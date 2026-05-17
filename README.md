@@ -1,4 +1,4 @@
-# 🤖 Wokflows — AI Agent Workflows & Skills
+# 🤖 Workflows — AI Agent Workflows & Skills
 
 Este repositorio centraliza los **workflows** y **skills** reutilizables para agentes de IA (Cursor, Antigravity, etc.) que siguen el estándar **Issue-as-Code distribuido v3.0**.
 
