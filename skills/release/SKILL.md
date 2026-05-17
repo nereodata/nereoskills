@@ -5,7 +5,7 @@ description: Gestión de lanzamientos y etiquetado de versiones (Release Managem
 
 # Skill: Gestión de Lanzamientos (/release)
 
-Esta skill formaliza el cierre de una versión del proyecto: valida pre-flight, genera/verifica CHANGELOG, hace bump y squash a `main`, etiqueta sobre `main`, y verifica el post-tag (CI, release publicado, deploys).
+Esta skill formaliza el cierre de una versión del proyecto: valida pre-flight, genera/verifica CHANGELOG, hace bump y merge (`--no-ff`) a `main`, etiqueta sobre `main`, y verifica el post-tag (CI, release publicado, deploys).
 
 La skill es **agnóstica del proyecto consumidor**. Toda la configuración específica vive en `task_config.yaml` del consumidor: manifiestos a verificar, comandos pre-flight, checks de salud cloud, flags de code signing, etc. Si el consumidor no declara estas secciones, la skill avisa al usuario y aplica el subset clásico.
 
@@ -92,20 +92,21 @@ En la rama `release/vX.Y` (o `hotfix/vX.Y.Z`):
 
 > **Acción visible externamente.** Pedir confirmación explícita al usuario antes de ejecutar — modifica `main` y empuja al remoto.
 
-#### 4.a Bloque funcional (squash merge)
+#### 4.a Bloque funcional (merge --no-ff)
 
 ```
 git checkout main
 git pull --ff-only
-git merge --squash release/vX.Y
-git commit -m "chore(release): vX.Y.Z"
+git merge --no-ff release/vX.Y -m "chore(release): vX.Y.Z"
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
 git push origin main --follow-tags
 ```
 
-El tag se crea sobre el commit canónico de `main`, **no** sobre la rama `release/`. Esto garantiza que `git describe --tags` desde `main` apunta a un commit que existe en la línea principal.
+El tag se crea sobre el merge commit canónico de `main`. Todos los commits individuales de `release/vX.Y` quedan **alcanzables desde `main`** a través del merge commit, preservando el histórico granular de forma permanente.
 
-Tras el push, eliminar la rama de release: `git branch -d release/vX.Y` (y opcionalmente `git push origin --delete release/vX.Y`).
+> **Por qué `--no-ff` y no `--squash`**: el squash aplasta todos los commits en uno y destruye el histórico detallado cuando se borra la rama. Con `--no-ff`, aunque se borre la rama, los commits no son *unreachable* y `git gc` nunca los elimina.
+
+Tras el push, eliminar la rama de release: `git branch -d release/vX.Y` (y opcionalmente `git push origin --delete release/vX.Y`). **Los commits no se pierden** porque son alcanzables desde `main`.
 
 #### 4.b Hotfix (merge commit)
 

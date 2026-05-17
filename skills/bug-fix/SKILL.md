@@ -9,16 +9,17 @@ Este flujo orquesta la resolución de bugs, soportando la jerarquía **Master/Co
 
 ## Modos de Ejecución
 
-1.  **Modo Maestro (Master Fix)**:
+1. **Modo Maestro (Master Fix)**:
     - Entrada: `B-[PRJ]-XXXX`
     - El AI analiza todos los componentes afectados por el bug maestro y aplica las correcciones secuencialmente.
-2.  **Modo Componente (Componente Fix)**:
+2. **Modo Componente (Componente Fix)**:
     - Entrada: `B-[PRJ]-[COMP]-XXXX`
     - Foco exclusivo en la corrección técnica de un componente.
 
 ## Pasos de la Skill
 
 ### 0. Clasificación de Urgencia y Rama de Trabajo
+
 - Preguntar al usuario: **"¿Este bug es urgente y necesita llegar a producción inmediatamente (hotfix), o puede resolverse dentro del bloque funcional actual (release)?"**
 - **Si hotfix**:
   - Identificar la versión de producción afectada (último tag en `main`).
@@ -36,9 +37,11 @@ Este flujo orquesta la resolución de bugs, soportando la jerarquía **Master/Co
 - Cargar metadatos del bug y la versión actual de `task_config.yaml` (`project.version`).
 - **Actualización de Estado**: Cambiar el `status` a `in_progress`. (La versión ya fue asignada en el paso 0.)
 - Establecer `actual_effort` y actualizar `remaining_effort`.
-- **Fase de Pruebas**: Crear/actualizar BDD y Unit Test que capturen el fallo.
-    - *Importante*: Integrar el escenario en un `.feature` de sistema existente, salvo que sea necesario crear una nueva funcionalidad no existente para resolver el bug. No crear archivos `.feature` nominales al bug o ID de tarea: los feature son de sistema, no de proceso.
-- **Human in the loop**: Solicitar confirmación del usuario antes de continuar.
+- **Fase de Pruebas**: Crear/actualizar pruebas que capturen el fallo.
+  - **BDD**: Integrar el escenario en un `.feature` de sistema existente, evaluando el comportamiento funcional de lo que debe hacer la app (aplica a cualquier proyecto). No crear archivos `.feature` nominales al bug o ID de tarea, y reutiliar en la medida de lo posible los existentes.
+  - **Evals (Solo proyectos y consultas IA)**: Valorar la necesidad de añadir/modificar *evals* para garantizar que los prompts se responden adecuadamente por los modelos seleccionados frente a este caso de uso.
+  - Crear/actualizar Unit Tests que cubran el cambio técnico.
+- **Human in the loop**: Solicitar confirmación del usuario antes de continuar. En este HITL deben validarse los escenarios BDD y, si aplica, los evals.
 
 ### 2. Desarrollo (Fix)
 
@@ -61,4 +64,3 @@ Este flujo orquesta la resolución de bugs, soportando la jerarquía **Master/Co
 ### 5. Persistencia
 
 - Realizar los cambios y preparar para hacer commit con el prefijo `fix([ID])` (puedes apoyarte en la skill `commit`).
-

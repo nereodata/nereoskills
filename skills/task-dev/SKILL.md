@@ -39,11 +39,12 @@ Este flujo (ahora skill) orquesta el ciclo completo de desarrollo de una tarea, 
 Para cada componente afectado (secuencialmente en Master Mode, o el único en Component Mode):
 
 #### 3.1 Fase BDD/TDD (Red Phase)
-- Definir escenarios en `<componente>/tests/bdd/features/` integrándolos en de un `.feature` de sistema existente.
+- **BDD**: Definir escenarios en `<componente>/tests/bdd/features/` integrándolos en de un `.feature` de sistema existente. Estas pruebas evalúan el comportamiento funcional de lo que debe hacer la app y el sistema (aplica a cualquier proyecto).
+- **Evals (Solo proyectos y consultas IA)**: Valorar la necesidad de incluir *evals* para evaluar que los prompts definidos se responden de manera adecuada por los modelos seleccionados.
 - Crear tests unitarios en `<componente>/tests/unit/` que cubran el cambio.
 - **Validación**: Ejecutar la revisión de tests (`/review-test`). Puntuación mínima de 8/10. NO se inicia la implementación sin tests validados.
 - Confirmar que los tests fallan inicialmente (Estado Rojo).
-- **Human in the loop**: Solicitar confirmación del usuario antes de continuar.
+- **Human in the loop**: Solicitar confirmación del usuario antes de continuar. En este HITL deben validarse los escenarios BDD y, si aplica, los evals.
 
 #### 3.2 Fase de Desarrollo (Green Phase)
 - Implementar la lógica necesaria siguiendo estándares (Docstrings obligatorios, limpieza).
