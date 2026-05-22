@@ -42,5 +42,16 @@ Una vez generado el `work_plan.md`, procede a registrar cada una de las tareas i
 - Se debe dejar una separación de **10 puntos** entre cada tarea (ej. 110, 120, 130...).
 - Para cada tarea del plan, invoca `/task-add` proporcionando el título, objetivo técnico y criterios de aceptación derivados del plan.
 
+### Fase 3: Especificación del Contrato Técnico (Escenarios y Evals)
+Tras registrar las tareas en el backlog, el planificador debe generar las especificaciones formales de comportamiento y calidad que guiarán al desarrollo técnico:
+
+1. **Creación de Features BDD**:
+   - Por cada tarea de componente que afecte a un flujo funcional, crear o actualizar los archivos `.feature` de Gherkin correspondientes en la ruta del componente (ej. `<componente>/tests/bdd/features/`).
+   - Los escenarios deben redactarse en español y etiquetarse con `@pending` o `@unimplemented` para que sirvan como la base de la Fase Roja en el desarrollo.
+2. **Definición de Evals / Golden Sets**:
+   - Si la tarea involucra componentes de Inteligencia Artificial, NL2SQL o pipelines probabilísticos, añadir al menos **3-5 casos de prueba de evaluación** representativos al dataset de Golden Evals del proyecto (ej: registrando preguntas y salidas esperadas en los datasets de evaluación locales).
+
 **SALIDA ESPERADA:**
-Confirmación del plan generado y lista de IDs de tareas maestras (`T-[PRJ]-XXXX`) y de componente (`T-[PRJ]-[COMP]-XXXX`) creadas.
+- Confirmación del plan generado y lista de IDs de tareas maestras (`T-[PRJ]-XXXX`) y de componente (`T-[PRJ]-[COMP]-XXXX`) creadas.
+- Listado de archivos `.feature` y datasets de evaluación inicializados como contratos de aceptación para el desarrollo técnico.
+
