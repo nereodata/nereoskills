@@ -38,26 +38,22 @@ Este flujo (ahora skill) orquesta el ciclo completo de desarrollo de una tarea, 
 ### 3. Ciclo de Desarrollo Técnico (Por cada Componente)
 Para cada componente afectado (secuencialmente en Master Mode, o el único en Component Mode):
 
-#### 3.1 Fase BDD/TDD (Red Phase - Automatizada)
-- Definir escenarios en `<componente>/tests/bdd/features/` integrándolos en un `.feature` de sistema existente.
+#### 3.1 Fase BDD/TDD (Red Phase)
+- Definir escenarios en `<componente>/tests/bdd/features/` integrándolos en de un `.feature` de sistema existente.
 - Crear tests unitarios en `<componente>/tests/unit/` que cubran el cambio.
-- **Validación Automatizada**: Ejecutar el bucle de autocorrección en fase roja:
-  ```bash
-  python .agents/scripts/auto_dev_loop.py --phase red --test-cmd "<comando-de-test>" --cwd "<ruta-componente>"
-  ```
-  - Si el script reporta éxito, los tests fallan correctamente y se puede proceder a la fase de codificación.
-  - Si el script falla, leer el informe generado en `.agents/scratch/qa_feedback.md`, corregir los escenarios y re-ejecutar.
-  - **Human-in-the-loop**: Solicitar confirmación al usuario únicamente si los tests pasan directamente sin codificación, lo que indica un diseño de test incorrecto.
+- **Validación**: Ejecutar la revisión de tests (`/review-test`). Puntuación mínima de 8/10. NO se inicia la implementación sin tests validados.
+- Confirmar que los tests fallan inicialmente (Estado Rojo).
+- **Human in the loop**: Solicitar confirmación del usuario antes de continuar.
 
-#### 3.2 Fase de Desarrollo y Calidad (Green & QA Phase - Bucle de Autocorrección Cerrado)
-- Implementar la lógica necesaria siguiendo estándares (Docstrings obligatorios, modularidad, DRY).
-- **Bucle de Autocorrección Cerrado (Self-Correction Loop)**: Ejecutar el orquestador de validación de calidad local en segundo plano:
-  ```bash
-  python .agents/scripts/auto_dev_loop.py --phase green --test-cmd "<comando-de-test>" --cwd "<ruta-componente>" --lint-cmd "<comando-linter>" --typecheck-cmd "<comando-typecheck>"
-  ```
-  - **En caso de fallo (Exit 1)**: Leer los errores estructurados de tests, linting o tipo en `.agents/scratch/qa_feedback.md`. El subagente Coder debe corregir el código basándose en el feedback de forma autónoma (hasta un máximo de 3 intentos).
-  - **En caso de éxito (Exit 0)**: Se garantiza que los tests pasan y que no hay regresiones de linter o tipos.
-  - **Human-in-the-loop**: Si después de 3 intentos de autocorrección el script sigue fallando, abortar, escribir la causa en `.agents/scratch/blocked_reason.md` y notificar al programador humano solicitando asistencia.
+#### 3.2 Fase de Desarrollo (Green Phase)
+- Implementar la lógica necesaria siguiendo estándares (Docstrings obligatorios, limpieza).
+- Refactorizar hasta que todos los tests creados en la fase roja pasen con éxito.
+
+#### 3.3 Calidad y Revisión (QA Phase)
+- Ejecutar la suite de pruebas completa para descartar regresiones.
+- Ejecutar la revisión de código exhaustiva (`/review-code`). 
+- **Criterio**: Puntuación mínima de 8/10 en inspecciones de seguridad y testeabilidad.
+- **Human in the loop**: Solicitar confirmación del usuario antes de continuar.
 
 #### 3.4 Sincronización de Diseño (Sync Phase)
 - Revisar si el código altera el diseño técnico macro.

@@ -11,15 +11,6 @@ description: Proxy para el workflow /task-dev
 
 # /task-dev
 
-Has sido invocado para desarrollar una tarea. Sigue estrictamente la skill correspondiente en `../skills/task-dev/SKILL.md`.
-
-### ⚡ Directivas Turbo de Ejecución Asíncrona:
-1.  **Fase Roja (TDD)**: Ejecuta automáticamente la validación roja con `python .agents/scripts/auto_dev_loop.py --phase red --test-cmd "<comando-de-test>" --cwd "<ruta-componente>"`.
-2.  **Fase Verde y QA**: Escribe la implementación y ejecuta la validación verde con:
-    ```bash
-    python .agents/scripts/auto_dev_loop.py --phase green --test-cmd "<comando-de-test>" --cwd "<ruta-componente>" --lint-cmd "<linter>" --typecheck-cmd "<typechecker>"
-    ```
-3.  **Bucle de Feedback Cerrado**: Si el comando anterior falla (Exit 1), no solicites asistencia manual. Abre y lee el reporte generado en `.agents/scratch/qa_feedback.md`, corrige el código y vuelve a ejecutar el comando hasta un máximo de 3 intentos.
-4.  **Bloqueos**: Detén el modo turbo y notifica al usuario humano únicamente si superas los 3 intentos sin éxito o necesitas definir requisitos de diseño adicionales.
-
+Has sido invocado para desarrollar una tarea. Tu **único objetivo** es leer y ejecutar estrictamente los pasos definidos en la skill correspondiente:
+👉 Usa la herramienta `view_file` en `../skills/task-dev/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) y sigue sus instrucciones.
 
