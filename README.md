@@ -2,7 +2,7 @@
 
 Este repositorio centraliza los **agentes**, **skills** y **workflows** reutilizables para herramientas de IA (Claude Code, Cursor, Antigravity, etc.) que siguen el estándar **Issue-as-Code distribuido v3.0**.
 
-La arquitectura separa **conocimiento** (skills) de **ejecución** (agentes): las skills definen el "qué hacer" de forma agnóstica; los agentes deciden el "cómo", incluyendo aislamiento, paralelización y delegación.
+La arquitectura separa **conocimiento** (skills) de **ejecución** (agentes): las skills definen procesos, criterios y playbooks de orquestación; los agentes son los especialistas que ejecutan cada fase. El hilo principal del runtime actúa como coordinador, leyendo el playbook (skill) y delegando cada paso al agente indicado.
 
 > **Modo de uso previsto:** este repo se integra como un **submódulo Git** en la carpeta `.agents/` de cualquier proyecto consumer. Cada runtime (Claude Code, Cursor, etc.) enlaza a los agentes y skills mediante su propio mecanismo de descubrimiento.
 
@@ -14,50 +14,63 @@ La arquitectura separa **conocimiento** (skills) de **ejecución** (agentes): la
 
 | Agente | Rol | Skills que usa |
 |--------|-----|---------------|
-| **Hermes** | Coordinador — recibe tareas/bugs, analiza dependencias, delega a los demás, gestiona HITL | task-dev, bug-fix |
 | **Cronos** | Gestor de tareas — crea, actualiza, estima, prioriza y cierra tareas y bugs | task-add, bug-add, task-list |
-| **Atenea** | Analista — entiende requisitos, aclara con el usuario, define BDD y evals | generate-bdd, review-test |
+| **Atenea** | Analista — entiende requisitos, aclara con el usuario, define BDD y evals | generate-bdd, req-analysis |
 | **Artemisa** | Desarrollador — implementa step definitions, tests unitarios y lógica de negocio | (código directo) |
-| **Hades** | QA — revisa en contexto aislado, sin historial previo, con bucle de auto-corrección | review-code, review-test, review-fix |
+| **Hades** | QA — revisa especificación, tests y código en contexto aislado, con bucle de auto-corrección | review-spec, review-test, review-code |
 | **Clío** | Documentalista — actualiza docs, changelog y genera commits semánticos | manage-docs, commit |
+
+La **coordinación** la realizan las skills de orquestación (`task-dev`, `bug-fix`) ejecutadas por el hilo principal del runtime, que actúa como director y gestiona los HITL.
 
 ### Flujo de Desarrollo
 
 ```
-Usuario
+Usuario: /task-dev T-APX-XXXX   (tarea padre — foco Product Owner)
   │
-  └─ Hermes (coordinador)
-       ├─ Cronos → inicialización (status, esfuerzo, versión)
-       ├─ Atenea → especificación (escenarios BDD a nivel feature + evals)
-       ├─ [HITL: validación de escenarios]
-       ├─ Artemisa → Red (step definitions, evals, unit tests)
-       │            → Green (implementación hasta que todo pase)
-       ├─ [HITL: validación funcional]
-       ├─ Hades → QA aislado (auto-corrección ×3)
-       │    └─ Si rechaza → Artemisa corrige → Hades re-evalúa
-       ├─ Clío → documentación + commit
-       └─ Cronos → cierre (esfuerzo real, status completed)
+  └─ Hilo principal (coordinador, lee skill task-dev/bug-fix)
+       ├─ @cronos   → inicializa padre + todas las hijas (status, esfuerzo, versión)
+       ├─ @atenea   → especificación de TODOS los componentes (BDD + evals)
+       │               → presentación consolidada para revisión ágil
+       ├─ @hades    → review-spec (auto-corrección ×3 con @atenea)
+       ├─ [HITL: validación de especificación — consolidada, a nivel padre]
+       ├─ @artemisa → fase roja (step defs + unit tests, fallan)
+       ├─ @hades    → review-test (auto-corrección ×3 con @artemisa)
+       ├─ @artemisa → fase verde (implementación, tests pasan)
+       ├─ [HITL: validación funcional — todo junto]
+       ├─ @hades    → review-code (auto-corrección ×3 con @artemisa)
+       ├─ @clio     → documentación + commit
+       └─ @cronos   → cierra todas las hijas + la padre
 ```
+
+> Cada vez que un agente produce un artefacto, Hades lo revisa antes de avanzar: especificación (review-spec), tests (review-test) y código (review-code). La misma lógica aplica a tareas y a bugs — en bugs solo cambia el contexto, y las fases sin cambios se omiten.
 
 ### Principios de diseño
 
 - **Agnóstico de runtime**: las skills no mencionan mecanismos de ninguna herramienta concreta. Los agentes usan vocabulario estándar (`isolation: worktree`) que cada runtime mapea a sus capacidades.
-- **Separación de contexto cognitivo**: Hades (QA) opera sin acceso al historial de desarrollo, eliminando sesgo de confirmación.
-- **Composabilidad**: los agentes componen skills reutilizables. Añadir un nuevo flujo es crear un agente que reutiliza las mismas piezas.
+- **Separación de contexto cognitivo**: Hades opera sin acceso al historial de desarrollo, eliminando sesgo de confirmación. Nadie revisa su propio trabajo — ni Atenea su especificación, ni Artemisa su código.
+- **Composabilidad**: las skills de orquestación componen agentes y skills reutilizables. Añadir un nuevo flujo es crear una skill-playbook que reutiliza los mismos agentes.
 - **Auto-corrección**: Hades implementa un bucle cerrado de hasta 3 iteraciones. Solo escala al humano si no converge.
+- **Estado del flujo externo**: el coordinador mantiene un checklist explícito de fases (no en memoria de contexto, que se diluye en flujos largos). Lo consulta entre cada paso. Los HITL son ítems del checklist: si se difieren, quedan abiertos hasta realizarse — protege contra el olvido de fases.
 
 ### HITL (Human-in-the-Loop)
 
-Hermes gestiona exactamente 2 puntos de parada humana:
+El hilo principal gestiona exactamente 2 puntos de parada humana:
 
 | Punto | Propósito |
 |-------|-----------|
-| **Post-Atenea** (Red Phase) | Validar que los tests capturan correctamente el requisito/fallo |
-| **Post-Artemisa** (Green Phase) | Validar integración visual, UX y efectos secundarios no cubiertos por tests |
+| **Post-especificación** (tras Atenea) | Validar que las BDD y evals consolidadas capturan correctamente el requisito/fallo de toda la tarea padre |
+| **Post-implementación** (tras Artemisa) | Validar integración visual, UX y efectos secundarios del conjunto, no cubiertos por tests |
 
-### Paralelización (Master Mode)
+### Trabajo a nivel de tarea padre
 
-Cuando una tarea o bug afecta a múltiples componentes independientes, Hermes lanza un Artemisa por componente en contextos aislados con copia independiente del código. Si hay dependencias entre componentes, se ejecutan secuencialmente.
+El Product Owner trabaja siempre sobre la **tarea/bug padre** (el objetivo atómico con valor para el usuario). El flujo es único aunque la tarea afecte a varios componentes:
+
+- **Atenea** presenta la especificación de todos los componentes de forma **consolidada** — un resumen único de todas las BDD y evals, para revisión ágil en un solo HITL.
+- Los HITL son a nivel padre, agrupados (una validación de especificación, una validación funcional).
+- **Cronos** traduce padre ↔ hijas: reparte estado, esfuerzo y cierre entre las tareas hijas (una por componente), que son unidades de contabilidad, no flujos separados.
+- La implementación de varios componentes puede paralelizarse internamente (independientes) o secuenciarse (dependientes), pero es un detalle de ejecución invisible para el PO.
+
+**Component Mode** (`T-[PRJ]-[COMP]-XXXX`) existe como atajo de desarrollador para trabajar una hija suelta, pero el foco de producto es siempre la padre.
 
 ---
 
@@ -66,7 +79,6 @@ Cuando una tarea o bug afecta a múltiples componentes independientes, Hermes la
 ```
 Workflows/
 ├── agents/                # Agentes (cómo orquestar)
-│   ├── hermes.md          # Coordinador
 │   ├── atenea.md          # Analista
 │   ├── artemisa.md        # Desarrollador
 │   ├── cronos.md          # Gestor de tareas
@@ -76,9 +88,9 @@ Workflows/
 │   ├── task-dev/          # Proceso de desarrollo de tareas
 │   ├── bug-fix/           # Proceso de resolución de bugs
 │   ├── generate-bdd/      # Genera feature files Gherkin en español
+│   ├── review-spec/       # Auditoría de la especificación (BDD + evals)
 │   ├── review-code/       # Auditoría de código (8 áreas, puntuación 1-10)
 │   ├── review-test/       # Auditoría de suite de tests
-│   ├── review-fix/        # Verificación de bug fixes
 │   ├── manage-docs/       # Gestión de documentación según docs_config.yaml
 │   ├── commit/            # Commit semántico multi-agrupado
 │   ├── task-add/          # Registro de tareas (Issue-as-Code)
@@ -109,9 +121,9 @@ Las skills son conocimiento puro — definen procesos, criterios y estándares. 
 | `task-dev` | Proceso y fases para desarrollo de tareas (Master/Componente) |
 | `bug-fix` | Proceso y fases para resolución de anomalías |
 | `generate-bdd` | Genera feature files Gherkin en español |
+| `review-spec` | Auditoría de la especificación: claridad, completitud y testeabilidad de BDD + evals |
 | `review-code` | Auditoría de código: Seguridad, Arquitectura, Eficiencia, Testeabilidad, etc. |
 | `review-test` | Auditoría de suite de tests: cobertura BDD, aislamiento, integración |
-| `review-fix` | Verificación de correcciones de bugs |
 | `manage-docs` | Gestión de documentación según `docs_config.yaml` |
 | `commit` | Generación de commits semánticos con trazabilidad |
 | `task-add` | Registro de tareas (Issue-as-Code v3.0) |
@@ -161,18 +173,17 @@ Característica: Título en español
 ### Flujo de Desarrollo Estándar
 
 ```
-📋 Init Phase  → Cronos: status, esfuerzo, versión
-🔴 Red Phase   → Atenea: escenarios BDD + evals (especificación)
-              ↓  /review-test (mínimo 8/10)
-              ↓  [HITL: validación de escenarios]
-              → Artemisa: step definitions, evals, unit tests (código)
-🟢 Green Phase → Artemisa: implementación
-              ↓  [HITL: validación funcional]
-🔵 QA Phase    → Hades: revisión aislada (auto-corrección ×3)
-              ↓
-📄 Sync Phase  → Clío: /manage-docs + /commit
-              ↓
-✅ Close Phase → Cronos: esfuerzo real, cierre de tarea
+📋 Init          → Cronos:   status, esfuerzo, versión
+📝 Especificación → Atenea:   escenarios BDD + evals
+🔎 review-spec   → Hades:    audita especificación (aislado, ×3)
+                 ↓ [HITL: validación de especificación]
+🔴 Red           → Artemisa: step definitions, evals, unit tests (fallan)
+🔎 review-test   → Hades:    audita calidad de tests (aislado, ×3)
+🟢 Green         → Artemisa: implementación (tests pasan)
+                 ↓ [HITL: validación funcional]
+🔎 review-code   → Hades:    audita calidad de código (aislado, ×3)
+📄 Docs          → Clío:     /manage-docs + /commit
+✅ Cierre        → Cronos:   esfuerzo real, cierre de tarea
 ```
 
 ### Política de Versionado y Estrategia de Ramas
