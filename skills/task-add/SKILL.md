@@ -7,8 +7,21 @@ description: Añade una nueva tarea al backlog del producto siguiendo estándare
 
 Este flujo (ahora skill) permite registrar tareas pendientes en el backlog del producto, siguiendo el estándar **Issue-as-Code distribuido v3.0 (Master/Componente)**.
 
+## Qué es una Tarea Padre (Master)
+
+Una **tarea padre representa una única capacidad, mejora o cambio que un usuario percibe como valioso por sí mismo**. Es la **unidad mínima entregable de valor**: lo más pequeño que se puede completar y que un usuario reconocería como *"ahora puedo hacer X"* o *"esto ahora funciona mejor"*.
+
+- Es **atómica desde el punto de vista del usuario**: describe un solo resultado con valor, no un conjunto de resultados.
+- Sus **tareas hijas (Componente)** son la descomposición *técnica* de ese mismo objetivo entre los componentes que hay que tocar (HMI, servicio, paquete...). Todas las hijas sirven al **mismo** valor de usuario.
+- Un cambio que afecta a 3 componentes pero entrega un único valor de usuario → **una** tarea padre con 3 hijas.
+- Dos valores de usuario distintos e independientes → **dos** tareas padre, cada una con sus hijas.
+
+**Prueba rápida:** describe el resultado en una frase desde la perspectiva del usuario. Si necesitas la conjunción "y" para enumerar capacidades distintas (*"permite X y además Y y también Z"*), probablemente son varias tareas padre, no una. Una tarea padre se describe como **una sola cosa útil**.
+
+Una tarea padre **no es** un contenedor temático ni un sitio donde agrupar trabajo afín ("todo lo del login", "mejoras de UI"). Agrupar por afinidad la convierte en una épica difusa y rompe la trazabilidad del valor. Cuando dudes entre agrupar o separar, separa: cada unidad de valor merece su propia tarea padre.
+
 ## Estructura del Backlog
-El backlog se organiza de forma descentralizada. Así, para un proyecto dado habrá tareas de proyecto (épicas), que a su vez pueden dividirse en tareas de cada uno de los componentes. Los componentes, a su vez, estarán divididos en:
+El backlog se organiza de forma descentralizada. Así, para un proyecto dado habrá tareas de proyecto (padre), que se descomponen técnicamente en tareas de cada uno de los componentes implicados. Los componentes, a su vez, estarán divididos en:
 
 - **Servicios (Backend)**: Servicios de backend
 - **Apps (HMI)**: aplicaciones / interfaces de usuario

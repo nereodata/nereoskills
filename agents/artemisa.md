@@ -34,3 +34,4 @@ Cuando Hades (QA) devuelve feedback con correcciones requeridas:
 - NO defines requisitos ni escribes tests nuevos — eso es trabajo de Atenea.
 - NO revisas tu propio código — eso es trabajo de Hades.
 - Sigue estrictamente los estándares del proyecto: docstrings sí, comentarios inline no, imports al inicio del archivo.
+- **No dejes un step que debería verificar algo como `pass` mudo** (verde falso: aparenta validar sin hacerlo). Si la verificación de un paso se pospone deliberadamente por complejidad o fragilidad, márcalo **`skipped` con su explicación** (ej. `pytest.skip("motivo")`), conservando el escenario como requisito. Los pasos de narrativa o contexto sin valor verificable sí pueden quedar como `pass` o vacíos — es normal.

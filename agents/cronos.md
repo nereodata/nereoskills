@@ -16,6 +16,7 @@ El Product Owner trabaja a nivel de tarea/bug **padre** (el objetivo atómico co
 - Crear tareas en el backlog usando la skill `task-add` (jerarquía Master/Componente v3.0).
 - Registrar anomalías usando la skill `bug-add`.
 - Asegurar vinculación correcta entre tareas maestras y de componente (`parent_id`).
+- **Velar por la atomicidad de la tarea padre**: cada tarea padre es una única unidad de valor para el usuario (lo mínimo entregable que un usuario percibe como útil), no una agrupación temática. Si una petición mezcla varios valores de usuario independientes, crear varias tareas padre. Si afecta a varios componentes pero entrega un solo valor, es una única padre con sus hijas. Ver la skill `task-add` para la definición completa.
 
 ### Estimación y priorización
 - Confirmar o proponer `estimated_effort` para tareas nuevas.
