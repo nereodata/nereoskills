@@ -15,10 +15,17 @@ Listar todos los archivos `.feature` de la carpeta de features y compararlos con
 ### 2. Verificación de Implementación
 Confirmar que NO existen features huérfanas (archivos feature sin tests que los implementen) y que todos los escenarios tienen sus Step Definitions implementados.
 
+**Detección de verde falso**: revisar el *cuerpo* de cada step definition, no solo su existencia. El riesgo es un paso que **debería verificar algo pero pasa en silencio** sin comprobarlo.
+
+- **Pasos de narrativa / contexto** (típicamente `Dado`/`Given` que solo preparan o ambientan, sin un resultado verificable): pueden quedar como `pass` o incluso vacíos. Es normal y legítimo; no requieren acción.
+- **Pasos cuya verificación se omite deliberadamente** por ser compleja o frágil de implementar: NO deben quedar como `pass` mudo (aparentarían validar). Deben marcarse **explícitamente como `skipped` con su explicación** (ej. `pytest.skip("motivo")`), conservando el escenario BDD como requisito documentado y dejando constancia visible de que no se está verificando.
+- **Red flag a penalizar**: un paso que por su redacción implica una comprobación (p. ej. un `Entonces`/`Then` que asevera un resultado) implementado como no-op que pasa, sin asserts y sin estar `skipped`.
+
 ### 3. Auditoría de Calidad (Test Reviewer)
 Analizar y puntuar sobre 10 siguiendo estos tres pilares:
 * **Bloque BDD (Contrato de Negocio)**:
   - Penalizar severamente (-5 puntos) si hay *features* huérfanas o escenarios sin steps.
+  - Penalizar severamente los **pasos que deberían verificar y pasan en silencio** (p. ej. un `Entonces` sin asserts ni efectos y sin estar `skipped`): son verdes falsos. Exigir que se conviertan en comprobación real, o en `skipped` con explicación si su verificación se pospone por complejidad/fragilidad. Los pasos de narrativa/contexto sin valor verificable pueden quedar como `pass` y no se penalizan.
   - Asegurar uso correcto del runner (ej. `pytest-bdd`) y evitar llamadas a runners obsoletos.
   - Trazabilidad con tags de requisitos (`@RF-XXX`).
 * **Bloque Unitario (Aislamiento técnico)**:
@@ -38,7 +45,7 @@ Es OBLIGATORIO generar un reporte `.md` en `docs/review/test_reviews/` con la si
    - **Puntos Fuertes**: Listado de aciertos en la implementación de pruebas.
    - **Puntos de Mejora**: Listado de debilidades detectadas.
 3. **Plan de Acción (Backlog de Revisión)**: Un listado de todas las mejoras detectadas, clasificadas y ordenadas por criticidad:
-   - **🔴 CRÍTICO**: Bloqueante (ej. features huérfanas, fallos graves de aislamiento).
+   - **🔴 CRÍTICO**: Bloqueante (ej. features huérfanas, pasos no-op con verde falso, fallos graves de aislamiento).
    - **🟠 ALTA**: Urgente (ej. falta de tests edge cases críticos).
    - **🟡 MEDIA**: Deuda técnica (ej. refactorización de fixtures).
    - **🔵 BAJA**: Mejora menor (ej. nombres de tests más claros).
