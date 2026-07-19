@@ -41,11 +41,59 @@ class PhaseState:
     """Estado de una fase individual."""
     name: str                          # Nombre descriptivo
     status: str = PhaseStatus.PENDING.value
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[Dict[str, Any]] = None  # Artefactos reales producidos
     validated: bool = False
     validation_notes: str = ""
     error: Optional[str] = None
     attempts: int = 0
+
+    # Estructuras de resultado por fase (sirven como schema)
+    # Fase A (Definición BDD)
+    # "result": {
+    #   "feature_file": "path/to/T-NTR-XXXX.feature" | null,
+    #   "review_spec_verdict": "APROBADO|RECHAZADO|PENDIENTE",
+    #   "review_spec_report": "docs/review/spec_reviews/T-NTR-XXXX-spec-review.md" | null,
+    #   "debt": ["...", "..."]
+    # }
+
+    # Fase B (Diseño)
+    # "result": {
+    #   "design_file": "docs/design/T-NTR-XXXX-design.md" | null,
+    #   "changes": ["[NEW] pkg/X.go", "[MODIFY] pkg/Y.go"],
+    #   "review_design_verdict": "APROBADO|RECHAZADO|PENDIENTE",
+    #   "review_design_report": "docs/review/design_reviews/..." | null,
+    #   "debt": [...]
+    # }
+
+    # Fase C (Tests + Desarrollo)
+    # "result": {
+    #   "test_files": ["tests/unit/X_test.go", ...],
+    #   "implementation_files": ["pkg/core/X.go", ...],
+    #   "review_test_verdict": "APROBADO|RECHAZADO|PENDIENTE",
+    #   "review_test_report": "docs/review/test_reviews/..." | null,
+    #   "debt": [...]
+    # }
+
+    # Fase D (QA - Code Review)
+    # "result": {
+    #   "review_code_verdict": "APROBADO|RECHAZADO|PENDIENTE",
+    #   "review_code_report": "docs/review/code_reviews/..." | null,
+    #   "review_code_issues": ["CRÍTICO: ...", "ALTA: ...", ...],
+    #   "debt": [...]
+    # }
+
+    # Fase E (Documentación)
+    # "result": {
+    #   "updated_files": ["docs/...", "README.md", ...],
+    #   "debt": [...]
+    # }
+
+    # Fase F (Cierre)
+    # "result": {
+    #   "commit_hash": "abc1234def567" | null,
+    #   "commit_message": "feat(NTR): ...",
+    #   "status": "completed|failed"
+    # }
 
 
 @dataclass
@@ -57,6 +105,7 @@ class TaskState:
     status: str                        # initialized | in_progress | completed | failed
     created_at: str
     updated_at: str
+    is_mock: bool = False              # Flag: mock mode o interactivo
     triaged: bool = False
     triage: Dict[str, str] = field(default_factory=dict)
     phases: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -122,6 +171,9 @@ class TaskOrchestrator:
         print(f"TASK ORCHESTRATOR {mode_label}")
         print(f"Task ID: {self.task_id}")
         print(f"{'='*70}\n")
+
+        # Registrar modo
+        self.state.is_mock = self.mock_mode
 
         # [1] INIT
         if self.state.status == "pending":
@@ -216,7 +268,7 @@ class TaskOrchestrator:
                 self.state.phases[phase]['status'] == PhaseStatus.PENDING.value)
 
     def _execute_phase(self, phase: str):
-        """Ejecuta una fase (mock o interactivo)."""
+        """Ejecuta una fase (mock o interactivo) y captura referencias reales."""
         phase_state = self.state.phases[phase]
         skill_name = self._phase_to_skill(phase)
 
@@ -227,14 +279,9 @@ class TaskOrchestrator:
         phase_state['attempts'] += 1
 
         if self.mock_mode:
-            # Modo mock: simula resultado
-            phase_state['result'] = {
-                'skill': skill_name,
-                'output': f'Mock result from {skill_name}',
-                'verdict': 'APROBADO',
-                'score': 9,
-            }
-            print(f"    [MOCK] Resultado simulado: APROBADO (9/10)\n")
+            # Modo mock: simula resultado vacío (null/empty arrays, no strings)
+            phase_state['result'] = self._create_mock_result(phase)
+            print(f"    [MOCK] Resultado vacío (sin artefactos reales)\n")
         else:
             # Modo interactivo: espera entrada del usuario
             print(f"    → Proporciona entrada para {skill_name}:")
@@ -247,13 +294,197 @@ class TaskOrchestrator:
                 print()
                 return
 
-            phase_state['result'] = {
-                'skill': skill_name,
-                'output': user_input,
-            }
+            # Capturar referencias reales a artefactos
+            phase_state['result'] = self._extract_artifacts(phase, user_input)
             print()
 
         phase_state['status'] = PhaseStatus.COMPLETED.value
+
+    def _create_mock_result(self, phase: str) -> Dict[str, Any]:
+        """Crea estructura de resultado vacío para mock mode."""
+        schemas = {
+            'A': {
+                'feature_file': None,
+                'review_spec_verdict': 'PENDIENTE',
+                'review_spec_report': None,
+                'debt': []
+            },
+            'B': {
+                'design_file': None,
+                'changes': [],
+                'review_design_verdict': 'PENDIENTE',
+                'review_design_report': None,
+                'debt': []
+            },
+            'C': {
+                'test_files': [],
+                'implementation_files': [],
+                'review_test_verdict': 'PENDIENTE',
+                'review_test_report': None,
+                'debt': []
+            },
+            'D': {
+                'review_code_verdict': 'PENDIENTE',
+                'review_code_report': None,
+                'review_code_issues': [],
+                'debt': []
+            },
+            'E': {
+                'updated_files': [],
+                'debt': []
+            },
+            'F': {
+                'commit_hash': None,
+                'commit_message': None,
+                'status': 'pending'
+            }
+        }
+        return schemas.get(phase, {})
+
+    def _extract_artifacts(self, phase: str, output: str) -> Dict[str, Any]:
+        """Extrae referencias reales a artefactos del output."""
+        task_id = self.task_id
+        result = self._create_mock_result(phase)
+
+        if phase == 'A':
+            # Buscar .feature generado
+            feature_file = self._find_feature_file(task_id)
+            spec_report = self._find_review_report('spec_reviews', task_id)
+            verdict = self._extract_verdict_from_output(output)
+
+            result['feature_file'] = feature_file
+            result['review_spec_verdict'] = verdict
+            result['review_spec_report'] = spec_report
+
+        elif phase == 'B':
+            # Buscar docs/design/[ID]-design.md
+            design_file = self._find_design_file(task_id)
+            design_report = self._find_review_report('design_reviews', task_id)
+            changes = self._extract_changes_from_output(output)
+            verdict = self._extract_verdict_from_output(output)
+
+            result['design_file'] = design_file
+            result['changes'] = changes
+            result['review_design_verdict'] = verdict
+            result['review_design_report'] = design_report
+
+        elif phase == 'C':
+            # Buscar archivos de test e implementación
+            test_files = self._find_test_files()
+            impl_files = self._find_implementation_files()
+            test_report = self._find_review_report('test_reviews', task_id)
+            verdict = self._extract_verdict_from_output(output)
+
+            result['test_files'] = test_files
+            result['implementation_files'] = impl_files
+            result['review_test_verdict'] = verdict
+            result['review_test_report'] = test_report
+
+        elif phase == 'D':
+            # Buscar review-code report
+            code_report = self._find_review_report('code_reviews', task_id)
+            issues = self._extract_issues_from_output(output)
+            verdict = self._extract_verdict_from_output(output)
+
+            result['review_code_verdict'] = verdict
+            result['review_code_report'] = code_report
+            result['review_code_issues'] = issues
+
+        elif phase == 'E':
+            # Buscar archivos actualizados
+            updated = self._find_updated_files()
+            result['updated_files'] = updated
+
+        elif phase == 'F':
+            # Buscar último commit
+            commit_hash = self._find_last_commit()
+            result['commit_hash'] = commit_hash
+            result['status'] = 'completed' if commit_hash else 'pending'
+
+        return result
+
+    def _find_feature_file(self, task_id: str) -> Optional[str]:
+        """Busca archivo .feature para la tarea."""
+        # En una estructura real, sería algo como:
+        # tasks/*/T-NTR-XXXX.feature
+        for f in Path('.').rglob('*.feature'):
+            if task_id in str(f):
+                return str(f)
+        return None
+
+    def _find_design_file(self, task_id: str) -> Optional[str]:
+        """Busca docs/design/[ID]-design.md."""
+        design_path = Path('docs/design') / f'{task_id}-design.md'
+        return str(design_path) if design_path.exists() else None
+
+    def _find_review_report(self, review_type: str, task_id: str) -> Optional[str]:
+        """Busca reporte de review (spec/design/test/code)."""
+        review_dir = Path('docs/review') / review_type
+        if not review_dir.exists():
+            return None
+        for f in review_dir.glob(f'*{task_id}*'):
+            return str(f)
+        return None
+
+    def _find_test_files(self) -> list:
+        """Busca archivos de test recientemente modificados."""
+        test_files = []
+        for f in Path('.').rglob('*_test.go'):  # Go example
+            test_files.append(str(f))
+        for f in Path('.').rglob('*_test.py'):  # Python example
+            test_files.append(str(f))
+        return test_files[:5]  # Top 5
+
+    def _find_implementation_files(self) -> list:
+        """Busca archivos de implementación recientemente modificados."""
+        # En producción, usaría git diff HEAD~1 para ser preciso
+        return []
+
+    def _find_updated_files(self) -> list:
+        """Busca archivos de docs actualizados."""
+        updated = []
+        for f in Path('docs').rglob('*.md'):
+            updated.append(str(f))
+        return updated[:10]
+
+    def _find_last_commit(self) -> Optional[str]:
+        """Obtiene hash del último commit."""
+        try:
+            commit = subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'],
+                cwd=Path.cwd(),
+                text=True
+            ).strip()
+            return commit[:12]  # Abbreviate
+        except:
+            return None
+
+    def _extract_verdict_from_output(self, output: str) -> str:
+        """Extrae veredicto (APROBADO/RECHAZADO) del output."""
+        if 'APROBADO' in output.upper():
+            return 'APROBADO'
+        elif 'RECHAZADO' in output.upper():
+            return 'RECHAZADO'
+        else:
+            return 'PENDIENTE'
+
+    def _extract_changes_from_output(self, output: str) -> list:
+        """Extrae cambios ([NEW]/[MODIFY]/[DELETE]) del output."""
+        changes = []
+        for line in output.split('\n'):
+            if '[NEW]' in line or '[MODIFY]' in line or '[DELETE]' in line:
+                changes.append(line.strip())
+        return changes
+
+    def _extract_issues_from_output(self, output: str) -> list:
+        """Extrae issues (CRÍTICO/ALTA/MEDIA/BAJA) del output."""
+        issues = []
+        for line in output.split('\n'):
+            for severity in ['CRÍTICO', 'ALTA', 'MEDIA', 'BAJA']:
+                if severity in line:
+                    issues.append(line.strip())
+                    break
+        return issues
 
     def _phase_to_skill(self, phase: str) -> str:
         """Mapea fase a skills a ejecutar."""
