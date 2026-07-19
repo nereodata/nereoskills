@@ -27,6 +27,112 @@ from datetime import datetime
 import re
 
 
+# ============================================================================
+# SKILL OUTPUT SCHEMAS
+# ============================================================================
+# Each phase returns JSON with this structure. Strict in structure, flexible
+# in content (arrays can be empty, fields optional if noted).
+#
+# The orchestrator validates and extracts data from these schemas.
+# ============================================================================
+
+PHASE_SCHEMAS = {
+    'A': {
+        'description': 'Fase A: Definición (BDD + review-spec)',
+        'schema': {
+            'phase': 'A',
+            'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+            'artifacts': {
+                'feature_file': 'path/to/T-NTR-XXXX.feature | null',
+            },
+            'review': {
+                'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+                'report': 'docs/review/spec_reviews/T-NTR-XXXX-spec-review.md | null',
+            },
+            'debt': ['deuda1', 'deuda2']  # Can be empty []
+        },
+        'example': '''{
+    "phase": "A",
+    "verdict": "APROBADO",
+    "artifacts": {
+        "feature_file": "features/T-APX-001.feature"
+    },
+    "review": {
+        "verdict": "APROBADO",
+        "report": "docs/review/spec_reviews/T-APX-001-spec-review.md"
+    },
+    "debt": []
+}'''
+    },
+    'B': {
+        'description': 'Fase B: Diseño (design + review-design)',
+        'schema': {
+            'phase': 'B',
+            'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+            'artifacts': {
+                'design_file': 'docs/design/T-NTR-XXXX-design.md | null',
+                'changes': ['[NEW] pkg/X.go', '[MODIFY] pkg/Y.go']
+            },
+            'review': {
+                'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+                'report': 'docs/review/design_reviews/T-NTR-XXXX-design-review.md | null',
+            },
+            'debt': []
+        }
+    },
+    'C': {
+        'description': 'Fase C: Desarrollo (tests + review-test)',
+        'schema': {
+            'phase': 'C',
+            'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+            'artifacts': {
+                'test_files': ['tests/unit/X_test.go'],
+                'implementation_files': ['pkg/core/X.go']
+            },
+            'review': {
+                'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+                'report': 'docs/review/test_reviews/T-NTR-XXXX-test-review.md | null',
+            },
+            'debt': []
+        }
+    },
+    'D': {
+        'description': 'Fase D: QA (review-code)',
+        'schema': {
+            'phase': 'D',
+            'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+            'review': {
+                'verdict': 'APROBADO|RECHAZADO|PENDIENTE',
+                'report': 'docs/review/code_reviews/T-NTR-XXXX-code-review.md | null',
+                'issues': ['CRÍTICO: ...', 'ALTA: ...']
+            },
+            'debt': []
+        }
+    },
+    'E': {
+        'description': 'Fase E: Documentación (manage-docs)',
+        'schema': {
+            'phase': 'E',
+            'artifacts': {
+                'updated_files': ['docs/api.md', 'README.md']
+            },
+            'debt': []
+        }
+    },
+    'F': {
+        'description': 'Fase F: Cierre (commit)',
+        'schema': {
+            'phase': 'F',
+            'commit': {
+                'hash': 'abc1234def567 | null',
+                'message': 'feat(APX): implement auth'
+            },
+            'status': 'completed|pending'
+        }
+    }
+}
+
+
 class PhaseStatus(Enum):
     """Estado de una fase."""
     PENDING = "pending"
@@ -290,8 +396,10 @@ class TaskOrchestrator:
             phase_state['result'] = self._create_mock_result(phase)
             print(f"    [MOCK] Resultado vacío (sin artefactos reales)\n")
         else:
-            # Modo interactivo: espera entrada del usuario
-            print(f"    → Proporciona entrada para {skill_name}:")
+            # Modo interactivo: espera entrada del usuario (JSON esperado)
+            print(f"    → Proporciona salida JSON para {skill_name}")
+            print(f"    Schema esperado:")
+            print(f"    {PHASE_SCHEMAS[phase]['example']}")
             print(f"      (o escribe 'skip' para saltar esta fase)\n")
 
             user_input = input("    > ").strip()
@@ -308,105 +416,105 @@ class TaskOrchestrator:
         phase_state['status'] = PhaseStatus.COMPLETED.value
 
     def _create_mock_result(self, phase: str) -> Dict[str, Any]:
-        """Crea estructura de resultado vacío para mock mode."""
-        schemas = {
+        """Crea estructura de resultado vacío para mock mode (sigue schema)."""
+        base = {
             'A': {
-                'feature_file': None,
-                'review_spec_verdict': 'PENDIENTE',
-                'review_spec_report': None,
+                'phase': 'A',
+                'verdict': 'PENDIENTE',
+                'artifacts': {'feature_file': None},
+                'review': {'verdict': 'PENDIENTE', 'report': None},
                 'debt': []
             },
             'B': {
-                'design_file': None,
-                'changes': [],
-                'review_design_verdict': 'PENDIENTE',
-                'review_design_report': None,
+                'phase': 'B',
+                'verdict': 'PENDIENTE',
+                'artifacts': {'design_file': None, 'changes': []},
+                'review': {'verdict': 'PENDIENTE', 'report': None},
                 'debt': []
             },
             'C': {
-                'test_files': [],
-                'implementation_files': [],
-                'review_test_verdict': 'PENDIENTE',
-                'review_test_report': None,
+                'phase': 'C',
+                'verdict': 'PENDIENTE',
+                'artifacts': {'test_files': [], 'implementation_files': []},
+                'review': {'verdict': 'PENDIENTE', 'report': None},
                 'debt': []
             },
             'D': {
-                'review_code_verdict': 'PENDIENTE',
-                'review_code_report': None,
-                'review_code_issues': [],
+                'phase': 'D',
+                'review': {'verdict': 'PENDIENTE', 'report': None, 'issues': []},
                 'debt': []
             },
             'E': {
-                'updated_files': [],
+                'phase': 'E',
+                'artifacts': {'updated_files': []},
                 'debt': []
             },
             'F': {
-                'commit_hash': None,
-                'commit_message': None,
+                'phase': 'F',
+                'commit': {'hash': None, 'message': None},
                 'status': 'pending'
             }
         }
-        return schemas.get(phase, {})
+        return base.get(phase, {})
 
     def _extract_artifacts(self, phase: str, output: str) -> Dict[str, Any]:
-        """Extrae referencias reales a artefactos del output."""
+        """
+        Parsea JSON output de la skill según schema predefinido.
+        Si JSON inválido, intenta recuperar con búsqueda en filesystem.
+        """
+        # Intentar parsear como JSON
+        try:
+            data = json.loads(output)
+            # Validar que sea del phase correcto
+            if data.get('phase') == phase:
+                print(f"    ✓ Schema JSON válido para Phase {phase}")
+                return data
+        except json.JSONDecodeError:
+            print(f"    ⚠️  JSON inválido, intentando fallback filesystem...")
+
+        # Fallback: buscar en filesystem
+        return self._extract_artifacts_fallback(phase)
+
+    def _extract_artifacts_fallback(self, phase: str) -> Dict[str, Any]:
+        """
+        Fallback si el JSON no es válido.
+        Busca artefactos en el filesystem basado en convenciones.
+        Retorna estructura incompleta (mejor que nada).
+        """
         task_id = self.task_id
         result = self._create_mock_result(phase)
 
         if phase == 'A':
-            # Buscar .feature generado
             feature_file = self._find_feature_file(task_id)
             spec_report = self._find_review_report('spec_reviews', task_id)
-            verdict = self._extract_verdict_from_output(output)
-
-            result['feature_file'] = feature_file
-            result['review_spec_verdict'] = verdict
-            result['review_spec_report'] = spec_report
+            result['artifacts']['feature_file'] = feature_file
+            result['review']['report'] = spec_report
 
         elif phase == 'B':
-            # Buscar docs/design/[ID]-design.md
             design_file = self._find_design_file(task_id)
             design_report = self._find_review_report('design_reviews', task_id)
-            changes = self._extract_changes_from_output(output)
-            verdict = self._extract_verdict_from_output(output)
-
-            result['design_file'] = design_file
-            result['changes'] = changes
-            result['review_design_verdict'] = verdict
-            result['review_design_report'] = design_report
+            result['artifacts']['design_file'] = design_file
+            result['review']['report'] = design_report
 
         elif phase == 'C':
-            # Buscar archivos de test e implementación
             test_files = self._find_test_files()
             impl_files = self._find_implementation_files()
             test_report = self._find_review_report('test_reviews', task_id)
-            verdict = self._extract_verdict_from_output(output)
-
-            result['test_files'] = test_files
-            result['implementation_files'] = impl_files
-            result['review_test_verdict'] = verdict
-            result['review_test_report'] = test_report
+            result['artifacts']['test_files'] = test_files
+            result['artifacts']['implementation_files'] = impl_files
+            result['review']['report'] = test_report
 
         elif phase == 'D':
-            # Buscar review-code report
             code_report = self._find_review_report('code_reviews', task_id)
-            issues = self._extract_issues_from_output(output)
-            verdict = self._extract_verdict_from_output(output)
-
-            result['review_code_verdict'] = verdict
-            result['review_code_report'] = code_report
-            result['review_code_issues'] = issues
+            result['review']['report'] = code_report
 
         elif phase == 'E':
-            # Buscar archivos actualizados
             updated = self._find_updated_files()
-            result['updated_files'] = updated
+            result['artifacts']['updated_files'] = updated
 
         elif phase == 'F':
-            # Buscar último commit
             commit_hash = self._find_last_commit()
-            result['commit_hash'] = commit_hash
-            result['status'] = 'completed' if commit_hash else 'pending'
+            result['commit']['hash'] = commit_hash
 
         return result
 
@@ -466,32 +574,6 @@ class TaskOrchestrator:
         except:
             return None
 
-    def _extract_verdict_from_output(self, output: str) -> str:
-        """Extrae veredicto (APROBADO/RECHAZADO) del output."""
-        if 'APROBADO' in output.upper():
-            return 'APROBADO'
-        elif 'RECHAZADO' in output.upper():
-            return 'RECHAZADO'
-        else:
-            return 'PENDIENTE'
-
-    def _extract_changes_from_output(self, output: str) -> list:
-        """Extrae cambios ([NEW]/[MODIFY]/[DELETE]) del output."""
-        changes = []
-        for line in output.split('\n'):
-            if '[NEW]' in line or '[MODIFY]' in line or '[DELETE]' in line:
-                changes.append(line.strip())
-        return changes
-
-    def _extract_issues_from_output(self, output: str) -> list:
-        """Extrae issues (CRÍTICO/ALTA/MEDIA/BAJA) del output."""
-        issues = []
-        for line in output.split('\n'):
-            for severity in ['CRÍTICO', 'ALTA', 'MEDIA', 'BAJA']:
-                if severity in line:
-                    issues.append(line.strip())
-                    break
-        return issues
 
     def _phase_to_skill(self, phase: str) -> str:
         """Mapea fase a skills a ejecutar."""
@@ -506,7 +588,10 @@ class TaskOrchestrator:
         return skills.get(phase, '?')
 
     def _validate_phase(self, phase: str) -> bool:
-        """Valida que la fase se ejecutó correctamente."""
+        """
+        Valida que la fase se ejecutó correctamente.
+        Chequea que el resultado sigue el schema y tiene datos críticos.
+        """
         phase_state = self.state.phases[phase]
 
         # Si fue skipped, validación automática
@@ -515,13 +600,18 @@ class TaskOrchestrator:
 
         print(f"    Validando Phase {phase}...")
 
-        # Lógica de validación simple
         result = phase_state.get('result', {})
 
         # Verificar que hay resultado
-        if not result or not result.get('output'):
+        if not result:
             phase_state['error'] = "No result provided"
             print(f"    ❌ Validación fallida: resultado vacío\n")
+            return False
+
+        # Validar schema: debe tener campo 'phase' correcto
+        if result.get('phase') != phase:
+            phase_state['error'] = f"Result phase mismatch: expected {phase}, got {result.get('phase')}"
+            print(f"    ❌ Validación fallida: phase incorrecta\n")
             return False
 
         # En modo mock, simula validación exitosa
@@ -532,7 +622,8 @@ class TaskOrchestrator:
             return True
 
         # En modo interactivo, validación manual
-        print(f"    ¿Validar Phase {phase}? [y/n]: ", end="")
+        print(f"    Veredicto en resultado: {result.get('verdict', 'N/A')}")
+        print(f"    ¿Aceptar Phase {phase}? [y/n]: ", end="")
         response = input().strip().lower()
 
         if response == 'y':
