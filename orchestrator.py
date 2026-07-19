@@ -128,9 +128,10 @@ class TaskOrchestrator:
     STATE_DIR = Path('.tasks')
     MAX_RETRIES = 3
 
-    def __init__(self, task_id: str, mock_mode: bool = False):
+    def __init__(self, task_id: str, mock_mode: bool = False, fast_mode: bool = False):
         self.task_id = task_id
         self.mock_mode = mock_mode
+        self.fast_mode = fast_mode
         self.state_file = self.STATE_DIR / f'{task_id}.json'
         self.state = self._load_or_create_state()
 
@@ -166,7 +167,13 @@ class TaskOrchestrator:
 
     def run(self):
         """Ejecuta el flujo desde donde quedó."""
-        mode_label = "(MOCK)" if self.mock_mode else "(INTERACTIVE)"
+        if self.mock_mode:
+            mode_label = "(MOCK)"
+        elif self.fast_mode:
+            mode_label = "(FAST - sin HITL)"
+        else:
+            mode_label = "(INTERACTIVE)"
+
         print(f"\n{'='*70}")
         print(f"TASK ORCHESTRATOR {mode_label}")
         print(f"Task ID: {self.task_id}")
@@ -192,8 +199,8 @@ class TaskOrchestrator:
                 self.save_state()
 
                 if self._validate_phase(phase):
-                    # Validación ok, pausa HITL
-                    if not self.mock_mode:
+                    # Validación ok, pausa HITL (solo si no es fast/mock)
+                    if not self.mock_mode and not self.fast_mode:
                         self._hitl_pause(phase)
                     self.save_state()
                 else:
@@ -644,13 +651,14 @@ class TaskOrchestrator:
 
 
 def main():
-    """CLI: python orchestrator.py <command> <task_id> [--mock]"""
+    """CLI: python orchestrator.py <command> <task_id> [--mock|--fast]"""
     if len(sys.argv) < 3:
-        print("Usage: orchestrator.py <run|status|resume> <task_id> [--mock]")
+        print("Usage: orchestrator.py <run|status|resume> <task_id> [--mock|--fast]")
         print()
         print("Modes:")
-        print("  orchestrator.py run T-APX-001           # Interactive mode")
-        print("  orchestrator.py run T-APX-001 --mock    # Mock mode (testing)")
+        print("  orchestrator.py run T-APX-001           # Interactive (pausa en cada fase)")
+        print("  orchestrator.py run T-APX-001 --fast    # Fast (sin HITL, ejecuta todo)")
+        print("  orchestrator.py run T-APX-001 --mock    # Mock (testing, no pide nada)")
         print("  orchestrator.py status T-APX-001        # Show status")
         print("  orchestrator.py resume T-APX-001        # Resume from pause")
         sys.exit(1)
@@ -658,8 +666,9 @@ def main():
     command = sys.argv[1]
     task_id = sys.argv[2]
     mock_mode = '--mock' in sys.argv
+    fast_mode = '--fast' in sys.argv
 
-    orchestrator = TaskOrchestrator(task_id, mock_mode=mock_mode)
+    orchestrator = TaskOrchestrator(task_id, mock_mode=mock_mode, fast_mode=fast_mode)
 
     if command == 'run':
         orchestrator.run()
