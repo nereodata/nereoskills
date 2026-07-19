@@ -16,27 +16,23 @@ Este flujo se encarga de transformar el plan de trabajo y la arquitectura en un 
 - `platform_plan.md`
 - `work_plan.md`
 
-## Instrucciones del Prompt (Ejecutar con el contexto anterior)
+## Proceso
 
-Basándote en el Plan de Trabajo y la Arquitectura, genera la lista de tareas técnica final en formato JSON para su procesamiento.
+Basándote en Plan de Trabajo + Arquitectura:
 
-### Instrucciones:
-- Cada tarea debe especificar el 'equipo_asignado' (ej: 'Backend con FastAPI y PostgreSQL').
-- No utilices las palabras 'desarrollador', 'tester' o 'revisor'.
-- Las tareas deben ser claras y accionables para un agente IA.
+1. Generar JSON: tareas técnicas finales (accionables para agentes).
+2. **Cada tarea**: `id_tarea`, `descripcion`, `equipo_asignado` (tech stack, no "dev/tester/reviewer").
+3. **Devolución**: JSON puro sin markdown ni explicaciones.
 
-### ESTRUCTURA JSON REQUERIDA:
 ```json
 {
   "lista_de_tareas": [
     {
       "id_tarea": 1,
-      "descripcion": "Descripción detallada...",
-      "equipo_asignado": "Tecnología + Contexto"
+      "descripcion": "...",
+      "equipo_asignado": "Tech stack"
     }
   ]
 }
 ```
-
-**IMPORTANTE:** Devuelve solo el JSON puro, sin bloques de código markdown ni explicaciones adicionales.
 

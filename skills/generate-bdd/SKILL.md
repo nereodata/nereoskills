@@ -3,48 +3,40 @@ name: generate-bdd
 description: Generates a new BDD feature file following project standards
 ---
 
-# Skill: Generate BDD (/generate-bdd)
+# Skill: Generar BDD (/generate-bdd)
 
-This workflow (now skill) guides the agent in creating a new BDD feature file. It integrates the core workflow steps and relies on BDD generation standards.
+Crea archivos `.feature` en español, integrados en `.feature` existentes.
 
-## Pasos de la Skill
+## 📋 Pasos
 
-### 1. Analyze Request:
-* Identify the functionality to be tested.
-* Determine the target component (HMI, CTX, AI, LC).
+### 1. Identificar
+- Funcionalidad a testear.
+- Componente afectado.
 
-### 2. Estándares (BDD Generator)
-*   **Idioma**:
-    *   **Header**: Debe incluir `# language: es` en la primera línea.
-    *   **Keywords**: Español (`Característica`, `Escenario`, `Dado`, `Cuando`, `Entonces`, `Y`).
-    *   **Descripciones**: Español obligatorio.
-*   **Tags**:
-    *   Usar `@ui` para tests de frontend, `@api` para tests de backend.
-    *   Usar tags funcionales descriptivos (ej. `@auth`, `@layout`).
-*   **Estructura interna**:
-    *   **Característica**: Título en español descriptivo.
-    *   **User Story**: "Como [rol], Quiero [acción], Para [beneficio] (Ref: RF-XXX)".
-    *   **Escenarios**: Claros, atómicos y en español.
+### 2. Estándares
+- **Header**: `# language: es`.
+- **Keywords**: Español (Característica, Escenario, Dado, Cuando, Entonces, Y).
+- **Tags**: `@ui` (frontend), `@api` (backend), tags funcionales.
+- **Estructura**: Característica → User Story (Ref: RF-XXX) → Escenarios.
 
-### 3. Redactar Contenido (Plantilla Base):
+### 3. Plantilla Base
 ```gherkin
 # language: es
-@tag_componente @tag_funcionalidad
-Característica: Título de la Funcionalidad (En Español)
-  Como [rol de usuario]
-  Quiero [realizar una acción]
-  Para [obtener un valor] (Ref: RF-XXX)
+@componente @funcionalidad
+Característica: Título (Español)
+  Como [rol]
+  Quiero [acción]
+  Para [beneficio] (Ref: RF-XXX)
 
-  Escenario: Descripción del escenario existoso
-    Dado que el sistema está en un estado inicial conocido
-    Cuando realizo una acción específica
-    Entonces el sistema debe responder con el resultado esperado
-    Y el estado debe actualizarse
+  Escenario: Descripción
+    Dado que estado inicial
+    Cuando realizo acción
+    Entonces resultado esperado
 ```
 
-### 4. Create File:
-* Create the `.feature` file in the appropriate component directory: `<componente>/tests/features/`.
+### 4. Archivo
+- Crear en `<componente>/tests/features/` (integrado en `.feature` existente, no nominal).
 
-### 5. Review:
-* Ask the user to confirm the scenarios before proceeding to step definitions.
+### 5. Validar
+- Confirmar escenarios con usuario.
 

@@ -4,13 +4,20 @@ description: Proxy para el workflow /bug-fix
 ---
 
 > [!IMPORTANT]
-> Este workflow es **TURBO**. Todos los pasos serán auto-ejecutados EXCEPTO:
-> - Cambios fuera del entorno (workspace)
-> - Comandos git peligrosos (ej. `git push`, `git reset --hard`)
-> - **Control de Bucles:** Si una secuencia de comandos se repite más de 3 veces sin progreso, detened el modo turbo y pedid permiso manual.
+> **TURBO**: Auto-ejecutados todos excepto cambios fuera workspace, `git push`, `git reset --hard`, o 3+ repeats sin progreso.
 
-# /bug-fix
+# /bug-fix [BUG_ID]
 
-Has sido invocado para resolver una anomalía. Tu **único objetivo** es leer y ejecutar estrictamente los pasos definidos en la skill correspondiente:
-👉 Usa la herramienta `view_file` en `../skills/bug-fix/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) y sigue sus instrucciones.
+Ejecuta solo los pasos definidos en `../skills/bug-fix/SKILL.md`:
+
+1. **Urgencia**: Hotfix (`hotfix/vX.Y.(Z+1)` from latest tag) o Release (`release/vX.Y`).
+2. **Init**: Carga metadatos, status → `in_progress`.
+3. **Triaje**: Checklist de subfases (`[EXEC]`/`[SKIP]`).
+4. **Fase A-F**: Según triaje.
+   - **A (Reproduc.)**: `generate-bdd` (si destapa requisito) → Hades `/review-spec`.
+   - **B (Diseño)**: `/design` → Hades `/review-design`.
+   - **C (Fix)**: Red (tests que fallan) → Hades `/review-test` → Fix (corrección).
+   - **D (QA)**: Hades `/review-code` → HITL.
+   - **E (Docs)**: `/manage-docs`.
+   - **F (Cierre)**: `/commit fix([ID])` → status `completed`.
 
