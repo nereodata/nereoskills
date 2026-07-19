@@ -6,19 +6,19 @@ description: Orchestrador determinista para desarrollo de tareas
 > [!IMPORTANT]
 > **DETERMINÍSTICO**: Orden obligatorio, validación hard, HITL explícito.
 
-# /task-dev [TASK_ID] [--mode]
+# /task-dev [TASK_ID] [--fast]
 
-Ejecuta el orchestrador con tres modos:
+Ejecuta el orchestrador determinista con dos modos:
 
-## Modo Interactive (default)
+## Interactive (default)
 ```bash
 python orchestrator.py run [TASK_ID]
 ```
-- Pausa HITL después de cada fase
+- Pausa HITL después de cada fase validada
 - **Tú controlas**: continuar, pausar o rechazar
 - **Mejor para**: Control total, validación crítica, trabajo en equipo
 
-Ejemplo:
+Flujo con pausas:
 ```
 [A] Especificación → validación → PAUSA
     ¿Continuar? [y/n/reject]
@@ -26,36 +26,27 @@ Ejemplo:
     ¿Continuar? [y/n/reject]
 ```
 
-## Modo Fast
+## Fast
 ```bash
 python orchestrator.py run [TASK_ID] --fast
 ```
-- Ejecuta todas las fases sin pausas (no HITL)
-- **Validación automática** entre fases
-- **Captura artefactos reales** (no mocks)
+- Sin pausas HITL, validación automática
+- Ejecuta todas las fases de una vez
 - **Mejor para**: Flujos confiables, cuando confías en validaciones
 
-Ejecución sin interrupciones:
+Ejecución continua:
 ```
-[A] Especificación → validación automática → CONTINÚA
-[B] Diseño → validación automática → CONTINÚA
-[C] Tests → validación automática → CONTINÚA
-... todo se ejecuta hasta completar
+[A] Especificación → validación → CONTINÚA
+[B] Diseño → validación → CONTINÚA
+[C] Tests → validación → CONTINÚA
+... todo de un tirón
 ```
-
-## Modo Mock
-```bash
-python orchestrator.py run [TASK_ID] --mock
-```
-- Simula todas las fases sin pedir nada
-- **Sin intervención humana**, resultados vacíos
-- **Mejor para**: Testing del orchestrador, prototipos rápidos
 
 ---
 
 ## Útiles
 
-**Ver estado en cualquier momento:**
+**Ver estado:**
 ```bash
 python orchestrator.py status [TASK_ID]
 ```
@@ -64,18 +55,18 @@ python orchestrator.py status [TASK_ID]
 ```bash
 python orchestrator.py resume [TASK_ID]
 ```
-(Solo si quedó en pausa con modo Interactive)
+(Solo si quedó en pausa con Interactive mode)
 
 ---
 
-## Flujo Canónico (Interactive mode)
+## Flujo Canónico
 
 1. **[INIT]** Valida rama, carga task, detecta versión
 2. **[TRIAGE]** Decide [EXEC]/[SKIP] para cada fase (A-F)
-3. **[A]** BDD: `generate-bdd` → Hades `review-spec` → Validar → **PAUSA**
-4. **[B]** Diseño: `design` → Hades `review-design` → Validar → **PAUSA**
-5. **[C]** Tests: Red/Green → Hades `review-test` → Validar → **PAUSA**
-6. **[D]** QA: Hades `review-code` → Validar → **PAUSA**
+3. **[A]** BDD: `generate-bdd` → Hades `review-spec` → Validar
+4. **[B]** Diseño: `design` → Hades `review-design` → Validar
+5. **[C]** Tests: Red/Green → Hades `review-test` → Validar
+6. **[D]** QA: Hades `review-code` → Validar
 7. **[E]** Docs: `manage-docs`
 8. **[F]** Commit: `commit` → Close task
 9. **[CLOSE]** Tarea completada
