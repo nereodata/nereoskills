@@ -1,0 +1,29 @@
+# CODEOWNERS — nereoskills
+#
+# Los skills y agentes de este repositorio se distribuyen a todos los proyectos que
+# lo consumen como submódulo. Un cambio aquí afecta simultáneamente a todos ellos y a
+# todos los agentes que los ejecutan, así que toda modificación requiere aprobación
+# de un propietario.
+#
+# ⚠️ Este fichero NO protege nada por sí solo. Es la lista de propietarios; quien la
+# hace cumplir es la protección de rama. Para que tenga efecto hay que activar en
+# GitHub (Settings → Branches / Rules) sobre `main`:
+#   - Require a pull request before merging
+#   - Require review from Code Owners
+#   - Restrict who can push to matching branches
+#   - Block force pushes
+#
+# Nota para mantenedor único: GitHub no permite aprobar tu propia PR. Con
+# "Require review from Code Owners" activo y un solo propietario, necesitarás un
+# segundo revisor o marcar la excepción de bypass para administradores.
+
+# Propietario por defecto de todo el repositorio.
+*           @imoremu
+
+# Superficies que se distribuyen a los proyectos consumidores.
+/skills/    @imoremu
+/agents/    @imoremu
+/workflows/ @imoremu
+
+# La propia configuración de gobernanza.
+/.github/   @imoremu

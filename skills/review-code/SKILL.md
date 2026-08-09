@@ -13,7 +13,28 @@ Este flujo (ahora skill) orquesta la revisión del código para asegurar que cum
 
 Determinar qué archivos o bloques de código han sido modificados o deben ser revisados.
 
-### 2. Análisis Crítico (Code Reviewer)
+### 2. Conformidad con el Diseño (Obligatorio, previo a puntuar)
+
+Antes de puntuar nada, enumera cada decisión del documento de diseño y si el código la implementa.
+Recorre las **dos** direcciones — la segunda es la que se escapa siempre:
+
+* Decisiones del diseño que el código **no** implementa.
+* Decisiones que el código **toma** y el diseño **no menciona**: umbrales y constantes sin criterio
+  detrás, ramas de comportamiento no especificadas, reglas de negocio inventadas para hacer encajar
+  dos requisitos incompatibles. Una regla que no aparece en ningún artefacto es un conflicto de
+  especificación disfrazado, y es el hallazgo más caro de encontrar más tarde.
+
+Enumera además todo test o aserción preexistente que el cambio haya **modificado o eliminado**, y
+justifica por qué la regla que fijaba ya no aplica. Modificar un test que pasaba es un cambio de
+contrato, no un paso de la implementación.
+
+**La suite en verde no es evidencia de conformidad.** Para cada decisión relevante, comprueba que
+existe al menos un test que falla si esa decisión se revierte; si no existe, la decisión no está
+cubierta por mucho que todo pase.
+
+Una divergencia no declarada es 🔴 CRÍTICO con independencia de la calidad del código.
+
+### 3. Análisis Crítico (Code Reviewer)
 
 Analiza y puntúa (1-10) rigurosamente las siguientes áreas:
 
@@ -27,22 +48,25 @@ Analiza y puntúa (1-10) rigurosamente las siguientes áreas:
 * **Documentación**: Presencia de docstrings obligatorios en clases y métodos. No debe haber apenas comentarios inline.
 * **Cumplimiento de Requisitos**: Trazabilidad e implementación correcta de lo solicitado.
 
-### 3. Generar Reporte Estandarizado
+### 4. Generar Reporte Estandarizado
 
 Es OBLIGATORIO generar un archivo `.md` (usualmente en `docs/review/code_reviews/`) con la siguiente estructura:
 
 #### Estructura del Reporte
 
 1. **Resumen Ejecutivo**: Puntuación global y veredicto.
-2. **Análisis Detallado por Área**: Por cada una de las 8 áreas anteriores:
+2. **Conformidad con el Diseño**: Resultado de las dos direcciones (decisiones no implementadas y
+   decisiones no documentadas), tests preexistentes modificados o eliminados con su justificación,
+   y decisiones sin test que las fije.
+3. **Análisis Detallado por Área**: Por cada una de las 8 áreas anteriores:
    * **Puntuación**: [1-10]
    * **Explicación**: Razonamiento detallado de la nota.
    * **Puntos Fuertes**: Listado de aciertos técnicos.
    * **Puntos de Mejora**: Listado de debilidades detectadas.
-3. **Plan de Acción (Backlog de Revisión)**: Un listado de todas las mejoras detectadas, clasificadas y ordenadas por criticidad:
+4. **Plan de Acción (Backlog de Revisión)**: Un listado de todas las mejoras detectadas, clasificadas y ordenadas por criticidad:
    * **🔴 CRÍTICO**: Bloquea el paso a producción.
    * **🟠 ALTA**: Debería corregirse antes del merge.
    * **🟡 MEDIA**: Deuda técnica a planificar.
    * **🔵 BAJA**: Sugerencia de estilo o mejora menor.
-4. **Veredicto Final**
+5. **Veredicto Final**
 Calcular una puntuación global sobre 10. Informar al usuario si el código es "Apto para producción" (>8) o si requiere correcciones obligatorias pre-commit basándose en los puntos críticos y la nota global.
