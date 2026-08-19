@@ -24,14 +24,6 @@ Recorre las **dos** direcciones — la segunda es la que se escapa siempre:
   dos requisitos incompatibles. Una regla que no aparece en ningún artefacto es un conflicto de
   especificación disfrazado, y es el hallazgo más caro de encontrar más tarde.
 
-Enumera además todo test o aserción preexistente que el cambio haya **modificado o eliminado**, y
-justifica por qué la regla que fijaba ya no aplica. Modificar un test que pasaba es un cambio de
-contrato, no un paso de la implementación.
-
-**La suite en verde no es evidencia de conformidad.** Para cada decisión relevante, comprueba que
-existe al menos un test que falla si esa decisión se revierte; si no existe, la decisión no está
-cubierta por mucho que todo pase.
-
 Una divergencia no declarada es 🔴 CRÍTICO con independencia de la calidad del código.
 
 ### 3. Análisis Crítico (Code Reviewer)
@@ -48,6 +40,10 @@ Analiza y puntúa (1-10) rigurosamente las siguientes áreas:
 * **Documentación**: Presencia de docstrings obligatorios en clases y métodos. No debe haber apenas comentarios inline.
 * **Cumplimiento de Requisitos**: Trazabilidad e implementación correcta de lo solicitado.
 
+Limitar `review-code` a la testeabilidad intrínseca del código. No revisar la existencia o cobertura
+de tests, repetir comprobaciones de la fase roja ni ejecutar mutation testing. Delegar la calidad
+y cobertura de la suite en `review-test` y reservar mutation testing para una solicitud expresa.
+
 ### 4. Generar Reporte Estandarizado
 
 Es OBLIGATORIO generar un archivo `.md` (usualmente en `docs/review/code_reviews/`) con la siguiente estructura:
@@ -56,8 +52,7 @@ Es OBLIGATORIO generar un archivo `.md` (usualmente en `docs/review/code_reviews
 
 1. **Resumen Ejecutivo**: Puntuación global y veredicto.
 2. **Conformidad con el Diseño**: Resultado de las dos direcciones (decisiones no implementadas y
-   decisiones no documentadas), tests preexistentes modificados o eliminados con su justificación,
-   y decisiones sin test que las fije.
+   decisiones no documentadas).
 3. **Análisis Detallado por Área**: Por cada una de las 8 áreas anteriores:
    * **Puntuación**: [1-10]
    * **Explicación**: Razonamiento detallado de la nota.
