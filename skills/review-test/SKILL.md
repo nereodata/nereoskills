@@ -1,28 +1,33 @@
 ---
 name: review-test
-description: Evaluación de la calidad de la suite de pruebas
+description: Evaluación de calidad y cobertura de pruebas
 inputs:
-  - test_files: Ruta de los archivos de prueba
+  - test_files: Archivos de prueba modificados o creados
 outputs:
   - verdict: APROBADO o RECHAZADO
+  - review_file: Ruta del reporte generado
 ---
 
 # Skill: Test Review (/review-test)
 
-Audita la suite de pruebas para asegurar cobertura y evitar verdes falsos.
+Audita los tests del delta para validar cobertura y calidad mediante inspección de código.
+
+> - **Proporcionalidad:** Audita solo el delta. Ajusta la profundidad al tamaño del cambio.
+> - **Inspección estática:** Revisa el código del test; **no mutes código ni hagas experimentos**.
 
 ## 📋 Pasos de la Skill
 
-### 1. Verde Falso
-- No-ops en `Entonces` (deben verificar o ser `skipped` con motivo).
-- Pasos Dado/Cuando sin asserts pueden ser `pass`.
+### 1. Cobertura (Determinista)
+Si el runner lo permite (ej: `pytest --cov`, `npm test -- --coverage`), ejecútalo una vez sobre los tests afectados y anota el porcentaje.
 
-### 2. Evalúa (1-10 por bloque)
-- **BDD**: Sin features huérfanas, sin no-ops, trazabilidad.
-- **Unitario (Aislamiento)**: Sin red/BD/I/O real, edge cases.
+### 2. Evaluación (1-10 por bloque)
+- **Cobertura Funcional (BDD)**: Steps implementados con lógica real (sin no-ops ni `pass` vacíos).
+- **Aserciones y Aislamiento**: Aserciones sobre valores reales (sin `assert True`); unitarios sin I/O real.
 - **Integración**: Flujo punta a punta (si aplica).
 
-### 3. Reporte [`docs/review/test_reviews/[ID]-test-review.md`]
-- **Veredicto**: APROBADO (>8) / RECHAZADO (≤8)
-- **Por Bloque**: Puntuación + nota.
-- **Mejoras**: 🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA
+## 📋 Reporte [`docs/review/test_reviews/[ID]-test-review.md`]
+
+- **Veredicto**: APROBADO (media > 8, sin 🔴 CRÍTICOS y sin 🟠 ALTAS) / RECHAZADO
+- **Cobertura**: Porcentaje numérico o "N/A".
+- **Puntuaciones**: Nota (1-10) y apunte breve por bloque.
+- **Hallazgos**: Solo si existen (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA).
