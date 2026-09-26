@@ -24,6 +24,7 @@ SKILL = Path(__file__).resolve().parent / 'SKILL.md'
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
+          'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
 
@@ -176,7 +177,8 @@ def main():
 
         antes = firma(root, a.docs)
         cerradas = {i['id'] for i in backlog(root) if i['status'] in CERRADO}
-        prompt = PROMPT.format(skill=skill, paso=paso, args=f' con "{arg}"' if arg else '')
+        prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
+                               paso=paso, args=f' con "{arg}"' if arg else '')
         subprocess.run(comando(a, prompt), cwd=root)
 
         if a.test and any(i['status'] in CERRADO and i['id'] not in cerradas for i in backlog(root)):
