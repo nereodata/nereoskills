@@ -48,7 +48,7 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 1. **Un paso por ejecución.** Ejecuta solo el paso indicado y termina: el bucle decide el siguiente.
 2. **Sin preguntas.** Donde una skill pida algo al usuario, elige la opción recomendada o el valor por defecto y regístralo (DEC/SUP en el documento de la fase, o en la revisión de versión).
 3. **Sin HITL.** `/task-dev` y `/bug-fix` no se detienen en sus HITL: lo que se habría validado va a la revisión de versión. Las revisiones de Hades se mantienen.
-4. **Árbol limpio.** Termina cada paso con commit. Las fases de planificación commitean en la rama actual (`docs(plan): <paso>`).
+4. **Árbol limpio y señal al final.** El artefacto de «Hecho cuando» se escribe lo último, justo antes del commit con que termina cada paso. Las fases de planificación commitean en la rama actual (`docs(plan): <paso>`).
 5. **Bloqueo tras 3 rechazos de Hades.** Si solo quedan hallazgos 🟡/🔵, cierra y llévalos como deuda a la revisión de versión. Si persisten 🔴/🟠: guarda los cambios en la rama `wip/<ID>`, devuelve `release/vX.Y` al estado previo a la tarea, pon `status: blocked` y anota el motivo y los hallazgos en la revisión de versión. Una tarea que dependa de una bloqueada se bloquea sin intentarla.
 6. **Reportes con el ID maestro.** Pasa a Hades el ID de la tarea o bug maestro, para que el reporte sea `docs/review/code_reviews/<ID>-code-review.md`.
 7. **Sin fingir.** Si no puedes completar el paso, explica el bloqueo en tu salida y no cambies estados: el bucle lo detectará.

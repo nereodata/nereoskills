@@ -179,7 +179,11 @@ def main():
         cerradas = {i['id'] for i in backlog(root) if i['status'] in CERRADO}
         prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '')
-        subprocess.run(comando(a, prompt), cwd=root)
+        codigo = subprocess.run(comando(a, prompt), cwd=root).returncode
+        if codigo:
+            print(f'[orquestar] PARAR: el arnés terminó con código {codigo} '
+                  f'(¿límite de uso, autenticación, red?). Relanza cuando se resuelva.')
+            return 2
 
         if a.test and any(i['status'] in CERRADO and i['id'] not in cerradas for i in backlog(root)):
             if subprocess.run(a.test, shell=True, cwd=root).returncode:
