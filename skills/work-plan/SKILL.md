@@ -5,7 +5,7 @@ description: Crear la estrategia de desarrollo y generar tareas en el backlog.
 
 # Skill: Plan de Trabajo (/work-plan)
 
-**Objetivo:** Crear la estrategia de desarrollo basada en las tecnologías elegidas y automatizar la creación de tareas.
+**Objetivo:** Crear la estrategia de desarrollo basada en las tecnologías elegidas y registrar sus tareas en el backlog.
 
 **Documentación necesaria:**
 - `requirements.md`
@@ -13,45 +13,32 @@ description: Crear la estrategia de desarrollo y generar tareas en el backlog.
 - `needs_analysis.md` (Resultado del paso 2).
 - `platform_plan.md` (Resultado del paso 3).
 
-## Instrucciones del Prompt (Ejecutar en dos fases)
+## Fase 1: Plan de Desarrollo
 
-### Fase 1: Generación del Plan de Desarrollo
-Genera un plan de desarrollo técnico detallado basado EXCLUSIVAMENTE en la arquitectura de plataforma aprobada. 
+Genera un plan de desarrollo basado EXCLUSIVAMENTE en la arquitectura de plataforma aprobada:
+- **Foco en Software**: Sin tareas de infraestructura (ya definidas en `platform_plan.md`).
+- **Tecnologías**: EXACTAMENTE las del plan de plataforma (si dice React, React).
+- **Filosofía BDD/TDD**: Cada bloque funcional empieza por la definición de pruebas.
+- **Bloques = tareas padre**: Cada bloque es una capacidad con valor de usuario según `/task-add` (si se describe como "permite X y además Y", son dos), descompuesta por componente afectado.
+  Si `requirements.md` viene de `/ciclo-requisitos`, cada `F-xx` es un bloque y sus olas orientan las versiones.
 
-**Instrucciones:**
-1. **Foco en Software**: No incluyas tareas de infraestructura (ya definidas en el plan anterior).
-2. **Filosofía BDD/TDD**: Cada bloque funcional debe empezar por la definición de pruebas.
-3. **Tecnologías**: Usa EXACTAMENTE las definidas en el plan de plataforma (ej. si dice React, usa React).
-4. **Granularidad**: Tareas atómicas e independientes.
+**Salida:** `work_plan.md`, en el mismo directorio que los ficheros de entrada: fases, hitos y estrategia de integración continua.
 
-**SALIDA ESPERADA:**
-Un resumen del plan de trabajo en un fichero Markdown de nombre `work_plan.md`, en el mismo directorio que los ficheros de entrada y que explique las fases de desarrollo, hitos principales y estrategia de integración continua.
+## Fase 2: Backlog
 
-### Fase 2: Automatización del Backlog (Task Creation)
-Una vez generado el `work_plan.md`, procede a registrar cada una de las tareas identificadas en el sistema de backlog utilizando la skill `/task-add`.
+1. **Versión target**: Solicítala al usuario (ej. `v1.2`) y pásala a `/task-add` (`vX.Y.0`); sin versión, `/task-add` aplica sus valores por defecto.
+2. **Registro** con `/task-add`, por bloque:
+   - **Maestra**: título, objetivo de negocio y criterios `CA-M-n` (si hay `CA-Fxx-nn` de origen, cítalo en el criterio).
+   - **Hijas**, una por componente afectado: objetivo técnico y criterios `CA-n` en forma de escenario.
+3. **Peso**: Ascendente, desde un valor **superior a 100** (o el indicado por el usuario), con **10 puntos** de separación (110, 120, 130...).
 
-**Asignación de Versión Target:**
-- Solicitar al usuario la versión target para este plan de trabajo (ej. `v1.2`).
-- Todas las tareas generadas se crearán con `version: "vX.Y.0"` y `status: planned`.
-- Si el usuario no especifica versión, las tareas se crean con `version: ""` y `status: backlog` (por defecto).
-- Agrupar las tareas en el resumen final por versión target para facilitar la trazabilidad con las ramas `release/`.
+## Fase 3: Contrato de Aceptación
 
-**Reglas de Priorización (Weighting):**
-- La prioridad de las tareas debe ser **ascendente**.
-- El peso inicial debe ser **superior a 100** (o el valor indicado por el usuario).
-- Se debe dejar una separación de **10 puntos** entre cada tarea (ej. 110, 120, 130...).
-- Para cada tarea del plan, invoca `/task-add` proporcionando el título, objetivo técnico y criterios de aceptación derivados del plan.
+Para cada tarea hija que afecte a un flujo funcional, aplica `/generate-bdd` con sus `CA-n` como etiquetas `@CA-*`. Si involucra IA, NL2SQL o pipelines probabilísticos, añade **3-5 evals** como Golden Tests en Gherkin, en su suite aislada.
 
-### Fase 3: Especificación del Contrato Técnico (Escenarios y Evals)
-Tras registrar las tareas en el backlog, el planificador debe generar las especificaciones formales de comportamiento y calidad que guiarán al desarrollo técnico:
+`/task-dev` reutiliza estos escenarios en su Subfase A (delta-first) y los audita con `/review-spec`.
 
-1. **Creación de Features BDD**:
-   - Por cada tarea de componente que afecte a un flujo funcional, crear o actualizar los archivos `.feature` de Gherkin correspondientes en la ruta del componente (ej. `<componente>/tests/bdd/features/`).
-   - Los escenarios deben redactarse en español y etiquetarse con `@pending` o `@unimplemented` para que sirvan como la base de la Fase Roja en el desarrollo.
-2. **Definición de Evals / Golden Sets**:
-   - Si la tarea involucra componentes de Inteligencia Artificial, NL2SQL o pipelines probabilísticos, añadir al menos **3-5 casos de prueba de evaluación** representativos al dataset de Golden Evals del proyecto (ej: registrando preguntas y salidas esperadas en los datasets de evaluación locales).
+## Salida Esperada
 
-**SALIDA ESPERADA:**
-- Confirmación del plan generado y lista de IDs de tareas maestras (`T-[PRJ]-XXXX`) y de componente (`T-[PRJ]-[COMP]-XXXX`) creadas.
-- Listado de archivos `.feature` y datasets de evaluación inicializados como contratos de aceptación para el desarrollo técnico.
-
+- IDs de tareas maestras (`T-[PRJ]-XXXX`) y de componente (`T-[PRJ]-[COMP]-XXXX`) creadas, agrupadas por versión target (trazabilidad con ramas `release/`).
+- `.feature` y evals creados o actualizados.
