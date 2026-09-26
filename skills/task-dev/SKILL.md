@@ -2,6 +2,7 @@
 name: task-dev
 description: Ciclo de desarrollo completo de una tarea (BDD -> Diseño -> TDD -> Dev -> QA -> Doc)
 inputs:
+  - modo: (Opcional) interactivo (por defecto) | orquestado
   - task_id: ID de la tarea (T-PRJ-XXXX o T-PRJ-COMP-XXXX)
 outputs:
   - status: completed
@@ -23,6 +24,8 @@ dependencies:
 # Skill: Desarrollo de Tarea (/task-dev)
 
 Playbook para el desarrollo de tareas.
+
+> **Modo orquestado** (invocada desde `/orquestar`): mismo ciclo, pero ningún HITL detiene el flujo. Lo que se habría validado se añade a `docs/review/versions/vX.Y-revision.md` (formato en `/orquestar`) para la revisión humana al cerrar la versión. Donde se pregunte al usuario, se toma la opción recomendada y se registra. Las revisiones de Hades se mantienen.
 
 ## 1. Inicialización (inline)
 - **Validar Rama**: Debe ser `release/vX.Y` o `hotfix/vX.Y.Z`. Abortar si es `main`.

@@ -2,6 +2,7 @@
 name: bug-fix
 description: Ciclo completo para la resolución de anomalías (bugs) (Triaje -> BDD -> Diseño -> Red/Fix -> QA -> Doc)
 inputs:
+  - modo: (Opcional) interactivo (por defecto) | orquestado
   - bug_id: ID del bug (B-PRJ-XXXX o B-PRJ-COMP-XXXX)
 outputs:
   - status: completed
@@ -23,6 +24,9 @@ dependencies:
 # Skill: Resolución de Anomalías (/bug-fix)
 
 Playbook para la resolución de bugs.
+
+> **Modo orquestado** (invocada desde `/orquestar`): mismo ciclo, pero ningún HITL detiene el flujo. Lo que se habría validado se añade a `docs/review/versions/vX.Y-revision.md` (formato en `/orquestar`) para la revisión humana al cerrar la versión. Donde se pregunte al usuario, se toma la opción recomendada y se registra. Las revisiones de Hades se mantienen.
+> En modo orquestado el bug no es urgente: se corrige en la `release/vX.Y` activa.
 
 ## 0. Clasificación de Urgencia y Rama de Trabajo (inline)
 Preguntar al usuario si el bug es urgente (hotfix) o no (release):

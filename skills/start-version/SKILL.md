@@ -7,6 +7,8 @@ description: Inicializa un nuevo bloque funcional creando la rama release y actu
 
 Esta skill formaliza la apertura de un nuevo bloque funcional (release), creando la rama de trabajo y sincronizando la versión target en todos los manifiestos del monorepo.
 
+> **Modo orquestado** (invocada desde `/orquestar`): la versión target es la indicada, sin preguntar. Si no hay releases previas (sin tags), no se exige que `main` esté en un tag.
+
 ## Pasos de la Skill
 
 ### 1. Validación Previa
