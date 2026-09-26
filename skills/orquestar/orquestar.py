@@ -22,6 +22,7 @@ HARNESS = {
 }
 SKILL = Path(__file__).resolve().parent / 'SKILL.md'
 CERRADO = {'completed', 'cancelled'}
+FUERA = CERRADO | {'blocked'}  # no pendientes
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
@@ -70,6 +71,17 @@ def vkey(v):
     return (int(m[1]), int(m[2])) if m else None
 
 
+def primera_linea(path):
+    lineas = path.read_text(encoding='utf-8').splitlines()
+    return lineas[0] if lineas else ''
+
+
+def revisada(root, iid):
+    """Hades solo escribe el reporte de review-code si aprueba (o N/A sin código)."""
+    d = root / 'docs/review/code_reviews'
+    return d.is_dir() and any(d.glob(f'{iid}*'))
+
+
 def estado(root, docs):
     """Devuelve ('PASO', paso, arg, rama) | ('PARAR', motivo) | ('FIN', motivo)."""
     d = root / docs
@@ -79,25 +91,37 @@ def estado(root, docs):
         return ('PARAR', f'Falta la idea: escríbela en {docs}/requirements.md o usa --idea.')
     if not (d / 'req_analysis.md').exists():
         return ('PASO', 'ciclo-requisitos', '', None)
-    if 'REQUIERE_ACLARACION' in (d / 'req_analysis.md').read_text(encoding='utf-8').splitlines()[0]:
+    if 'REQUIERE_ACLARACION' in primera_linea(d / 'req_analysis.md'):
         return ('PARAR', f'Requisitos con preguntas sin valor por defecto seguro: revisa {docs}/req_analysis.md.')
     for doc, paso in (('needs_analysis.md', 'needs-analysis'), ('platform_plan.md', 'platform-plan')):
         if not (d / doc).exists():
             return ('PASO', paso, '', None)
+    if not (d / 'platform_review.md').exists():
+        return ('PASO', 'revisar-plataforma', '', None)
+    if 'RECHAZADO' in primera_linea(d / 'platform_review.md'):
+        return ('PARAR', f'Plataforma rechazada por Hades: revisa {docs}/platform_review.md.')
     items = backlog(root)
     if not (d / 'work_plan.md').exists() or not items:
         return ('PASO', 'work-plan', '', None)
 
-    pendientes = [i for i in items if i['status'] not in CERRADO and vkey(i['version'])]
+    pendientes = [i for i in items if i['status'] not in FUERA and vkey(i['version'])]
     abiertas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*').splitlines()]
     for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0)):
         v = rama.split('/')[1]
-        suyas = [i for i in pendientes if vkey(i['version']) == vkey(v)]
-        if not suyas:
-            return ('PARAR', f'Versión {v} terminada. Revisa docs/review/versions/{v}-revision.md: '
-                             f'registra defectos con /bug-add o cierra con /release, y relanza.')
-        i = min(suyas, key=lambda i: (i['status'] != 'in_progress', i['weight']))
-        return ('PASO', i['paso'], i['id'], rama)
+        suyas = [i for i in items if vkey(i['version']) == vkey(v)]
+        sin_revisar = [i for i in suyas if i['status'] == 'completed' and not revisada(root, i['id'])]
+        if sin_revisar:
+            return ('PASO', 'revisar-tarea', sin_revisar[0]['id'], rama)
+        pend = [i for i in suyas if i['status'] not in FUERA]
+        if pend:
+            i = min(pend, key=lambda i: (i['status'] != 'in_progress', i['weight']))
+            return ('PASO', i['paso'], i['id'], rama)
+        if not (root / f'docs/review/versions/{v}-arquitectura.md').exists():
+            return ('PASO', 'revisar-version', v, rama)
+        bloqueadas = [i['id'] for i in suyas if i['status'] == 'blocked']
+        return ('PARAR', f'Versión {v} terminada. Revisa docs/review/versions/{v}-revision.md'
+                         + (f' (bloqueadas: {", ".join(bloqueadas)})' if bloqueadas else '')
+                         + ': registra defectos con /bug-add o cierra con /release, y relanza.')
     if not pendientes:
         return ('FIN', 'Todas las tareas con versión están cerradas.')
     v = min(vkey(i['version']) for i in pendientes)
