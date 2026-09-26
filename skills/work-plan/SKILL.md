@@ -20,13 +20,14 @@ Genera un plan de desarrollo basado EXCLUSIVAMENTE en la arquitectura de platafo
 - **Tecnologías**: EXACTAMENTE las del plan de plataforma (si dice React, React).
 - **Filosofía BDD/TDD**: Cada bloque funcional empieza por la definición de pruebas.
 - **Bloques = tareas padre**: Cada bloque es una capacidad con valor de usuario según `/task-add` (si se describe como "permite X y además Y", son dos), descompuesta por componente afectado.
-  Si `requirements.md` viene de `/ciclo-requisitos`, cada `F-xx` es un bloque y sus olas orientan las versiones.
+  Si `requirements.md` viene de `/ciclo-requisitos`, cada `F-xx` es un bloque.
+- **Versiones = bloques funcionales** (`Y` de `branch_strategy.md`): agrupa las tareas padre en versiones. Cada versión reúne varias funcionalidades que juntas dan un nuevo nivel de capacidad, demostrable de principio a fin; una sola funcionalidad no justifica versión. La primera es el núcleo mínimo usable. Si hay olas de `/ciclo-requisitos`, parte de ellas.
 
 **Salida:** `work_plan.md`, en el mismo directorio que los ficheros de entrada: fases, hitos y estrategia de integración continua.
 
 ## Fase 2: Backlog
 
-1. **Versión target**: Solicítala al usuario (ej. `v1.2`) y pásala a `/task-add` (`vX.Y.0`); sin versión, `/task-add` aplica sus valores por defecto.
+1. **Versiones**: El reparto lo propone el plan; no se pregunta una versión única. Cada tarea se registra con la `vX.Y.0` de su bloque. La revisión humana se hace al cerrar cada versión, no antes.
 2. **Registro** con `/task-add`, por bloque:
    - **Maestra**: título, objetivo de negocio y criterios `CA-M-n` (si hay `CA-Fxx-nn` de origen, cítalo en el criterio).
    - **Hijas**, una por componente afectado: objetivo técnico y criterios `CA-n` en forma de escenario.
