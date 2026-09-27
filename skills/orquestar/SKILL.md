@@ -30,7 +30,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Falta `task_config.yaml` o `<docs>/requirements.md` | PARAR: falta configuración o idea |
 | Sin `<docs>/req_analysis.md` | paso `ciclo-requisitos` |
 | `req_analysis.md` con `REQUIERE_ACLARACION` | PARAR: preguntas sin valor por defecto seguro |
-| Sin `needs_analysis.md` / `platform_plan.md` | paso `needs-analysis` / `platform-plan` |
+| Sin `platform_plan.md` | paso `platform-plan` |
 | Sin `<docs>/platform_review.md` | paso `revisar-plataforma` |
 | `platform_review.md` con `RECHAZADO` | PARAR: plataforma rechazada |
 | Sin `work_plan.md` o backlog vacío | paso `work-plan` |
@@ -56,15 +56,14 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 | Paso | Sigue | Ajuste | Hecho cuando |
 |---|---|---|---|
 | `ciclo-requisitos` | `/ciclo-requisitos` sobre `<docs>/requirements.md` | sin ronda de preguntas de la fase 0 | existe `req_analysis.md` |
-| `needs-analysis` | `/needs-analysis` | — | existe `needs_analysis.md` |
 | `platform-plan` | `/platform-plan` | — | existe `platform_plan.md` |
-| `revisar-plataforma` | Hades con los pilares de `/review-design` sobre `platform_plan.md`, frente a requisitos y `needs_analysis.md`; corrige y repite (máx. 3) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
+| `revisar-plataforma` | Hades con los pilares de `/review-design` sobre `platform_plan.md`, frente a los requisitos; señala también lo que sobra para el tamaño del producto; corrige y repite (máx. 3) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
 | `work-plan` | `/work-plan` | — | `work_plan.md` y tareas con versión en el backlog |
 | `start-version` | `/start-version` con la versión indicada | — | existe `release/vX.Y` |
 | `task-dev` | `/task-dev <ID>` en modo orquestado | — | tarea `completed` y commit |
 | `bug-fix` | `/bug-fix <ID>` en modo orquestado | — | bug `completed` y commit |
 | `revisar-tarea` | Hades `/review-code` sobre los commits del ID (y `/review-design` si no hubo diseño); corrige y repite (máx. 3, regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
-| `revisar-version` | Hades con `/review-design` y `/review-code` sobre `git diff main...release/vX.Y`: duplicados entre tareas, patrones incoherentes, capas mezcladas | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → deuda en la revisión | existe `vX.Y-arquitectura.md` |
+| `revisar-version` | Hades con `/review-design` y `/review-code` sobre `git diff main...release/vX.Y`: duplicados entre tareas, patrones incoherentes, capas mezcladas y lo que sobra para el tamaño del producto | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → deuda en la revisión | existe `vX.Y-arquitectura.md` |
 
 `/release` no es un paso del bucle: lo ejecuta el humano tras la revisión.
 

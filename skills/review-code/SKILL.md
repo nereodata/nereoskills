@@ -10,7 +10,7 @@ outputs:
 
 # Skill: Code Review (/review-code)
 
-Audita el código modificado para asegurar calidad, seguridad y cumplimiento del diseño.
+Audita el código de producción modificado: calidad, seguridad y fidelidad al diseño aprobado. La arquitectura y la testeabilidad las evalúa `/review-design`; las pruebas, `/review-test`.
 
 > - **Proporcionalidad:** Audita solo el delta. Ajusta la profundidad al tamaño del cambio.
 > - **Alcance:** Solo código de producción (los tests van a `/review-test`). **No ejecutes pruebas**.
@@ -29,13 +29,11 @@ Ejecuta las herramientas disponibles en el proyecto sobre los archivos modificad
 
 ### 2. Áreas de Evaluación (1-10)
 1. **Seguridad**: Credenciales, inyecciones, sanitización y validación de entradas.
-2. **Conformidad con Diseño**: Fidelidad al diseño (divergencias no documentadas = 🔴 CRÍTICO).
-3. **Arquitectura**: Patrones aplicados, acoplamiento bajo y alta cohesión.
-4. **Buenas Prácticas**: Estilo del proyecto, nombres limpios y resultado de linters.
-5. **Eficiencia**: Complejidad algorítmica y gestión razonable de recursos.
-6. **Testeabilidad**: Facilidad del código de producción para ser probado (modularidad, IoC).
-7. **Mantenibilidad**: Código limpio, SOLID, DRY y responsabilidad única.
-8. **Documentación**: Docstrings en clases/métodos públicos; sin comentarios inline superfluos.
+2. **Conformidad con Diseño**: Fidelidad al diseño aprobado (divergencias no documentadas = 🔴 CRÍTICO).
+3. **Buenas Prácticas**: Estilo del proyecto, nombres limpios y resultado de linters.
+4. **Eficiencia**: Complejidad algorítmica y gestión razonable de recursos.
+5. **Legibilidad**: Funciones cortas, sin duplicación dentro del cambio y sin código muerto.
+6. **Documentación**: Docstrings en clases/métodos públicos; sin comentarios inline superfluos.
 
 ## 📋 Reporte [`docs/review/code_reviews/[ID]-code-review.md`]
 

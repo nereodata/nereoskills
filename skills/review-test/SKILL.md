@@ -10,15 +10,18 @@ outputs:
 
 # Skill: Test Review (/review-test)
 
-Audita los tests del delta para validar cobertura y calidad mediante inspección de código.
+Audita los tests del delta en fase roja, antes de escribir el código de producción. Solo las pruebas: el código lo revisa `/review-code`.
 
 > - **Proporcionalidad:** Audita solo el delta. Ajusta la profundidad al tamaño del cambio.
-> - **Inspección estática:** Revisa el código del test; **no mutes código ni hagas experimentos**.
+> - **Sin experimentos:** Revisa el código del test y ejecuta la suite; **no mutes código**.
 
 ## 📋 Pasos de la Skill
 
-### 1. Cobertura (Determinista)
-Si el runner lo permite (ej: `pytest --cov`, `npm test -- --coverage`), ejecútalo una vez sobre los tests afectados y anota el porcentaje.
+### 1. Ejecución en rojo (Determinista)
+Ejecuta una vez los tests afectados:
+- **Casan con la spec**: ningún step sin definir ni ambiguo respecto al `.feature` (🔴 CRÍTICO).
+- **Fallan por el motivo correcto**: por la funcionalidad que falta, no por errores de sintaxis, imports o fixtures (🔴 CRÍTICO).
+- **Cobertura**: si el runner lo permite (ej: `pytest --cov`, `npm test -- --coverage`), anota el porcentaje.
 
 ### 2. Evaluación (1-10 por bloque)
 - **Cobertura Funcional (BDD)**: Steps implementados con lógica real (sin no-ops ni `pass` vacíos).
@@ -28,6 +31,6 @@ Si el runner lo permite (ej: `pytest --cov`, `npm test -- --coverage`), ejecúta
 ## 📋 Reporte [`docs/review/test_reviews/[ID]-test-review.md`]
 
 - **Veredicto**: APROBADO (media > 8, sin 🔴 CRÍTICOS y sin 🟠 ALTAS) / RECHAZADO
-- **Cobertura**: Porcentaje numérico o "N/A".
+- **Ejecución**: Resultado en rojo (tests, steps sin definir, motivo del fallo) y cobertura, o "N/A".
 - **Puntuaciones**: Nota (1-10) y apunte breve por bloque.
 - **Hallazgos**: Solo si existen (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA).

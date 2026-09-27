@@ -47,6 +47,7 @@ Una regla nueva vive en **un solo sitio**. Si aparece replicada en varias capas 
 extráela; tres copias divergen y ningún test falla cuando se olvida una.
 
 ### 4. Documento [`docs/design/[ID]-design.md`]
+Lo mínimo suficiente para implementar sin preguntar: en cambios pequeños, omite las secciones que no aplican.
 ```markdown
 # Diseño Técnico: [ID] - [Título]
 

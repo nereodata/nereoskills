@@ -12,7 +12,6 @@ Este flujo se encarga de transformar el plan de trabajo y la arquitectura en un 
 **Documentación necesaria:**
 - `requirements.md`
 - `req_analysis.md`
-- `needs_analysis.md`
 - `platform_plan.md`
 - `work_plan.md`
 

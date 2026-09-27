@@ -94,9 +94,8 @@ def estado(root, docs):
         return ('PASO', 'ciclo-requisitos', '', None)
     if 'REQUIERE_ACLARACION' in primera_linea(d / 'req_analysis.md'):
         return ('PARAR', f'Requisitos con preguntas sin valor por defecto seguro: revisa {docs}/req_analysis.md.')
-    for doc, paso in (('needs_analysis.md', 'needs-analysis'), ('platform_plan.md', 'platform-plan')):
-        if not (d / doc).exists():
-            return ('PASO', paso, '', None)
+    if not (d / 'platform_plan.md').exists():
+        return ('PASO', 'platform-plan', '', None)
     if not (d / 'platform_review.md').exists():
         return ('PASO', 'revisar-plataforma', '', None)
     if 'RECHAZADO' in primera_linea(d / 'platform_review.md'):

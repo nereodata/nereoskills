@@ -1,34 +1,31 @@
 ---
 name: platform-plan
-description: Definir la infraestructura, tecnologías y estrategia de escalado/lock-in.
+description: Decidir la arquitectura y el stack mínimos que cumplen los requisitos, en proporción al tamaño del producto.
 ---
 
-# Skill: Necesidades de Plataforma (/platform-plan)
+# Skill: Plan de Plataforma (/platform-plan)
 
-**Objetivo:** Definir la infraestructura, tecnologías y estrategia de escalado/lock-in.
+**Objetivo:** Decidir la arquitectura y el stack mínimos que cumplen los requisitos, para que `/work-plan` pueda crear las tareas.
 
 **Documentación necesaria:**
-- `requirements.md`
-- `req_analysis.md` (Resultado del paso 1).
-- `needs_analysis.md` (Resultado del paso 2).
+- `requirements.md` (incluye el tamaño del producto y las entradas técnicas detectadas).
+- `req_analysis.md`.
 
-## Instrucciones del Prompt (Ejecutar con el contexto anterior)
+## Proceso
 
-Define la arquitectura de la plataforma y un plan de configuración detallado para un ingeniero humano.
+1. **Necesidades que condicionan**: solo las que cambian una decisión (volumen, datos, disponibilidad, datos personales y cumplimiento normativo, dependencias externas). Verifica en la web los límites, costes y términos de las dependencias externas. Cifras con base; si no la hay, supuesto declarado.
+2. **Opciones**: las 2-3 arquitecturas más lógicas para este producto concreto. Decide una, di por qué y qué te haría cambiar de opinión. Si eliges algo propietario, el lock-in forma parte del porqué.
+3. **Stack**: ningún componente sin una necesidad que lo justifique. Por defecto, lo más simple que funcione para el tamaño declarado.
 
-### Proceso de Pensamiento Estratégico:
-1. **Identifica Espectro de Soluciones**: (IaaS, PaaS, BaaS).
-2. **Análisis Comparativo**: (Coste, Time-to-market, Escalabilidad, Lock-in).
-3. **Análisis de Sostenibilidad (Coste del éxito)**: ¿Qué pasa si el proyecto triunfa? Cuantifica el coste de migración fuera de soluciones propietarias.
+## Salida: `platform_plan.md`
 
-### Decisión Final y Hoja de Ruta:
-- Si eliges Lock-in alto: Define KPI de migración.
-- Si eliges Desacoplado: Define plan de optimización.
+En el mismo directorio que los ficheros de entrada:
+- **Necesidades**: tabla breve (necesidad | valor | por qué condiciona).
+- **Opciones y decisión**.
+- **Stack**: tabla (capa | elección | necesidad que cubre).
+- **Estructura del código y reglas de capas** (si aplica).
+- **Estrategia de pruebas**: niveles y herramientas.
+- **Pasos manuales** que requieren a una persona.
+- **Decisiones** (`DEC-xx`).
 
-### SALIDA ESPERADA:
-Informe en un fichero Markdown de nombre `platform_plan.md`, en el mismo directorio que los ficheros de entrada y con:
-1. Resumen del pensamiento estratégico.
-2. Decisión de arquitectura (Stack tecnológico).
-3. Recursos necesarios (BBDD, Servidores, etc.).
-4. Plan de configuración paso a paso para un ingeniero.
-
+Lo justo para que `/work-plan` cree las tareas y `/design` diseñe: sin tutoriales, sin versiones de paquetes (salvo incompatibilidad conocida) y sin comparar tipos genéricos de arquitectura.

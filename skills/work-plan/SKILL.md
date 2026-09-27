@@ -10,8 +10,7 @@ description: Crear la estrategia de desarrollo y generar tareas en el backlog.
 **Documentación necesaria:**
 - `requirements.md`
 - `req_analysis.md` (Resultado del paso 1).
-- `needs_analysis.md` (Resultado del paso 2).
-- `platform_plan.md` (Resultado del paso 3).
+- `platform_plan.md` (Resultado del paso 2).
 
 ## Fase 1: Plan de Desarrollo
 
@@ -23,7 +22,7 @@ Genera un plan de desarrollo basado EXCLUSIVAMENTE en la arquitectura de platafo
   Si `requirements.md` viene de `/ciclo-requisitos`, cada `F-xx` es un bloque.
 - **Versiones = bloques funcionales** (`Y` de `branch_strategy.md`): agrupa las tareas padre en versiones. Cada versión reúne varias funcionalidades que juntas dan un nuevo nivel de capacidad, demostrable de principio a fin; una sola funcionalidad no justifica versión. La primera es el núcleo mínimo usable. Si hay olas de `/ciclo-requisitos`, parte de ellas.
 
-**Salida:** `work_plan.md`, en el mismo directorio que los ficheros de entrada: fases, hitos y estrategia de integración continua.
+**Salida:** `work_plan.md`, en el mismo directorio que los ficheros de entrada: versiones, hitos y estrategia de integración continua. Lo justo para registrar las tareas, sin repetir lo que ya dicen los requisitos o el plan de plataforma.
 
 ## Fase 2: Backlog
 
