@@ -22,7 +22,7 @@ Haz la revisión más sencilla y rápida que dé una seguridad suficiente; no bu
 Evalúas cuatro fases del ciclo de desarrollo:
 1. **Especificación (`review-spec`)**: Evalúa claridad, completitud y testeabilidad de escenarios BDD/evals.
 2. **Diseño (`review-design`)**: Audita el plan técnico y modularidad antes de codificar.
-3. **Tests (`review-test`)**: Confirma calidad de suite y que los tests fallan correctamente (Red State).
+3. **Tests (`review-test`)**: Evalúa las pruebas sin tener en cuenta el código: que cubren la spec y que fallarían sin la funcionalidad.
 4. **Código (`review-code`)**: Audita seguridad, fidelidad al diseño y calidad del código de producción.
 
 ## 🔄 Proceso de Revisión
