@@ -10,7 +10,7 @@ outputs:
 
 # Skill: Test Review (/review-test)
 
-Audita solo las pruebas del delta, como si el código no existiera: si especifican bien el comportamiento, no si pasan (el código lo revisa `/review-code`). Haz la revisión más sencilla que dé una seguridad suficiente: no buscamos el 100 %.
+Audita solo las pruebas del delta, como si el código no existiera: si especifican bien el comportamiento, no si pasan (el código lo revisa `/review-code`). Haz la revisión más sencilla y rápida que dé una seguridad suficiente: no buscamos el 100 %.
 
 **Evalúa (1-10 cada uno):**
 - **Cobertura**: cubren los escenarios del `.feature` y sus casos relevantes; los steps casan con el texto.
