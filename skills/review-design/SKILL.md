@@ -1,6 +1,6 @@
 ---
 name: review-design
-description: Auditoría del plan de diseño técnico
+description: Revisión del documento de diseño técnico frente a la especificación y el código existente
 inputs:
   - design_file: Ruta del documento de diseño técnico a revisar
 outputs:
@@ -10,21 +10,14 @@ outputs:
 
 # Skill: Review Design (/review-design)
 
-Audita la propuesta de diseño técnico antes de escribir código.
+Audita solo el documento de diseño del delta, frente a la especificación y al código existente, antes de implementar (la implementación la revisa `/review-code`). Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
 
-> - **Proporcionalidad:** Audita el diseño frente a la tarea. Ajusta la profundidad al cambio.
-> - **Ámbito:** Contrasta el diseño con los BDD y el código existente.
+**Evalúa (1-10 cada uno):**
+- **Viabilidad y cobertura**: cubre la especificación sin sobreingeniería para el tamaño del producto.
+- **Modularidad**: alta cohesión, bajo acoplamiento, una regla en un solo sitio.
+- **Testeabilidad**: interfaces claras y lógica aislable de la E/S.
+- **Delta-first**: reutiliza lo existente con el mínimo impacto. Si cambia un contrato, el mapa de impacto está completo (llamantes, tests afectados, decisiones contradichas).
 
-## 📋 Pasos de la Skill
-
-### 1. Pilares de Evaluación (1-10)
-- **Viabilidad y Cobertura**: Cubre la especificación BDD sin sobreingeniería (KISS/YAGNI).
-- **Modularidad**: SOLID, DRY, alta cohesión y bajo acoplamiento.
-- **Testeabilidad**: Interfaces claras, estrategia de mocks y desacoplado de I/O real.
-- **Delta-First**: Reutilización de código existente y mínimo impacto.
-
-## 📋 Reporte [`docs/review/design_reviews/[ID]-design-review.md`]
-
-- **Veredicto**: APROBADO (media > 8, sin 🔴 CRÍTICOS y sin 🟠 ALTAS) / RECHAZADO
-- **Puntuaciones**: Nota (1-10) y apunte breve por pilar.
-- **Hallazgos**: Solo si existen (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA).
+## Reporte [`docs/review/design_reviews/[ID]-design-review.md`]
+- **Veredicto**: APROBADO (media > 8, sin 🔴 ni 🟠) / RECHAZADO
+- **Puntuaciones** y **Hallazgos** (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA), solo si existen.

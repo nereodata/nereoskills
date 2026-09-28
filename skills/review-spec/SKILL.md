@@ -1,6 +1,6 @@
 ---
 name: review-spec
-description: Evaluación de la calidad de la especificación antes de implementar
+description: Revisión de la especificación del delta (escenarios BDD y evals), sin tener en cuenta el diseño ni el código
 inputs:
   - spec_file: Ruta de la especificación a revisar
 outputs:
@@ -10,29 +10,20 @@ outputs:
 
 # Skill: Specification Review (/review-spec)
 
-Audita la especificación funcional (escenarios BDD y evals de IA) antes de codificar.
+Audita solo la especificación del delta (`.feature` y evals), como si el diseño y el código no existieran: si describe bien el comportamiento, no cómo se implementa. Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
 
-> - **Proporcionalidad:** Audita solo el delta funcional. Ajusta la profundidad al cambio.
-> - **Ámbito:** Revisa archivos `.feature` y evals. **No ejecutes código ni pruebas**.
+**Obligatorias (si falla alguna, 🔴 CRÍTICO):**
+- **No regresión**: no elimina ni altera escenarios existentes.
+- **Coherencia**: no contradice decisiones ni contratos ya documentados.
+- **Trazabilidad**: cada `@CA-*` existe en la tarea o bug de origen.
+- **Delta real**: describe comportamiento nuevo o modificado, sin duplicados.
 
-## 📋 Pasos de la Skill
+**Evalúa (1-10 cada uno):**
+- **Claridad**: inequívoca y orientada al usuario.
+- **Completitud**: camino feliz, límites y errores relevantes.
+- **Testeabilidad**: resultados observables con valores concretos.
+- **Estructura**: en el `.feature` de su funcionalidad, nunca por tarea, fase o versión.
 
-### 1. Comprobaciones Obligatorias (Pasa / Falla)
-Si alguna falla, es 🔴 CRÍTICO:
-- **No regresión**: No se eliminan ni alteran escenarios preexistentes en los `.feature`.
-- **Sin contradicciones**: Coherente con decisiones de diseño y contratos vigentes.
-- **Trazabilidad**: Etiquetas (`@CA-*`) corresponden a criterios reales de la tarea/bug.
-- **Delta real**: Describe un comportamiento nuevo o modificado (sin duplicados).
-
-### 2. Pilares de Evaluación (1-10)
-- **Claridad**: `Dado/Cuando/Entonces` concisos, inequívocos y orientados al usuario.
-- **Completitud**: Camino feliz, casos límite y errores principales.
-- **Testeabilidad**: Resultados observables con contenido y valores concretos.
-- **Estructura**: Integrados en `.feature` funcionales (nunca por tarea ni por fase).
-
-## 📋 Reporte [`docs/review/spec_reviews/[ID]-spec-review.md`]
-
-- **Veredicto**: APROBADO (media > 8, sin 🔴 CRÍTICOS y sin 🟠 ALTAS) / RECHAZADO
-- **Comprobaciones Obligatorias**: Lista con estado (✅ OK / ❌ Fallo + motivo).
-- **Puntuaciones**: Nota (1-10) y apunte breve por pilar.
-- **Hallazgos**: Solo si existen (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA).
+## Reporte [`docs/review/spec_reviews/[ID]-spec-review.md`]
+- **Veredicto**: APROBADO (media > 8, sin 🔴 ni 🟠) / RECHAZADO
+- **Obligatorias** (✅ / ❌ + motivo), **Puntuaciones** y **Hallazgos** (🔴 CRÍTICO | 🟠 ALTA | 🟡 MEDIA | 🔵 BAJA), solo si existen.
