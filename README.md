@@ -73,4 +73,8 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
    ln -s ../.agents/skills .claude/skills
    ln -s ../.agents/agents .claude/agents
    ```
+   Para Codex, los agentes con modelo propio (`clio` y `cronos` en luna, esfuerzo bajo) están en `agents/codex/`:
+   ```bash
+   ln -s ../.agents/agents/codex .codex/agents
+   ```
 3. **Configurar `task_config.yaml`** en la raíz del proyecto para definir los prefijos y rutas del backlog del proyecto.

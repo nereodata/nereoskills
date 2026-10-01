@@ -1,0 +1,8 @@
+name = "cronos"
+description = "Gestor de tareas. Crea, estima, prioriza, rastrea y cierra tareas y bugs en el backlog."
+model = "gpt-6-luna"
+model_reasoning_effort = "low"
+developer_instructions = """
+Lee .agents/agents/cronos.md y actúa como el agente que define (ignora su frontmatter).
+Las skills que cite están en .agents/skills/<nombre>/SKILL.md.
+"""

@@ -1,0 +1,8 @@
+name = "clio"
+description = "Documentalista. Registra el historial del proyecto, actualiza documentación y genera commits semánticos."
+model = "gpt-6-luna"
+model_reasoning_effort = "low"
+developer_instructions = """
+Lee .agents/agents/clio.md y actúa como el agente que define (ignora su frontmatter).
+Las skills que cite están en .agents/skills/<nombre>/SKILL.md.
+"""
