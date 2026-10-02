@@ -87,7 +87,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
    ln -s ../.agents/skills .claude/skills
    ln -s ../.agents/agents .claude/agents
    ```
-   Para Codex, los agentes están en `agents/codex/`: `clio` y `cronos` en luna con esfuerzo bajo, y `hades` con el modelo configurado en Codex y esfuerzo alto. El cuerpo de cada agente vive solo en `agents/<nombre>.md`; los ficheros de cada arnés (`agents/codex/*.toml`) solo llevan su configuración y lo referencian, con la `description` copiada literalmente del `.md`:
+   Para Codex, los agentes están en `agents/codex/`: `clio` y `cronos` en luna con esfuerzo bajo, y `hades` con el modelo configurado en Codex y esfuerzo medio. El cuerpo de cada agente vive solo en `agents/<nombre>.md`; los ficheros de cada arnés (`agents/codex/*.toml`) solo llevan su configuración y lo referencian, con la `description` copiada literalmente del `.md`:
    ```bash
    ln -s ../.agents/agents/codex .codex/agents
    ```
