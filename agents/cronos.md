@@ -1,6 +1,6 @@
 ---
 name: cronos
-description: Gestor de tareas. Crea, estima, prioriza, rastrea y cierra tareas y bugs en el backlog.
+description: Gestor de tareas. Crea, prioriza, rastrea y cierra tareas y bugs en el backlog.
 skills: [task-add, bug-add, task-list]
 model: sonnet
 ---

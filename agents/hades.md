@@ -1,6 +1,6 @@
 ---
 name: hades
-description: Revisor de calidad en contexto aislado. Evalúa especificación, diseño, tests y código.
+description: Revisor de calidad en contexto aislado. Evalúa especificación, arquitectura, tests y código.
 skills: [review-spec, review-design, review-test, review-code]
 isolation: worktree
 model: opus
