@@ -25,7 +25,7 @@ inputs:
 - **estado**: ejecuta `orquestar.py --estado` (fase actual, si hay bucle en marcha y consumo acumulado) y resume el final de `orquestar.log`. Si el bucle paró para la revisión humana, explica qué toca hacer (ver «Revisión de versión»).
 - **parar**: ejecuta `orquestar.py --parar`; el bucle termina el paso en curso y para. Relanzar sigue donde iba.
 
-Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test`, `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`. Sin `--fondo` corre en primer plano.
+Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test`, `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`, `--espera-max`. Sin `--fondo` corre en primer plano.
 
 **Métricas.** Cada paso añade una línea a `orquestar_metricas.jsonl`: paso, ID, rama, duración y, con `claude`, turnos, tokens por modelo, coste a precio de lista y subagentes. El consumo de una tarea es la suma de sus líneas. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar` y las métricas) quedan excluidos de git.
 
@@ -53,6 +53,8 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 **Deuda registrada** = bug pendiente sin versión (lo crea `/bug-add` a partir de un hallazgo de Hades con destino `registrar`). El bucle no la trabaja hasta que `revisar-deuda` la incluye en una versión.
 
 El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cierra con la suite en rojo (`--test`) o al llegar a `--max-pasos`.
+
+**Sin cuota** (Claude, Codex u otro arnés): si un paso falla y su salida indica límite de uso, el bucle no para. Espera hasta la hora de recuperación que indique el arnés (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Cualquier otro fallo del arnés para el bucle.
 
 ## ⚙️ Modo orquestado
 

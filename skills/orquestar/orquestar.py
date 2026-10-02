@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 HARNESS = {
@@ -28,7 +28,8 @@ METRICAS = 'orquestar_metricas.jsonl'
 LOG = 'orquestar.log'
 PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
-PROPIOS = (METRICAS, LOG, PID, PARADA)  # ficheros del bucle, excluidos de git
+ESPERA = 'orquestar.espera'
+PROPIOS = (METRICAS, LOG, PID, PARADA, ESPERA)  # ficheros del bucle, excluidos de git
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
@@ -167,19 +168,25 @@ def json_claude(a):
 
 
 def ejecutar(a, root, prompt):
-    """Lanza el paso y devuelve (código, métricas). Con claude, lee el JSON final."""
+    """Lanza el paso y devuelve (código, métricas, salida). Con claude, lee el JSON final."""
     inicio = time.monotonic()
     if not json_claude(a):
-        codigo = subprocess.run(comando(a, prompt), cwd=root).returncode
-        return codigo, {'duracion_s': round(time.monotonic() - inicio)}
+        lineas = []
+        with subprocess.Popen(comando(a, prompt), cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                              text=True, encoding='utf-8', errors='replace') as p:
+            for linea in p.stdout:
+                print(linea, end='', flush=True)
+                lineas.append(linea)
+        return p.returncode, {'duracion_s': round(time.monotonic() - inicio)}, ''.join(lineas[-200:])
     r = subprocess.run(comando(a, prompt), cwd=root, capture_output=True, text=True,
                        encoding='utf-8', errors='replace')
     m = {'duracion_s': round(time.monotonic() - inicio)}
+    salida = r.stdout + '\n' + r.stderr
     try:
         d = json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        print(r.stdout, r.stderr, sep='\n', flush=True)
-        return r.returncode, m
+        print(salida, flush=True)
+        return r.returncode, m, salida
     print(d.get('result', ''), flush=True)
     m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
              subagentes=(d.get('subagent_stats') or {}).get('spawned'), error=d.get('is_error'),
@@ -187,7 +194,53 @@ def ejecutar(a, root, prompt):
                           'cache_leida': u.get('cacheReadInputTokens'),
                           'cache_escrita': u.get('cacheCreationInputTokens'), 'coste_usd': u.get('costUSD')}
                       for k, u in (d.get('modelUsage') or {}).items()})
-    return r.returncode, m
+    return (1 if d.get('is_error') and not r.returncode else r.returncode), m, salida
+
+
+CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
+                   r'|\b429\b|overloaded', re.I)
+
+
+def espera_cuota(salida, ahora=None):
+    """Segundos hasta poder reintentar si la salida indica falta de cuota; None si es otro error.
+
+    Reconoce la hora de recuperación en los formatos habituales (marca de tiempo tras «|»,
+    «try again in 2h 13m», «resets at 5pm»); si no la hay, propone 30 minutos.
+    """
+    if not CUOTA.search(salida):
+        return None
+    ahora = ahora or datetime.now()
+    margen = 120
+    m = re.search(r'\|(\d{10})\b', salida)
+    if m:
+        return max(int(m[1]) - int(ahora.timestamp()), 0) + margen
+    m = re.search(r'(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*'
+                  r'(?:(\d+)\s*(?:minutes?|mins?|m)\b)?', salida, re.I)
+    if m and (m[1] or m[2]):
+        return int(m[1] or 0) * 3600 + int(m[2] or 0) * 60 + margen
+    m = re.search(r'(?:try again|resets?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', salida, re.I)
+    if m:
+        h = int(m[1]) % 12 + (12 if m[3].lower() == 'pm' else 0)
+        objetivo = ahora.replace(hour=h, minute=int(m[2] or 0), second=0, microsecond=0)
+        if objetivo <= ahora:
+            objetivo += timedelta(days=1)
+        return int((objetivo - ahora).total_seconds()) + margen
+    return 1800
+
+
+def esperar(root, segundos):
+    """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
+    hasta = datetime.now() + timedelta(seconds=segundos)
+    (root / ESPERA).write_text(hasta.isoformat(timespec='minutes'), encoding='utf-8')
+    print(f'[orquestar] sin cuota: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
+    try:
+        while datetime.now() < hasta:
+            if (root / PARADA).exists():
+                return False
+            time.sleep(min(30, max((hasta - datetime.now()).total_seconds(), 0)))
+        return True
+    finally:
+        (root / ESPERA).unlink(missing_ok=True)
 
 
 def excluir(root):
@@ -213,6 +266,8 @@ def resumen(root):
     """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
     if (root / PID).exists():
         print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
+        if (root / ESPERA).exists():
+            print(f'[orquestar] esperando cuota hasta {(root / ESPERA).read_text().strip()}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
     if (root / METRICAS).exists():
@@ -250,6 +305,8 @@ def main():
     ap.add_argument('--max-pasos', type=int, default=100)
     ap.add_argument('--presupuesto', type=float, help='gasto máximo por paso en USD (solo claude)')
     ap.add_argument('--reintentos', type=int, default=2, help='pasos seguidos sin progreso antes de parar')
+    ap.add_argument('--espera-max', type=float, default=12,
+                    help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y sale')
     ap.add_argument('--fondo', action='store_true', help=f'lanza el bucle desacoplado, con la salida en {LOG}')
     ap.add_argument('--parar', action='store_true', help='pide al bucle en marcha que pare tras el paso en curso')
@@ -279,8 +336,8 @@ def main():
         return bucle(a, root)
     finally:
         if not a.estado:
-            (root / PID).unlink(missing_ok=True)
-            (root / PARADA).unlink(missing_ok=True)
+            for f in (PID, PARADA, ESPERA):
+                (root / f).unlink(missing_ok=True)
 
 
 def bucle(a, root):
@@ -289,7 +346,7 @@ def bucle(a, root):
         (root / a.docs / 'requirements.md').write_text(a.idea + '\n', encoding='utf-8')
 
     skill = os.path.relpath(SKILL, root).replace('\\', '/')
-    sin_progreso = 0
+    sin_progreso = esperado = 0
     for n in range(1, a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
@@ -309,14 +366,23 @@ def bucle(a, root):
         cerradas = {i['id'] for i in backlog(root) if i['status'] in CERRADO}
         prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '')
-        codigo, m = ejecutar(a, root, prompt)
+        codigo, m, salida = ejecutar(a, root, prompt)
+        cuota = espera_cuota(salida) if codigo else None
         registrar(root, {'fecha': datetime.now().isoformat(timespec='seconds'), 'paso': paso, 'id': arg,
                          'rama': git('branch', '--show-current'), 'arnes': a.cmd or a.harness,
-                         'codigo': codigo, **m})
+                         'codigo': codigo, **m, **({'sin_cuota': True} if cuota else {})})
+        if cuota is not None and esperado + cuota <= a.espera_max * 3600:
+            esperado += cuota
+            if not esperar(root, cuota):
+                print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
+                return 2
+            continue
         if codigo:
-            print(f'[orquestar] PARAR: el arnés terminó con código {codigo} '
-                  f'(¿límite de uso, autenticación, red?). Relanza cuando se resuelva.')
+            motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
+                      else '¿autenticación, red?')
+            print(f'[orquestar] PARAR: el arnés terminó con código {codigo} ({motivo}). Relanza cuando se resuelva.')
             return 2
+        esperado = 0
 
         if a.test and any(i['status'] in CERRADO and i['id'] not in cerradas for i in backlog(root)):
             if subprocess.run(a.test, shell=True, cwd=root).returncode:
