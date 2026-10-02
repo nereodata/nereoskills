@@ -87,7 +87,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
    ln -s ../.agents/skills .claude/skills
    ln -s ../.agents/agents .claude/agents
    ```
-   Para Codex, los agentes con modelo propio (`clio` y `cronos` en luna, esfuerzo bajo) están en `agents/codex/`:
+   Para Codex, los agentes están en `agents/codex/`: `clio` y `cronos` en luna con esfuerzo bajo, y `hades` con el modelo configurado en Codex y esfuerzo alto:
    ```bash
    ln -s ../.agents/agents/codex .codex/agents
    ```
