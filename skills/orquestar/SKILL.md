@@ -1,26 +1,33 @@
 ---
 name: orquestar
-description: Lleva un producto de la idea a su última tarea sin parar. Deduce la fase del disco y ejecuta el siguiente paso del ciclo (requisitos, arquitectura, plan, versiones y task-dev) en modo orquestado; el humano solo interviene al cerrar cada versión.
+description: Lleva un producto de la idea a su última tarea sin parar. Invocada por una persona, lanza el bucle desatendido (orquestar.py), informa de cómo va o lo para; el bucle deduce la fase del disco y continúa desde donde toque. Invocada por el bucle, ejecuta el paso indicado en modo orquestado. El humano solo interviene al cerrar cada versión.
 inputs:
-  - paso: (Opcional) paso a ejecutar; si falta, se deduce del estado
-  - arg: (Opcional) ID de tarea/bug o versión
+  - accion: (Opcional, persona) lanzar (por defecto) | estado | parar
+  - paso: (Lo pasa el bucle) paso a ejecutar
+  - arg: (Lo pasa el bucle) ID de tarea/bug o versión
 ---
 
 # Skill: Orquestador (/orquestar)
 
 **Objetivo:** De una idea a un producto completo y funcional con la máxima agilidad. El humano revisa al cerrar cada versión, no antes.
 
-## ▶️ Ejecución
+## ▶️ Dos usos
 
-- **En bucle (recomendado).** Desde la raíz del proyecto:
-  ```bash
-  python .agents/skills/orquestar/orquestar.py --harness claude|codex|gemini|cursor [--test "<suite>"] [--idea "<texto>"]
-  ```
-  Cada paso es una ejecución nueva del arnés, con contexto limpio. El script deduce el estado del disco, lanza el paso, comprueba que hubo progreso y repite. `--estado` solo muestra la fase; `--cmd "<plantilla con {prompt}>"` admite otro arnés.
-- **Métricas.** Cada paso añade una línea a `orquestar_metricas.jsonl` (excluido de git): paso, ID, rama, duración y, con `claude`, turnos, tokens por modelo, coste a precio de lista y subagentes. El consumo de una tarea es la suma de sus líneas. Con `claude`, `--presupuesto <usd>` limita el gasto de cada paso.
-- **A mano.** En cualquier arnés: deduce el paso con la tabla de estado y ejecuta **uno**.
+**Te invoca el bucle** (el prompt indica un paso): ejecuta solo ese paso según el modo orquestado y termina.
 
-Los arneses se lanzan sin confirmaciones de permisos: ejecútalo en un contenedor o VM.
+**Te invoca una persona** (sin paso): no ejecutes pasos tú. El bucle (`orquestar.py`, junto a esta skill) es quien deduce el estado del disco y continúa desde donde toque. Desde la raíz del proyecto:
+
+- **lanzar**:
+  1. Comprueba que existe `<docs>/requirements.md` con commit y que el árbol está limpio. Si no hay requisitos, propón `/ciclo-requisitos` en modo interactivo (con su ronda de preguntas) y no lances.
+  2. Averigua el comando de la suite del proyecto (manifiestos, README, CI); si no lo encuentras, pregúntalo.
+  3. Ejecuta `python <ruta>/orquestar.py --fondo --harness <arnés> --test "<suite>"` (más `--presupuesto` si lo piden). Vuelve enseguida: el bucle sigue desacoplado, con la salida en `orquestar.log`.
+  4. Avisa: los pasos corren sin confirmaciones de permisos (mejor en contenedor o VM), y si tu arnés usa sandbox, puede que el bucle necesite lanzarse fuera de él.
+- **estado**: ejecuta `orquestar.py --estado` (fase actual, si hay bucle en marcha y consumo acumulado) y resume el final de `orquestar.log`. Si el bucle paró para la revisión humana, explica qué toca hacer (ver «Revisión de versión»).
+- **parar**: ejecuta `orquestar.py --parar`; el bucle termina el paso en curso y para. Relanzar sigue donde iba.
+
+Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test`, `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`. Sin `--fondo` corre en primer plano.
+
+**Métricas.** Cada paso añade una línea a `orquestar_metricas.jsonl`: paso, ID, rama, duración y, con `claude`, turnos, tokens por modelo, coste a precio de lista y subagentes. El consumo de una tarea es la suma de sus líneas. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar` y las métricas) quedan excluidos de git.
 
 ## 🧭 Estado
 
