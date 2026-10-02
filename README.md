@@ -47,7 +47,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md).
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md).
 
 ---
 
