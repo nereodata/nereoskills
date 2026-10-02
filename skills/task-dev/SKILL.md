@@ -14,7 +14,6 @@ dependencies:
   - generate-bdd
   - review-spec
   - design
-  - review-design
   - review-test
   - review-code
   - manage-docs
@@ -29,9 +28,9 @@ Playbook para el desarrollo de tareas.
 
 ## 1. Inicialización (inline)
 - **Validar Rama**: Debe ser `release/vX.Y` o `hotfix/vX.Y.Z`. Abortar si es `main`.
-- **Cargar Metadatos**: Cargar tarea padre e hijas (componentes).
+- **Cargar Metadatos**: Cargar la tarea y sus hijas, si las tiene.
 - **Coherencia**: Validar que la versión en la tarea coincide con la de la rama activa.
-- **Estado**: Cambiar `status` a `in_progress` en padre e hijas. Establecer `estimated_effort` y `remaining_effort`.
+- **Estado**: Cambiar `status` a `in_progress` en la tarea y sus hijas.
 
 ## 2. Triaje de Alcance (inline)
 **Filosofía Delta-First**: Inspecciona si la funcionalidad ya existe antes de codificar. Analiza el cambio y determina qué subfases **realmente aportan valor** (no todas aplican).
@@ -49,34 +48,37 @@ Crea un checklist explícito en `task.md` marcando qué subfases ejecutar:
 ## 3. Fase de Implementación (secuencial)
 
 ### Subfase A: Definición [EXEC/SKIP]
-1. `/generate-bdd`: Escenarios BDD en español → `.feature` existentes (no nominales).
-2. Evals: Golden Tests en Gherkin (aislados).
-3. `Hades /review-spec` (aislado, ×3 iteraciones máx).
+1. `/generate-bdd`: Escenarios BDD en español → `.feature` existentes (no nominales). Si la tarea parte de escenarios ya aprobados en una fase previa (citados en sus criterios), trasládalos al `.feature` sin cambiarlos.
+2. Evals: si involucra IA, NL2SQL o pipelines probabilísticos, 3-5 Golden Tests en Gherkin, en su suite aislada.
+3. `Hades /review-spec` (aislado, ×3 iteraciones máx) solo sobre lo que la tarea añade o modifica respecto a los escenarios de origen; si no añade ni modifica nada, se omite. Sin escenarios de origen, se revisa todo.
 4. **HITL**: Validar especificación consolidada.
 
 ### Subfase B: Diseño [EXEC/SKIP]
 1. `/design`: Analizar código existente → cambios (`[NEW]`, `[MODIFY]`, `[DELETE]`), SOLID/DRY/KISS/YAGNI, coherencia.
-   - Output: `docs/design/[ID]-design.md`.
-2. `Hades /review-design` (aislado, ×3 iteraciones máx).
-3. **HITL (Opcional)**: Validar diseño.
+   - Output: `docs/design/[ID]-design.md`. Sin revisión de Hades: `/review-code` comprueba después que el código lo sigue.
+   - Si se desvía de la arquitectura, añade la `DEC` al plan de plataforma en este mismo cambio.
+2. **HITL (Opcional)**: Validar diseño.
 
 ### Subfase C: Desarrollo [EXEC/SKIP]
 **Red Phase:**
 1. Step defs + unit tests → `tests/unit/`.
-2. Verificar que fallan (solo tests relevantes).
-3. `Hades /review-test` (aislado, ×3 iteraciones máx).
+2. Verificar que fallan (solo tests relevantes) y guardar esa salida.
+3. Lint y tipado limpios sobre las pruebas.
+4. `Hades /review-test` (aislado, ×3 iteraciones máx), con la salida del rojo.
 
 **Green Phase:**
 1. Implementación mínima (docstrings sí, inline comments no).
 2. Tests relevantes + suite completa al final.
+3. Lint y tipado limpios sobre todo el delta.
 
 ### Subfase D: QA [EXEC/SKIP]
-1. `Hades /review-code` (aislado, ×3 iteraciones máx).
+1. `Hades /review-code` (aislado, ×3 iteraciones máx). Obligatoria si hay cambios de código de producción.
 2. **HITL**: Validar funcionalidad e integración visual.
 
 ### Subfase E: Documentación [EXEC/SKIP]
 - `/manage-docs`: Actualizar según `docs_config.yaml` (minimalista, inline).
 
 ### Subfase F: Cierre [EXEC]
-1. `/commit`: Commit semántico (inline).
-2. Cierre: Esfuerzos reales, `status: completed` padre + hijas (inline).
+1. **Deuda**: según el destino que marque Hades en cada 🟡/🔵: `resolver` se corrige; `registrar` → `/bug-add` como deuda registrada (sin versión, `origen` = este ID y su reporte); `descartar` no se hace nada.
+2. Cierre: `status: completed` en la tarea y sus hijas (inline).
+3. `/commit`: Commit semántico (inline).

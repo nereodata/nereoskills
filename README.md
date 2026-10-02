@@ -12,29 +12,42 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 
 | Agente | Rol | Modelo | Skills que usa | Uso en `task-dev`/`bug-fix` |
 |--------|-----|--------|---------------|------------------------------|
-| **Hades** | QA — Juez de calidad objetivo e imparcial | Opus 4.8 | review-spec, review-design, review-test, review-code | **Delegado (aislado)** |
-| **Cronos** | Gestor de tareas — Controla el ciclo de vida del backlog | Haiku 4.5 | task-add, bug-add, task-list | Manual (init/cierre van inline) |
-| **Clío** | Documentalista — Registra cambios, documentación y commits | Haiku 4.5 | manage-docs, commit | Manual (docs/commit van inline) |
+| **Hades** | QA — Juez de calidad objetivo e imparcial | Opus | review-spec, review-design, review-test, review-code | **Delegado (aislado)** |
+| **Cronos** | Gestor de tareas — Controla el ciclo de vida del backlog | Sonnet | task-add, bug-add, task-list | Manual (init/cierre van inline) |
+| **Clío** | Documentalista — Registra cambios, documentación y commits | Sonnet | manage-docs, commit | Manual (docs/commit van inline) |
+
+### Quién revisa qué
+
+| Revisión | Cuándo | Mira |
+|---|---|---|
+| `review-spec` | Cada tarea | Escenarios y evals que la tarea añade o modifica |
+| `review-design` | Plan de plataforma y revisión de versión | Arquitectura y sus decisiones; nunca código |
+| `review-test` | Cada tarea, tras el rojo | Cobertura, aserciones, rojo correcto y estabilidad |
+| `review-code` | Cada tarea, tras el verde | Corrección, seguridad, calidad y conformidad con el diseño y la arquitectura |
+
+Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, fuera de versión) o `descartar`.
 
 ### Flujo de Desarrollo Canónico (`task-dev` / `bug-fix`)
 
 ```
-📋 Init          → inline:   delta-first, status, esfuerzo, versión
+📋 Init          → inline:   delta-first, status, versión
 📝 Especificación → inline:   BDD del delta (generate-bdd)
-🔎 review-spec   → Hades:    audita especificación (aislado, ×3)
+🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado, ×3)
                  ↓ [HITL: validación de especificación]
-📐 Diseño        → inline:   arquitectura y diseño de la solución (design)
-🔎 review-design → Hades:    audita arquitectura y testeabilidad (aislado, ×3)
-                 ↓ [HITL: validación del diseño (opcional)]
-🔴 Red           → inline:   step definitions y unit tests que fallan
+📐 Diseño        → inline:   diseño de la solución (design), sin revisión
+🔴 Red           → inline:   tests que fallan + lint/tipado limpios
 🔎 review-test   → Hades:    audita calidad de tests (aislado, ×3)
-🟢 Green/Fix     → inline:   implementación mínima (suite completa al final)
+🟢 Green/Fix     → inline:   implementación mínima + suite completa + lint/tipado
                  ↓ [HITL: validación funcional]
-🔎 review-code   → Hades:    audita calidad de código (aislado, ×3)
+🔎 review-code   → Hades:    audita código y conformidad (aislado, ×3)
 📄 Docs          → inline:   manage-docs
+✅ Cierre        → inline:   deuda (resolver/registrar/descartar), cierre de tareas
 💾 Commit        → inline:   commit semántico
-✅ Cierre        → inline:   esfuerzo real, cierre de tareas
 ```
+
+### Orquestador (`/orquestar`)
+
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md).
 
 ---
 
@@ -46,7 +59,7 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 │   ├── task-dev/          # Flujo de desarrollo de tareas
 │   ├── bug-fix/           # Flujo de resolución de bugs
 │   ├── design/            # Diseño técnico de la solución
-│   ├── review-design/     # Auditoría de diseño técnico
+│   ├── review-design/     # Auditoría de arquitectura
 │   ├── generate-bdd/      # Generación de BDD en español
 │   ├── review-spec/       # Auditoría de BDD + evals
 │   ├── review-test/       # Auditoría de calidad de tests
@@ -55,6 +68,7 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 │   ├── commit/            # Commits semánticos
 │   ├── task-add/          # Registro de tareas en backlog
 │   ├── bug-add/           # Registro de bugs en backlog
+│   ├── orquestar/         # Bucle de la idea al producto
 │   └── ...
 ├── workflows/             # Proxies para slash commands (/task-dev, /bug-fix, etc.)
 └── README.md

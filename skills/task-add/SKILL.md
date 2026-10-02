@@ -16,7 +16,7 @@ Crea y registra una nueva tarea de backlog siguiendo el formato Issue-as-Code v3
 
 Una **tarea padre representa una única capacidad, mejora o cambio que un usuario percibe como valioso por sí mismo** — la unidad mínima entregable. **Prueba rápida:** si describes el resultado con "permite X **y además** Y", probablemente sean varias tareas padre, no una. Agrupar por afinidad ("todo el login") es una épica difusa; cuando dudes, separa.
 
-**Tareas hijas** (Componente) son la descomposición técnica entre componentes. Un cambio de 3 componentes, un solo valor de usuario → una padre + 3 hijas.
+**Tareas hijas**: solo si la maestra necesita descomponerse en bloques que conviene tratar por separado: por componente afectado (un cambio de 3 componentes con un solo valor de usuario → una padre + 3 hijas), o por objetivo interno, sin valor propio para el usuario pero aislable (p. ej. una migración o un refactor previo). Si no, la maestra lleva directamente sus criterios técnicos y no tiene hijas.
 
 ## 📋 Pasos de la Skill
 
@@ -24,7 +24,7 @@ Una **tarea padre representa una única capacidad, mejora o cambio que un usuari
 - **Master**: Si representa una capacidad o valor del usuario final.
   - Ruta: `docs/plan/tasks/` (según `task_config.yaml`).
   - ID: `T-[PRJ]-XXXX` (autoincremental).
-- **Componente**: Descomposición técnica del cambio para un componente.
+- **Hija** (solo si hay que descomponer): un bloque de la maestra, por componente o por objetivo interno.
   - Ruta: Definida en `task_config.yaml` para el componente (service, app o package).
   - ID: `T-[PRJ]-[COMP]-XXXX` (autoincremental). Debe vincularse a su Master (`parent_id`).
 
@@ -45,10 +45,6 @@ type: funcional | despliegue | diseño | tools | infra
 weight: [integer]
 version: ""
 status: backlog
-effort_unit: h
-estimated_effort: 0
-remaining_effort: 0
-actual_effort: 0
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
 ---
@@ -61,11 +57,11 @@ updated_at: YYYY-MM-DD
 ## 📋 Criterios de Aceptación (Nivel Máster)
 - [ ] **CA-M-1:** [Criterio]
 
-## 🛠 Tareas de Componente
+## 🛠 Tareas Hijas (solo si hay descomposición)
 - [T-[PRJ]-[COMP]-XXXX: Título]
 ```
 
-**Para Tarea de Componente:**
+**Para Tarea Hija:**
 ```markdown
 ---
 id: T-[PRJ]-[COMP]-XXXX
@@ -75,10 +71,6 @@ parent_id: T-[PRJ]-XXXX
 weight: [integer]
 version: ""
 status: backlog
-effort_unit: h
-estimated_effort: 0
-remaining_effort: 0
-actual_effort: 0
 created_at: YYYY-MM-DD
 updated_at: YYYY-MM-DD
 ---

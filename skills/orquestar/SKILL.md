@@ -17,6 +17,7 @@ inputs:
   python .agents/skills/orquestar/orquestar.py --harness claude|codex|gemini|cursor [--test "<suite>"] [--idea "<texto>"]
   ```
   Cada paso es una ejecución nueva del arnés, con contexto limpio. El script deduce el estado del disco, lanza el paso, comprueba que hubo progreso y repite. `--estado` solo muestra la fase; `--cmd "<plantilla con {prompt}>"` admite otro arnés.
+- **Métricas.** Cada paso añade una línea a `orquestar_metricas.jsonl` (excluido de git): paso, ID, rama, duración y, con `claude`, turnos, tokens por modelo, coste a precio de lista y subagentes. El consumo de una tarea es la suma de sus líneas. Con `claude`, `--presupuesto <usd>` limita el gasto de cada paso.
 - **A mano.** En cualquier arnés: deduce el paso con la tabla de estado y ejecuta **uno**.
 
 Los arneses se lanzan sin confirmaciones de permisos: ejecútalo en un contenedor o VM.
@@ -34,12 +35,15 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Sin `<docs>/platform_review.md` | paso `revisar-plataforma` |
 | `platform_review.md` con `RECHAZADO` | PARAR: plataforma rechazada |
 | Sin `work_plan.md` o backlog vacío | paso `work-plan` |
+| Rama `release/vX.Y` recién abierta (ninguna tarea empezada), con deuda registrada pendiente y sin `docs/review/versions/vX.Y-deuda.md` | paso `revisar-deuda` |
 | Rama `release/vX.Y` con un ID `completed` sin reporte en `docs/review/code_reviews/` | paso `revisar-tarea` |
 | Rama `release/vX.Y` con tareas o bugs pendientes | paso `task-dev` / `bug-fix` del ID en curso o de menor `weight` |
 | Rama `release/vX.Y` sin pendientes ni `docs/review/versions/vX.Y-arquitectura.md` | paso `revisar-version` |
 | Rama `release/vX.Y` sin pendientes y revisada | PARAR: revisión de versión |
 | Sin rama abierta y con pendientes | paso `start-version` de la menor versión pendiente |
-| Todo cerrado | FIN |
+| Todo cerrado (la deuda registrada, sin versión, no cuenta) | FIN, con el número de mejoras pendientes |
+
+**Deuda registrada** = bug pendiente sin versión (lo crea `/bug-add` a partir de un hallazgo de Hades con destino `registrar`). El bucle no la trabaja hasta que `revisar-deuda` la incluye en una versión.
 
 El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cierra con la suite en rojo (`--test`) o al llegar a `--max-pasos`.
 
@@ -49,7 +53,7 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 2. **Sin preguntas.** Donde una skill pida algo al usuario, elige la opción recomendada o el valor por defecto y regístralo (DEC/SUP en el documento de la fase, o en la revisión de versión).
 3. **Sin HITL.** `/task-dev` y `/bug-fix` no se detienen en sus HITL: lo que se habría validado va a la revisión de versión. Las revisiones de Hades se mantienen.
 4. **Árbol limpio y señal al final.** El artefacto de «Hecho cuando» se escribe lo último, justo antes del commit con que termina cada paso. Las fases de planificación commitean en la rama actual (`docs(plan): <paso>`).
-5. **Bloqueo tras 3 rechazos de Hades.** Si solo quedan hallazgos 🟡/🔵, cierra y llévalos como deuda a la revisión de versión. Si persisten 🔴/🟠: guarda los cambios en la rama `wip/<ID>`, devuelve `release/vX.Y` al estado previo a la tarea, pon `status: blocked` y anota el motivo y los hallazgos en la revisión de versión. Una tarea que dependa de una bloqueada se bloquea sin intentarla.
+5. **Bloqueo tras 3 rechazos de Hades.** Si solo quedan hallazgos 🟡/🔵, cierra y aplica su destino (`resolver`, `registrar` o `descartar`). Si persisten 🔴/🟠: guarda los cambios en la rama `wip/<ID>`, devuelve `release/vX.Y` al estado previo a la tarea, pon `status: blocked` y anota el motivo y los hallazgos en la revisión de versión. Una tarea que dependa de una bloqueada se bloquea sin intentarla.
 6. **Reportes con el ID maestro.** Pasa a Hades el ID de la tarea o bug maestro, para que el reporte sea `docs/review/code_reviews/<ID>-code-review.md`.
 7. **Sin fingir.** Si no puedes completar el paso, explica el bloqueo en tu salida y no cambies estados: el bucle lo detectará.
 
@@ -57,23 +61,25 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 |---|---|---|---|
 | `ciclo-requisitos` | `/ciclo-requisitos` sobre `<docs>/requirements.md` | sin ronda de preguntas de la fase 0 | existe `req_analysis.md` |
 | `platform-plan` | `/platform-plan` | — | existe `platform_plan.md` |
-| `revisar-plataforma` | Hades con los pilares de `/review-design` sobre `platform_plan.md`, frente a los requisitos; señala también lo que sobra para el tamaño del producto; corrige y repite (máx. 3) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
+| `revisar-plataforma` | Hades `/review-design` sobre `platform_plan.md`, frente a los requisitos; corrige y repite (máx. 3) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
 | `work-plan` | `/work-plan` | — | `work_plan.md` y tareas con versión en el backlog |
 | `start-version` | `/start-version` con la versión indicada | — | existe `release/vX.Y` |
+| `revisar-deuda` | Repasa la deuda registrada frente al código actual y a las tareas de vX.Y | **incluir** la que afecta a lo que toca esta versión (mismos módulos o una tarea citada en `origen`): `version: vX.Y.0`, `status: planned` y peso que la ordena antes de las tareas a las que afecta; **cancelar** con motivo la ya resuelta o irrelevante; **dejar** el resto como mejora futura. La deuda no relacionada con la versión no se incluye: la decide el humano | existe `vX.Y-deuda.md` con las tres listas |
 | `task-dev` | `/task-dev <ID>` en modo orquestado | — | tarea `completed` y commit |
 | `bug-fix` | `/bug-fix <ID>` en modo orquestado | — | bug `completed` y commit |
-| `revisar-tarea` | Hades `/review-code` sobre los commits del ID (y `/review-design` si no hubo diseño); corrige y repite (máx. 3, regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
-| `revisar-version` | Hades con `/review-design` y `/review-code` sobre `git diff main...release/vX.Y`: duplicados entre tareas, patrones incoherentes, capas mezcladas y lo que sobra para el tamaño del producto | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → deuda en la revisión | existe `vX.Y-arquitectura.md` |
+| `revisar-tarea` | Hades `/review-code` sobre los commits del ID; corrige y repite (máx. 3, regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
+| `revisar-version` | Hades `/review-code` sobre `git diff main...release/vX.Y`, solo lo transversal: duplicados entre tareas, patrones incoherentes y capas mezcladas. Si el plan de plataforma cambió en la versión, además Hades `/review-design` sobre esas `DEC` | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → su destino (`registrar` → deuda registrada) | existe `vX.Y-arquitectura.md` |
 
 `/release` no es un paso del bucle: lo ejecuta el humano tras la revisión.
 
 ## 👤 Revisión de versión
 
 Cuando el bucle para con «Versión vX.Y terminada»:
-1. Lee `docs/review/versions/vX.Y-revision.md` (y `vX.Y-arquitectura.md`) y prueba el producto siguiendo sus pasos de validación.
+1. Lee `docs/review/versions/vX.Y-revision.md` (y `vX.Y-arquitectura.md` y `vX.Y-deuda.md`) y prueba el producto siguiendo sus pasos de validación.
 2. **Defectos:** regístralos con `/bug-add` en la rama `release/vX.Y` y relanza; el bucle los corrige con `/bug-fix`.
 3. **Bloqueadas:** desbloquéala (pista o simplificación, `status: planned`), muévela de versión o cancélala.
-4. **Conforme:** ejecuta `/release` y relanza; el bucle abre la siguiente versión.
+4. **Mejoras:** para meter en una versión deuda que el bucle no incluyó, ponle esa versión.
+5. **Conforme:** ejecuta `/release` y relanza; el bucle abre la siguiente versión.
 
 Formato de cada entrada (una por tarea o bug, la añade `/task-dev` o `/bug-fix`):
 
@@ -81,7 +87,7 @@ Formato de cada entrada (una por tarea o bug, la añade `/task-dev` o `/bug-fix`
 ## T-PRJ-XXXX · Título
 - **Especificación**: escenarios añadidos (archivo) y resumen
 - **Diseño**: decisiones relevantes (enlace a docs/design/…)
-- **Hades**: veredictos y deuda técnica pendiente
+- **Hades**: veredictos y bugs de deuda registrados
 - **Validación funcional**: pasos concretos para comprobarlo (comando, URL, datos)
 - **Decisiones sin preguntar**: opciones tomadas por defecto
 ```

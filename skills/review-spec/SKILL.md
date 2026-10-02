@@ -10,12 +10,12 @@ outputs:
 
 # Skill: Specification Review (/review-spec)
 
-Audita solo la especificación del delta (`.feature` y evals), como si el diseño y el código no existieran: si describe bien el comportamiento, no cómo se implementa. Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
+Audita solo la especificación del delta (`.feature` y evals), como si el diseño y el código no existieran: si describe bien el comportamiento, no cómo se implementa. Los escenarios que la tarea trae ya aprobados de una fase previa no se vuelven a revisar: solo lo que añade o modifica respecto a ellos. Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
 
 **Obligatorias (si falla alguna, 🔴 CRÍTICO):**
 - **No regresión**: no elimina ni altera escenarios existentes.
 - **Coherencia**: no contradice decisiones ni contratos ya documentados.
-- **Trazabilidad**: cada `@CA-*` existe en la tarea o bug de origen.
+- **Trazabilidad**: cada `@CA-*` existe en la tarea o bug de origen y corresponde al criterio que el escenario prueba.
 - **Delta real**: describe comportamiento nuevo o modificado, sin duplicados.
 
 **Evalúa (1-10 cada uno):**

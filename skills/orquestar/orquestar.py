@@ -7,20 +7,24 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime
 from pathlib import Path
 
 HARNESS = {
-    'claude': ['claude', '-p', '{prompt}', '--dangerously-skip-permissions'],
+    'claude': ['claude', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
     'codex': ['codex', 'exec', '--full-auto', '{prompt}'],
     'gemini': ['gemini', '--yolo', '-p', '{prompt}'],
     'cursor': ['cursor-agent', '-p', '--force', '{prompt}'],
 }
 SKILL = Path(__file__).resolve().parent / 'SKILL.md'
+METRICAS = 'orquestar_metricas.jsonl'
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
@@ -67,6 +71,11 @@ def backlog(root):
     return out
 
 
+def deuda(items):
+    """Deuda registrada: bugs pendientes sin versión, fuera del bucle hasta que se incluyan."""
+    return [i for i in items if i['paso'] == 'bug-fix' and i['status'] not in FUERA and not vkey(i['version'])]
+
+
 def vkey(v):
     m = re.match(r'v?(\d+)\.(\d+)', v or '')
     return (int(m[1]), int(m[2])) if m else None
@@ -109,6 +118,9 @@ def estado(root, docs):
     for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0)):
         v = rama.split('/')[1]
         suyas = [i for i in items if vkey(i['version']) == vkey(v)]
+        recien_abierta = all(i['status'] in ('backlog', 'planned') for i in suyas)
+        if recien_abierta and deuda(items) and not (root / f'docs/review/versions/{v}-deuda.md').exists():
+            return ('PASO', 'revisar-deuda', v, rama)
         sin_revisar = [i for i in suyas if i['status'] == 'completed' and not revisada(root, i['id'])]
         if sin_revisar:
             return ('PASO', 'revisar-tarea', sin_revisar[0]['id'], rama)
@@ -123,7 +135,9 @@ def estado(root, docs):
                          + (f' (bloqueadas: {", ".join(bloqueadas)})' if bloqueadas else '')
                          + ': registra defectos con /bug-add o cierra con /release, y relanza.')
     if not pendientes:
-        return ('FIN', 'Todas las tareas con versión están cerradas.')
+        mejoras = len(deuda(items))
+        return ('FIN', 'Todas las tareas con versión están cerradas'
+                       + (f'; quedan {mejoras} mejoras registradas como deuda.' if mejoras else '.'))
     v = min(vkey(i['version']) for i in pendientes)
     return ('PASO', 'start-version', f'v{v[0]}.{v[1]}', None)
 
@@ -138,7 +152,50 @@ def comando(a, prompt):
     exe = shutil.which(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
-    return [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+    cmd = [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+    if a.presupuesto and json_claude(a):
+        cmd += ['--max-budget-usd', str(a.presupuesto)]
+    return cmd
+
+
+def json_claude(a):
+    return a.harness == 'claude' and not a.cmd
+
+
+def ejecutar(a, root, prompt):
+    """Lanza el paso y devuelve (código, métricas). Con claude, lee el JSON final."""
+    inicio = time.monotonic()
+    if not json_claude(a):
+        codigo = subprocess.run(comando(a, prompt), cwd=root).returncode
+        return codigo, {'duracion_s': round(time.monotonic() - inicio)}
+    r = subprocess.run(comando(a, prompt), cwd=root, capture_output=True, text=True,
+                       encoding='utf-8', errors='replace')
+    m = {'duracion_s': round(time.monotonic() - inicio)}
+    try:
+        d = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        print(r.stdout, r.stderr, sep='\n', flush=True)
+        return r.returncode, m
+    print(d.get('result', ''), flush=True)
+    m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
+             subagentes=(d.get('subagent_stats') or {}).get('spawned'), error=d.get('is_error'),
+             modelos={k: {'entrada': u.get('inputTokens'), 'salida': u.get('outputTokens'),
+                          'cache_leida': u.get('cacheReadInputTokens'),
+                          'cache_escrita': u.get('cacheCreationInputTokens'), 'coste_usd': u.get('costUSD')}
+                      for k, u in (d.get('modelUsage') or {}).items()})
+    return r.returncode, m
+
+
+def registrar(root, fila):
+    """Añade una línea de métricas, con el fichero excluido de git para no ensuciar el árbol."""
+    exclude = Path(git('rev-parse', '--git-path', 'info/exclude'))
+    exclude = exclude if exclude.is_absolute() else root / exclude
+    if METRICAS not in (exclude.read_text(encoding='utf-8') if exclude.exists() else ''):
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        with exclude.open('a', encoding='utf-8') as f:
+            f.write(f'\n{METRICAS}\n')
+    with (root / METRICAS).open('a', encoding='utf-8') as f:
+        f.write(json.dumps(fila, ensure_ascii=False) + '\n')
 
 
 def main():
@@ -149,6 +206,7 @@ def main():
     ap.add_argument('--test', help='comando de la suite; debe pasar al cerrar cada tarea')
     ap.add_argument('--idea', help='texto de la idea; crea <docs>/requirements.md si no existe')
     ap.add_argument('--max-pasos', type=int, default=100)
+    ap.add_argument('--presupuesto', type=float, help='gasto máximo por paso en USD (solo claude)')
     ap.add_argument('--reintentos', type=int, default=2, help='pasos seguidos sin progreso antes de parar')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y sale')
     a = ap.parse_args()
@@ -178,7 +236,10 @@ def main():
         cerradas = {i['id'] for i in backlog(root) if i['status'] in CERRADO}
         prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '')
-        codigo = subprocess.run(comando(a, prompt), cwd=root).returncode
+        codigo, m = ejecutar(a, root, prompt)
+        registrar(root, {'fecha': datetime.now().isoformat(timespec='seconds'), 'paso': paso, 'id': arg,
+                         'rama': git('branch', '--show-current'), 'arnes': a.cmd or a.harness,
+                         'codigo': codigo, **m})
         if codigo:
             print(f'[orquestar] PARAR: el arnés terminó con código {codigo} '
                   f'(¿límite de uso, autenticación, red?). Relanza cuando se resuelva.')

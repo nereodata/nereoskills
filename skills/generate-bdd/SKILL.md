@@ -51,8 +51,8 @@ Característica: Título (Español)
   - Exentos los `@hitl` (validación humana, sin suite que ejecutar): deben declarar qué se
     observa y qué resultado lo daría por inválido.
 - **Etiquetas de criterio.** Si etiquetas con un criterio de aceptación (`@CA-*` o equivalente),
-  ese criterio debe existir en la tarea o bug de origen. Una etiqueta que no referencia nada
-  simula trazabilidad.
+  ese criterio debe existir en la tarea o bug de origen y ser el que el escenario prueba. Una
+  etiqueta que no referencia nada, o que referencia otro criterio, simula trazabilidad.
 - **Conflictos.** Si el comportamiento que especificas contradice una decisión ya documentada
   (nota de diseño, comentario de contrato, test que la fija), no lo resuelvas por tu cuenta:
   señálalo con `archivo:línea` y detente. Elegir entre dos reglas incompatibles es una decisión

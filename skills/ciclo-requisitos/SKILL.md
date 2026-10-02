@@ -21,7 +21,7 @@ outputs:
 /ciclo-requisitos → /platform-plan → /work-plan → /task-dev
 ```
 
-Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen las skills siguientes) y **no** escribe `.feature`: los crea `/work-plan` cuando existen las tareas cuyos `CA-*` referencian (regla de `/generate-bdd`).
+Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen las skills siguientes) y **no** escribe `.feature`: los crea `/task-dev` cuando desarrolla las tareas cuyos `CA-*` referencian (regla de `/generate-bdd`).
 
 **Coste:** ~8 subagentes en el caso típico, 11 como máximo.
 

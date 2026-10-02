@@ -37,7 +37,9 @@ juicio: se resuelve buscando, no recordando.
   comportamiento o quedan invalidados. **Si un test que hoy pasa tendrá que modificarse, eso es un
   cambio de contrato**: nómbralo aquí y di qué se hace con él. No es un paso de la implementación.
 - **Decisiones contradichas.** Declara toda decisión ya documentada que este diseño contradiga,
-  con `archivo:línea`. Si no hay ninguna, dilo explícitamente.
+  con `archivo:línea`. Si no hay ninguna, dilo explícitamente. Si lo contradicho es la
+  arquitectura (capas, stack o decisiones del plan de plataforma), añade la `DEC` que la cambia al
+  plan de plataforma en el mismo cambio: sin ella, `/review-code` lo rechaza.
 - **Sistema de referencia.** Si el comportamiento depende de una unidad o referencia (zona
   horaria, moneda, locale, unidad de medida), indica cuál se usa y en qué frontera se convierte.
 - **Camino caliente.** Si el cambio toca una consulta o una ruta de ejecución frecuente, indica

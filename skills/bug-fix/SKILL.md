@@ -14,7 +14,6 @@ dependencies:
   - generate-bdd
   - review-spec
   - design
-  - review-design
   - review-test
   - review-code
   - manage-docs
@@ -38,9 +37,9 @@ Preguntar al usuario si el bug es urgente (hotfix) o no (release):
 - Actualizar el campo `version` del bug con la versión de la rama.
 
 ## 1. Inicialización (inline)
-- Cargar metadatos del bug padre e hijos (componentes).
-- Cambiar `status` a `in_progress` en el padre e hijos.
-- Establecer esfuerzos (`actual_effort`, `remaining_effort`).
+- Cargar metadatos del bug y sus hijos, si los tiene.
+- Cambiar `status` a `in_progress` en el bug y sus hijos.
+- Si es deuda registrada (`origen`), lee el reporte de origen para entender el hallazgo.
 
 ## 2. Triaje de Alcance (inline)
 **Filosofía Delta-First**: Inspecciona el código actual y determina la causa raíz antes de corregir. Analiza el bug y determina qué subfases **realmente aportan valor** (no todas aplican).
@@ -60,32 +59,35 @@ Crea un checklist explícito en `task.md` marcando qué subfases ejecutar:
 ### Subfase A: Definición [EXEC/SKIP]
 1. `/generate-bdd`: Escenarios BDD en español → `.feature` existentes (no nominales). Solo si bug destapa requisito faltante/alterado.
 2. Evals: Golden Tests en Gherkin (aislados).
-3. `Hades /review-spec` (aislado, ×3 iteraciones máx).
+3. `Hades /review-spec` (aislado, ×3 iteraciones máx) sobre los escenarios añadidos o modificados.
 4. **HITL**: Validar reproducción.
 
 ### Subfase B: Diseño [EXEC/SKIP]
 1. `/design`: Analizar bug + código → cambios (`[NEW]`, `[MODIFY]`, `[DELETE]`), SOLID/DRY/KISS/YAGNI, coherencia.
-   - Output: `docs/design/[ID]-design.md`.
-2. `Hades /review-design` (aislado, ×3 iteraciones máx).
-3. **HITL (Opcional)**: Validar diseño.
+   - Output: `docs/design/[ID]-design.md`. Sin revisión de Hades: `/review-code` comprueba después que el código lo sigue.
+   - Si se desvía de la arquitectura, añade la `DEC` al plan de plataforma en este mismo cambio.
+2. **HITL (Opcional)**: Validar diseño.
 
 ### Subfase C: Desarrollo [EXEC/SKIP]
 **Red Phase:**
 1. Steps + unit tests que capturen fallo.
-2. Verificar que fallan (solo tests relevantes).
-3. `Hades /review-test` (aislado, ×3 iteraciones máx).
+2. Verificar que fallan (solo tests relevantes) y guardar esa salida. En deuda sin fallo reproducible (p. ej. un refactor), no hay rojo: los tests existentes deben seguir en verde.
+3. Lint y tipado limpios sobre las pruebas.
+4. `Hades /review-test` (aislado, ×3 iteraciones máx), con la salida del rojo.
 
 **Fix Phase:**
 1. Corrección mínima (docstrings sí, inline comments no).
 2. Tests relevantes + suite completa al final.
+3. Lint y tipado limpios sobre todo el delta.
 
 ### Subfase D: QA [EXEC/SKIP]
-1. `Hades /review-code` (aislado, ×3 iteraciones máx).
+1. `Hades /review-code` (aislado, ×3 iteraciones máx). Obligatoria si hay cambios de código de producción.
 2. **HITL**: Validar funcionalidad e integración visual.
 
 ### Subfase E: Documentación [EXEC/SKIP]
 - `/manage-docs`: Actualizar según `docs_config.yaml` (minimalista, inline).
 
 ### Subfase F: Cierre [EXEC]
-1. `/commit`: Commit semántico `fix([ID])` (inline).
-2. Cierre: Esfuerzos reales, `status: completed` padre + hijas (inline).
+1. **Deuda**: según el destino que marque Hades en cada 🟡/🔵: `resolver` se corrige; `registrar` → `/bug-add` como deuda registrada (sin versión, `origen` = este ID y su reporte); `descartar` no se hace nada.
+2. Cierre: `status: completed` en el bug y sus hijos (inline).
+3. `/commit`: Commit semántico `fix([ID])` (inline).
