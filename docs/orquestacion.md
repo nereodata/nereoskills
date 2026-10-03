@@ -47,6 +47,9 @@ flowchart TD
   sel -- sí --> td["task-dev / bug-fix del ID<br/>(en curso o menor weight)"]
   td --> rt["revisar-tarea<br/>solo si falta el reporte de review-code"]
   rt --> sel
+  td -. "bloqueada tras 3 rechazos" .-> ab["analizar-bloqueo<br/>contexto limpio: ni desarrollador ni Hades"]
+  ab -- "rescate con pista (máx. 2)" --> sel
+  ab -- "bloqueo: decisión crítica o algo externo" --> hum
   sel -- no --> rv["revisar-version<br/>Hades · review-code: duplicados y coherencia entre tareas<br/>Hades · review-design: solo si cambió el plan de plataforma"]
   rv --> q3{"¿🔴/🟠?"}
   q3 -- sí --> ba["bug-add en vX.Y"]
@@ -70,7 +73,7 @@ flowchart TD
   class req,pp,wp,sv,td,ba paso
   class rp hades
   class rt,rv nuevo
-  class rd,qd pnuevo
+  class rd,qd,ab pnuevo
   class hum,ba2,desb,rel humano
   class s1,s2 stop
 ```
@@ -96,7 +99,7 @@ flowchart TD
   q -- "con DEC o no se desvía" --> docs["E · manage-docs"]
   docs --> deu["F · deuda según Hades<br/>resolver · registrar como bug · descartar"]
   deu --> cie["cierre + entrada en vX.Y-revision.md<br/>y commit"]
-  rs -. "3 rechazos con 🔴/🟠" .-> blk["wip/ID + status: blocked"]
+  rs -. "3 rechazos con 🔴/🟠" .-> blk["wip/ID-n + status: blocked<br/>→ analizar-bloqueo"]
   rtst -. "3 rechazos con 🔴/🟠" .-> blk
   rc -. "3 rechazos con 🔴/🟠" .-> blk
 

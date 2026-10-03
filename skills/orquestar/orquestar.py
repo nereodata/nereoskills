@@ -30,6 +30,7 @@ PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
 PROPIOS = (METRICAS, LOG, PID, PARADA, ESPERA)  # ficheros del bucle, excluidos de git
+RESCATES = 2  # rescates máximos por tarea tras un bloqueo
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
@@ -71,7 +72,7 @@ def backlog(root):
                 continue
             peso = fm.get('weight', '')
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
-                        'version': fm.get('version', ''),
+                        'version': fm.get('version', ''), 'bloqueada_por': fm.get('bloqueada_por', ''),
                         'weight': int(peso) if peso.lstrip('-').isdigit() else 0})
     return out
 
@@ -95,6 +96,13 @@ def revisada(root, iid):
     """Hades solo escribe el reporte de review-code si aprueba (o N/A sin código)."""
     d = root / 'docs/review/code_reviews'
     return d.is_dir() and any(d.glob(f'{iid}*'))
+
+
+def analisis(root, iid):
+    """(análisis de bloqueo hechos, cuántos acabaron en rescate) de un ID."""
+    d = root / 'docs/review/bloqueos'
+    hechos = sorted(d.glob(f'{iid}-*.md')) if d.is_dir() else []
+    return len(hechos), sum('RESCATE' in primera_linea(f) for f in hechos)
 
 
 def estado(root, docs):
@@ -129,6 +137,11 @@ def estado(root, docs):
         sin_revisar = [i for i in suyas if i['status'] == 'completed' and not revisada(root, i['id'])]
         if sin_revisar:
             return ('PASO', 'revisar-tarea', sin_revisar[0]['id'], rama)
+        for i in suyas:
+            hechos, rescates = analisis(root, i['id'])
+            if (i['status'] == 'blocked' and not i['bloqueada_por']
+                    and hechos == rescates and rescates < RESCATES):
+                return ('PASO', 'analizar-bloqueo', i['id'], rama)
         pend = [i for i in suyas if i['status'] not in FUERA]
         if pend:
             i = min(pend, key=lambda i: (i['status'] != 'in_progress', i['weight']))
