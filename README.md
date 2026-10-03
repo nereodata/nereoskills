@@ -32,14 +32,14 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 ```
 📋 Init          → inline:   delta-first, status, versión
 📝 Especificación → inline:   BDD del delta (generate-bdd)
-🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado, ×3)
+🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado, hasta atasco)
                  ↓ [HITL: validación de especificación]
 📐 Diseño        → inline:   diseño de la solución (design), sin revisión
 🔴 Red           → inline:   tests que fallan + lint/tipado limpios
-🔎 review-test   → Hades:    audita calidad de tests (aislado, ×3)
+🔎 review-test   → Hades:    audita calidad de tests (aislado, hasta atasco)
 🟢 Green/Fix     → inline:   implementación mínima + suite completa + lint/tipado
                  ↓ [HITL: validación funcional]
-🔎 review-code   → Hades:    audita código y conformidad (aislado, ×3)
+🔎 review-code   → Hades:    audita código y conformidad (aislado, hasta atasco)
 📄 Docs          → inline:   manage-docs
 ✅ Cierre        → inline:   deuda (resolver/registrar/descartar), cierre de tareas
 💾 Commit        → inline:   commit semántico
@@ -47,7 +47,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md).
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`.
 
 ---
 

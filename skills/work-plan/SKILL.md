@@ -30,7 +30,8 @@ Genera un plan de desarrollo basado EXCLUSIVAMENTE en la arquitectura de platafo
 2. **Registro** con `/task-add`, por bloque:
    - **Maestra**: título, objetivo de negocio y criterios `CA-M-n` (si hay `CA-Fxx-nn` de origen, cítalo en el criterio).
    - **Hijas**, solo si hay descomposición: objetivo técnico y criterios `CA-n` en forma de escenario.
-3. **Peso**: Ascendente, desde un valor **superior a 100** (o el indicado por el usuario), con **10 puntos** de separación (110, 120, 130...).
+3. **Dependencias**: cada maestra declara en `depende_de` las maestras cuyo resultado necesita (ver `/task-add`), calculadas una vez para todo el plan: sin ciclos y sin depender de una tarea de una versión posterior. El orquestador las resuelve por código.
+4. **Peso**: Ascendente, desde un valor **superior a 100** (o el indicado por el usuario), con **10 puntos** de separación (110, 120, 130...).
 
 Los `.feature` y evals no se crean aquí: los crea `/task-dev` en su Subfase A al desarrollar cada tarea, a partir de sus criterios y de los escenarios de origen que citen.
 

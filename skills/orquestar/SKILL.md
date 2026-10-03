@@ -25,9 +25,13 @@ inputs:
 - **estado**: ejecuta `orquestar.py --estado` (fase actual, si hay bucle en marcha y consumo acumulado) y resume el final de `orquestar.log`. Si el bucle paró para la revisión humana, explica qué toca hacer (ver «Revisión de versión»).
 - **parar**: ejecuta `orquestar.py --parar`; el bucle termina el paso en curso y para. Relanzar sigue donde iba.
 
-Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test`, `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`, `--espera-max`. Sin `--fondo` corre en primer plano.
+Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test` (por defecto, `validation.command` de `task_config.yaml`), `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`, `--espera-max`.
 
-**Métricas.** Cada paso añade una línea a `orquestar_metricas.jsonl`: paso, ID, rama, duración y, con `claude`, turnos, tokens por modelo, coste a precio de lista y subagentes. El consumo de una tarea es la suma de sus líneas. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar` y las métricas) quedan excluidos de git.
+**Roles** (`orchestration.json` en la raíz, opcional): `development`, `hades`, `clio` y `cronos`, cada uno con `harness` (`claude` o `codex`), `model` y `effort` (y `instructions` si no es `.agents/agents/<rol>.md`). `development` fija el arnés y el modelo de los pasos; si hay `hades`, las revisiones se lanzan con `orquestar.py --agente hades --prompt-file <mandato>`, que usa su arnés y modelo y registra su consumo.
+
+**Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador, Hades y el bucle al cerrar cada tarea. Sin `--fondo` corre en primer plano.
+
+**Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
 ## 🧭 Estado
 
@@ -42,14 +46,19 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Sin `<docs>/platform_review.md` | paso `revisar-plataforma` |
 | `platform_review.md` con `RECHAZADO` | PARAR: plataforma rechazada |
 | Sin `work_plan.md` o backlog vacío | paso `work-plan` |
+| Alguna tarea maestra abierta sin el campo `depende_de` | paso `calcular-dependencias` |
+| `depende_de` con IDs inexistentes o ciclos | PARAR: dependencias inválidas |
 | Rama `release/vX.Y` recién abierta (ninguna tarea empezada), con deuda registrada pendiente y sin `docs/review/versions/vX.Y-deuda.md` | paso `revisar-deuda` |
 | Rama `release/vX.Y` con un ID `completed` sin reporte en `docs/review/code_reviews/` | paso `revisar-tarea` |
-| Rama `release/vX.Y` con un ID `blocked` (no por dependencia) cuyo último bloqueo no se ha analizado y con menos de 2 rescates | paso `analizar-bloqueo` |
-| Rama `release/vX.Y` con tareas o bugs pendientes | paso `task-dev` / `bug-fix` del ID en curso o de menor `weight` |
-| Rama `release/vX.Y` sin pendientes ni `docs/review/versions/vX.Y-arquitectura.md` | paso `revisar-version` |
-| Rama `release/vX.Y` sin pendientes y revisada | PARAR: revisión de versión |
+| Rama `release/vX.Y` con un ID `blocked` cuyo último bloqueo no se ha analizado y con menos de 2 rescates | paso `analizar-bloqueo` (primero el que más tareas retiene) |
+| Rama `release/vX.Y` con pendientes elegibles (todas sus `depende_de` completadas) | paso `task-dev` / `bug-fix`: el ID en curso, si no el que más tareas desbloquea, y a igualdad el de menor `weight` |
+| Rama `release/vX.Y` sin elegibles ni `docs/review/versions/vX.Y-arquitectura.md` | paso `revisar-version` |
+| Rama `release/vX.Y` revisada, con bloqueadas o en espera | PARAR: bloqueos de la versión, con cada tarea en espera y la causa raíz que la retiene |
+| Rama `release/vX.Y` revisada y sin pendientes | PARAR: revisión de versión |
 | Sin rama abierta y con pendientes | paso `start-version` de la menor versión pendiente |
 | Todo cerrado (la deuda registrada, sin versión, no cuenta) | FIN, con el número de mejoras pendientes |
+
+**En espera** = pendiente con alguna `depende_de` sin completar. Se calcula en cada vuelta; no se escribe ni se lanza nada para ella: cuando su dependencia se completa (o se rescata y completa), vuelve a ser elegible sola.
 
 **Deuda registrada** = bug pendiente sin versión (lo crea `/bug-add` a partir de un hallazgo de Hades con destino `registrar`). El bucle no la trabaja hasta que `revisar-deuda` la incluye en una versión.
 
@@ -63,7 +72,7 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 2. **Sin preguntas.** Donde una skill pida algo al usuario, elige la opción recomendada o el valor por defecto y regístralo (DEC/SUP en el documento de la fase, o en la revisión de versión).
 3. **Sin HITL.** `/task-dev` y `/bug-fix` no se detienen en sus HITL: lo que se habría validado va a la revisión de versión. Las revisiones de Hades se mantienen.
 4. **Árbol limpio y señal al final.** El artefacto de «Hecho cuando» se escribe lo último, justo antes del commit con que termina cada paso. Las fases de planificación commitean en la rama actual (`docs(plan): <paso>`).
-5. **Bloqueo tras 3 rechazos de Hades.** Si solo quedan hallazgos 🟡/🔵, cierra y aplica su destino (`resolver`, `registrar` o `descartar`). Si persisten 🔴/🟠: guarda los cambios en la rama `wip/<ID>-<n>` (n = intento), devuelve `release/vX.Y` al estado previo a la tarea, pon `status: blocked` y anota el motivo y los hallazgos en la revisión de versión. No decides tú si el bloqueo es salvable: lo analiza el paso `analizar-bloqueo`, con contexto limpio. Una tarea que dependa de una bloqueada se bloquea sin intentarla, con `bloqueada_por: <ID>`.
+5. **Bloqueo por atasco.** Las revisiones de Hades siguen la regla de atasco de `/task-dev` (no un número fijo de rondas). Si solo quedan hallazgos 🟡/🔵, cierra y aplica su destino (`resolver`, `registrar` o `descartar`). Si hay atasco con 🔴/🟠: guarda los cambios en la rama `wip/<ID>-<n>` (n = intento), devuelve `release/vX.Y` al estado previo a la tarea, pon `status: blocked` y anota el motivo y los hallazgos en la revisión de versión. No decides tú si el bloqueo es salvable: lo analiza el paso `analizar-bloqueo`, con contexto limpio. No toques las tareas que dependen de ella: el bucle las deja en espera.
 6. **Reportes con el ID maestro.** Pasa a Hades el ID de la tarea o bug maestro, para que el reporte sea `docs/review/code_reviews/<ID>-code-review.md`.
 7. **Sin fingir.** Si no puedes completar el paso, explica el bloqueo en tu salida y no cambies estados: el bucle lo detectará.
 
@@ -71,14 +80,15 @@ El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cie
 |---|---|---|---|
 | `ciclo-requisitos` | `/ciclo-requisitos` sobre `<docs>/requirements.md` | sin ronda de preguntas de la fase 0 | existe `req_analysis.md` |
 | `platform-plan` | `/platform-plan` | — | existe `platform_plan.md` |
-| `revisar-plataforma` | Hades `/review-design` sobre `platform_plan.md`, frente a los requisitos; corrige y repite (máx. 3) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
-| `work-plan` | `/work-plan` | — | `work_plan.md` y tareas con versión en el backlog |
+| `revisar-plataforma` | Hades `/review-design` sobre `platform_plan.md`, frente a los requisitos; corrige y repite (regla de atasco) | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
+| `work-plan` | `/work-plan` | — | `work_plan.md` y tareas con versión y `depende_de` en el backlog |
+| `calcular-dependencias` | Lee `work_plan.md` y todas las tareas maestras abiertas y declara en cada una `depende_de` (ver `/task-add`), una sola vez para todo el backlog | sin ciclos ni dependencias a versiones posteriores; las tareas `blocked` solo por depender de otra (bloqueo en cascada anterior) vuelven a `planned` y pierden esa nota de bloqueo | todas las maestras abiertas tienen `depende_de` |
 | `start-version` | `/start-version` con la versión indicada | — | existe `release/vX.Y` |
 | `revisar-deuda` | Repasa la deuda registrada frente al código actual y a las tareas de vX.Y | **incluir** la que afecta a lo que toca esta versión (mismos módulos o una tarea citada en `origen`): `version: vX.Y.0`, `status: planned` y peso que la ordena antes de las tareas a las que afecta; **cancelar** con motivo la ya resuelta o irrelevante; **dejar** el resto como mejora futura. La deuda no relacionada con la versión no se incluye: la decide el humano | existe `vX.Y-deuda.md` con las tres listas |
 | `task-dev` | `/task-dev <ID>` en modo orquestado | — | tarea `completed` y commit |
 | `bug-fix` | `/bug-fix <ID>` en modo orquestado | — | bug `completed` y commit |
-| `revisar-tarea` | Hades `/review-code` sobre los commits del ID; corrige y repite (máx. 3, regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
-| `analizar-bloqueo` | Analiza por qué se bloqueó el ID: la tarea, sus escenarios y diseño, los reportes de Hades rechazados y el diff de `wip/<ID>-<n>`. No eres el desarrollador ni Hades: clasifica la causa (ver «Análisis de bloqueo») | **rescate**: pista concreta, desde `wip/<ID>-<n>` o desde cero; `status: planned` en el ID y en las que tengan `bloqueada_por: <ID>` (sin ese campo). **bloqueo**: sigue `blocked`, con la pregunta concreta para el humano en la revisión de versión | existe `docs/review/bloqueos/<ID>-<n>.md` con primera línea `**Resultado:** RESCATE` o `BLOQUEO` |
+| `revisar-tarea` | Hades `/review-code` sobre los commits del ID; corrige y repite (regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
+| `analizar-bloqueo` | Analiza por qué se bloqueó el ID: la tarea, sus escenarios y diseño, los reportes de Hades rechazados y el diff de `wip/<ID>-<n>`. No eres el desarrollador ni Hades: clasifica la causa (ver «Análisis de bloqueo») | **rescate**: pista concreta, desde `wip/<ID>-<n>` o desde cero; `status: planned` en el ID (sus dependientes vuelven a ser elegibles solos). **bloqueo**: sigue `blocked`, con la pregunta concreta para el humano en la revisión de versión | existe `docs/review/bloqueos/<ID>-<n>.md` con primera línea `**Resultado:** RESCATE` o `BLOQUEO` |
 | `revisar-version` | Hades `/review-code` sobre `git diff main...release/vX.Y`, solo lo transversal: duplicados entre tareas, patrones incoherentes y capas mezcladas. Si el plan de plataforma cambió en la versión, además Hades `/review-design` sobre esas `DEC` | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → su destino (`registrar` → deuda registrada) | existe `vX.Y-arquitectura.md` |
 
 `/release` no es un paso del bucle: lo ejecuta el humano tras la revisión.

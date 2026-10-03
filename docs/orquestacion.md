@@ -27,7 +27,7 @@ flowchart LR
 
 ## 1. Bucle general (`orquestar.py`)
 
-Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, tarea cerrada con la suite en rojo (`--test`), fallo del arnés, `--parar` y `--max-pasos`. Cada paso deja una línea en `orquestar_metricas.jsonl`.
+Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, tarea cerrada con la suite en rojo (`--test`), fallo del arnés, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
 
 ```mermaid
 flowchart TD
@@ -43,11 +43,11 @@ flowchart TD
   sv --> qd{"¿deuda registrada?"}
   qd -- sí --> rd["revisar-deuda<br/>incluye la que toca vX.Y, cancela la resuelta,<br/>deja el resto como mejora"]
   rd --> sel
-  qd -- no --> sel{"¿pendientes en vX.Y?"}
-  sel -- sí --> td["task-dev / bug-fix del ID<br/>(en curso o menor weight)"]
+  qd -- no --> sel{"¿elegibles en vX.Y?<br/>(dependencias completadas)"}
+  sel -- sí --> td["task-dev / bug-fix del ID<br/>(en curso, el que más desbloquea, menor weight)"]
   td --> rt["revisar-tarea<br/>solo si falta el reporte de review-code"]
   rt --> sel
-  td -. "bloqueada tras 3 rechazos" .-> ab["analizar-bloqueo<br/>contexto limpio: ni desarrollador ni Hades"]
+  td -. "bloqueada por atasco" .-> ab["analizar-bloqueo<br/>contexto limpio: ni desarrollador ni Hades"]
   ab -- "rescate con pista (máx. 2)" --> sel
   ab -- "bloqueo: decisión crítica o algo externo" --> hum
   sel -- no --> rv["revisar-version<br/>Hades · review-code: duplicados y coherencia entre tareas<br/>Hades · review-design: solo si cambió el plan de plataforma"]
@@ -80,7 +80,7 @@ flowchart TD
 
 ## 2. Dentro de una tarea (`task-dev` / `bug-fix` en modo orquestado)
 
-Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. Cada revisión admite hasta 3 iteraciones. Una desviación de la arquitectura se registra como `DEC` en el plan de plataforma; la revisa `review-design` en la revisión de versión.
+Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. Cada revisión se repite mientras haya progreso y se bloquea por atasco. Una desviación de la arquitectura se registra como `DEC` en el plan de plataforma; la revisa `review-design` en la revisión de versión.
 
 ```mermaid
 flowchart TD
@@ -99,9 +99,9 @@ flowchart TD
   q -- "con DEC o no se desvía" --> docs["E · manage-docs"]
   docs --> deu["F · deuda según Hades<br/>resolver · registrar como bug · descartar"]
   deu --> cie["cierre + entrada en vX.Y-revision.md<br/>y commit"]
-  rs -. "3 rechazos con 🔴/🟠" .-> blk["wip/ID-n + status: blocked<br/>→ analizar-bloqueo"]
-  rtst -. "3 rechazos con 🔴/🟠" .-> blk
-  rc -. "3 rechazos con 🔴/🟠" .-> blk
+  rs -. "atasco con 🔴/🟠" .-> blk["wip/ID-n + status: blocked<br/>→ analizar-bloqueo"]
+  rtst -. "atasco con 🔴/🟠" .-> blk
+  rc -. "atasco con 🔴/🟠" .-> blk
 
   classDef paso fill:#e4efe9,stroke:#2f6f5e,color:#1d2421
   classDef hades fill:#e6e0f3,stroke:#5b4a8a,color:#1d2421

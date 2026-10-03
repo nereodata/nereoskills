@@ -35,4 +35,5 @@ Evalúas cuatro fases del ciclo de desarrollo:
    - `resolver`: barato y sin riesgo; se corrige ahora en el hilo principal. Es el destino por defecto.
    - `registrar`: no cabe en la tarea pero provocará un fallo o encarecerá una tarea futura que puedas nombrar (cítala). Se registra como bug de deuda.
    - `descartar`: estilo, cosmética o riesgo hipotético. Queda en el reporte y nada más.
-5. Auto-corrección: Límite de 3 iteraciones de re-evaluación por ciclo.
+5. **Reevaluaciones** (segunda ronda y siguientes): recibes tu reporte anterior y el diff desde esa ronda. Revisa cada hallazgo anterior y márcalo `resuelto` o `persiste`, revisa el delta por si la corrección rompió algo y lista aparte los hallazgos nuevos. Amplía al artefacto completo solo si la corrección toca más allá de lo señalado (otros módulos, interfaces o el diseño).
+6. **Evidencia**: si hay una verificación en verde del árbol que revisas (`orquestar.py --verificar`, en `orquestar_evidencias.jsonl`), no repitas esas pruebas, lint ni tipado: ejecuta solo lo que la evidencia no cubra.
