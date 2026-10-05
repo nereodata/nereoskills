@@ -99,10 +99,17 @@ def backlog(root):
 
 
 def errores_dependencias(items):
-    """IDs inexistentes y ciclos en `depende_de`."""
+    """IDs inexistentes, ciclos y dependencias a versiones posteriores."""
     ids = {i['id'] for i in items}
     deps = {i['id']: i['depende_de'] or [] for i in items}
     errores = [f'{i} depende de {d}, que no existe' for i, ds in deps.items() for d in ds if d not in ids]
+    por_id = {i['id']: i for i in items}
+    for i in items:
+        version = vkey(i.get('version', ''))
+        for d in deps[i['id']]:
+            destino = vkey(por_id[d].get('version', '')) if d in por_id else None
+            if version and destino and destino > version:
+                errores.append(f"{i['id']} depende de {d}, de una versión posterior")
     visto, pila = set(), []
 
     def ciclo(n):
@@ -270,7 +277,7 @@ def estado(root, docs):
 
 def firma(root, docs):
     return (estado(root, docs), git('rev-parse', 'HEAD'), git('status', '--porcelain'),
-            tuple((i['id'], i['status']) for i in backlog(root)))
+            tuple((i['id'], i['status']) for i in backlog(root)), arbol(root))
 
 
 # ---------------------------------------------------------------- arneses y roles
@@ -452,9 +459,12 @@ def arbol(root):
     """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
-        subprocess.run(['git', 'add', '-A', '.'], cwd=root, env=env, capture_output=True)
-        return subprocess.run(['git', 'write-tree'], cwd=root, env=env, capture_output=True,
-                              text=True).stdout.strip()
+        subprocess.run(['git', 'add', '-A', '.'], cwd=root, env=env, capture_output=True, check=True)
+        valor = subprocess.run(['git', 'write-tree'], cwd=root, env=env, capture_output=True,
+                               text=True, check=True).stdout.strip()
+        if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', valor):
+            raise RuntimeError('No se pudo calcular una huella Git válida del árbol')
+        return valor
 
 
 def suite(root, a=None):
