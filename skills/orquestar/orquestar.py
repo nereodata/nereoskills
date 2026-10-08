@@ -37,6 +37,7 @@ PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA)  # ficheros del bucle
 RESCATES = 2  # rescates máximos por tarea tras un bloqueo
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
+FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
@@ -262,10 +263,10 @@ def estado(root, docs):
         if bloqueadas or pend:
             partes = ([f'bloqueadas {", ".join(i["id"] for i in bloqueadas)}'] if bloqueadas else []) + \
                      ([f'en espera {i["id"]} (por {", ".join(raices(i["id"], por_id))})' for i in pend])
-            return ('PARAR', f'Bloqueos en {v}: ' + '; '.join(partes)
+            return ('PARAR', f'{FIN_VERSION[0]}{v}: ' + '; '.join(partes)
                              + f'. Revisa docs/review/versions/{v}-revision.md y docs/review/bloqueos/: '
                                'desbloquea, mueve de versión o cancela, y relanza.')
-        return ('PARAR', f'Versión {v} terminada. Revisa docs/review/versions/{v}-revision.md'
+        return ('PARAR', f'{FIN_VERSION[1]}{v} terminada. Revisa docs/review/versions/{v}-revision.md'
                          ': registra defectos con /bug-add o cierra con /release, y relanza.')
     if not pendientes:
         mejoras = len(deuda(items))
@@ -637,6 +638,11 @@ def main():
                 (root / f).unlink(missing_ok=True)
 
 
+def cierre_de_version(e):
+    """La versión abierta no tiene más tareas elegibles: toca la suite completa."""
+    return (e[0] == 'PASO' and e[1] == 'revisar-version') or (e[0] == 'PARAR' and e[1].startswith(FIN_VERSION))
+
+
 def bucle(a, root):
     if a.idea and not (root / a.docs / 'requirements.md').exists():
         (root / a.docs).mkdir(parents=True, exist_ok=True)
@@ -645,7 +651,7 @@ def bucle(a, root):
     script = os.path.relpath(Path(__file__).resolve(), root).replace('\\', '/')
     skill = os.path.relpath(SKILL, root).replace('\\', '/')
     extra = (f' Verifica con `python {script} --verificar` (suite completa, reutiliza la evidencia del mismo árbol)'
-             f' o `--verificar "<comando de pruebas relevantes>"`.')
+             f' o `--verificar "<comando de pruebas>"`, con el alcance que marque el triaje de la tarea.')
     if 'hades' in config(root):
         extra += f' Lanza las revisiones de Hades con `python {script} --agente hades --prompt-file <mandato>`.'
     cmd_suite = suite(root, a)
@@ -656,6 +662,9 @@ def bucle(a, root):
             return 2
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
+        if not a.estado and cmd_suite and cierre_de_version(e) and verificar(root, cmd_suite):
+            print(f'[orquestar] PARAR: la versión no tiene más tareas elegibles pero la suite falla ({cmd_suite}).')
+            return 2
         if a.estado or e[0] != 'PASO':
             return 0 if e[0] in ('FIN', 'PASO') else 2
         _, paso, arg, rama = e
@@ -666,7 +675,6 @@ def bucle(a, root):
             git('checkout', '-q', rama)
 
         antes = firma(root, a.docs)
-        cerradas = {i['id'] for i in backlog(root) if i['status'] in CERRADO}
         prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '') + extra
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
@@ -692,10 +700,6 @@ def bucle(a, root):
             return 2
         esperado = 0
 
-        if cmd_suite and any(i['status'] in CERRADO and i['id'] not in cerradas for i in backlog(root)):
-            if verificar(root, cmd_suite):
-                print(f'[orquestar] PARAR: {arg} se ha cerrado pero la suite falla ({cmd_suite}).')
-                return 2
         if firma(root, a.docs) == antes:
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')

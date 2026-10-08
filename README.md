@@ -37,7 +37,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 📐 Diseño        → inline:   diseño de la solución (design), sin revisión
 🔴 Red           → inline:   tests que fallan + lint/tipado limpios
 🔎 review-test   → Hades:    audita calidad de tests (aislado, hasta atasco)
-🟢 Green/Fix     → inline:   implementación mínima + suite completa + lint/tipado
+🟢 Green/Fix     → inline:   implementación mínima + verificación del triaje + lint/tipado
                  ↓ [HITL: validación funcional]
 🔎 review-code   → Hades:    audita código y conformidad (aislado, hasta atasco)
 📄 Docs          → inline:   manage-docs

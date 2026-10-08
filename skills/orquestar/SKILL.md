@@ -29,7 +29,7 @@ Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla
 
 **Roles** (`orchestration.json` en la raíz, opcional): `development`, `hades`, `clio` y `cronos`, cada uno con `harness` (`claude` o `codex`), `model` y `effort` (y `instructions` si no es `.agents/agents/<rol>.md`). `development` fija el arnés y el modelo de los pasos; si hay `hades`, las revisiones se lanzan con `orquestar.py --agente hades --prompt-file <mandato>`, que usa su arnés y modelo y registra su consumo.
 
-**Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador, Hades y el bucle al cerrar cada tarea. Sin `--fondo` corre en primer plano.
+**Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador y Hades con el alcance que marca el triaje de cada tarea (`ninguna`, `relevantes`, `regresión` o `suite`); el bucle pasa la suite completa una sola vez por versión, cuando no quedan tareas elegibles (antes de `revisar-version` y antes de parar para la revisión humana). Sin `--fondo` corre en primer plano.
 
 **Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
@@ -62,7 +62,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 
 **Deuda registrada** = bug pendiente sin versión (lo crea `/bug-add` a partir de un hallazgo de Hades con destino `registrar`). El bucle no la trabaja hasta que `revisar-deuda` la incluye en una versión.
 
-El bucle también para si un paso no avanza tras 2 intentos, si una tarea se cierra con la suite en rojo (`--test`) o al llegar a `--max-pasos`.
+El bucle también para si un paso no avanza tras 2 intentos, si la suite está en rojo al terminar la versión (`--test`) o al llegar a `--max-pasos`.
 
 **Sin cuota** (Claude, Codex u otro arnés): si un paso falla y su salida indica límite de uso, el bucle no para. Espera hasta la hora de recuperación que indique el arnés (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Cualquier otro fallo del arnés para el bucle.
 

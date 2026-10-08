@@ -73,6 +73,25 @@ class OrquestarRegressionTests(unittest.TestCase):
         self.assertTrue(motor.errores_dependencias([
             {'id': 'T1', 'depende_de': ['T2']}, {'id': 'T2', 'depende_de': ['T1']}]))
 
+    def test_suite_runs_at_version_close_not_after_each_task(self):
+        self.assertTrue(motor.cierre_de_version(('PASO', 'revisar-version', 'v0.1', 'release/v0.1')))
+        self.assertTrue(motor.cierre_de_version(('PARAR', 'Versión v0.1 terminada. Revisa')))
+        self.assertTrue(motor.cierre_de_version(('PARAR', 'Bloqueos en v0.1: bloqueadas T1')))
+        self.assertFalse(motor.cierre_de_version(('PASO', 'task-dev', 'T1', 'release/v0.1')))
+        self.assertFalse(motor.cierre_de_version(('PARAR', 'Falta task_config.yaml en la raíz del proyecto.')))
+
+    def test_red_suite_at_version_close_stops_before_review(self):
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                        max_pasos=3, reintentos=2, espera_max=0, cmd=None)
+        with tempfile.TemporaryDirectory() as directory:
+            with (patch.object(motor, 'estado', return_value=('PASO', 'revisar-version', 'v0.1', None)),
+                  patch.object(motor, 'config', return_value={}),
+                  patch.object(motor, 'verificar', return_value=1) as verificar,
+                  patch.object(motor, 'ejecutar') as ejecutar):
+                self.assertEqual(motor.bucle(args, Path(directory)), 2)
+        verificar.assert_called_once()
+        ejecutar.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()

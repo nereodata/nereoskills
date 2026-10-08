@@ -27,7 +27,7 @@ flowchart LR
 
 ## 1. Bucle general (`orquestar.py`)
 
-Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, tarea cerrada con la suite en rojo (`--test`), fallo del arnés, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
+Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, suite en rojo al terminar la versión (`--test`), fallo del arnés, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
 
 ```mermaid
 flowchart TD
@@ -84,13 +84,13 @@ Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. C
 
 ```mermaid
 flowchart TD
-  ini["Init + triaje delta-first<br/>in_progress, subfases EXEC/SKIP"] --> bdd["A · generate-bdd<br/>escenarios del delta + evals"]
+  ini["Init + triaje delta-first<br/>in_progress, subfases EXEC/SKIP<br/>nivel de verificación"] --> bdd["A · generate-bdd<br/>escenarios del delta + evals"]
   bdd --> rs["Hades · review-spec<br/>solo lo añadido o modificado<br/>respecto a los escenarios de origen"]
   rs --> dis["B · /design<br/>mapa de impacto obligatorio si cambia un contrato"]
   dis --> red["C · Red<br/>tests que fallan por la funcionalidad"]
   red --> pre1["lint + tipado limpios en tests<br/>salida del rojo registrada"]
   pre1 --> rtst["Hades · review-test<br/>cobertura, aserciones, rojo correcto, estabilidad"]
-  rtst --> green["Green<br/>implementación mínima + suite completa"]
+  rtst --> green["Green<br/>implementación mínima + verificación del triaje"]
   green --> pre2["lint + tipado limpios en todo el delta"]
   pre2 --> rc["Hades · review-code<br/>corrección, seguridad, calidad<br/>conformidad con el diseño de la tarea y la arquitectura"]
   rc --> q{"¿se desvía de la arquitectura?"}
