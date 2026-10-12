@@ -69,6 +69,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 │   ├── task-add/          # Registro de tareas en backlog
 │   ├── bug-add/           # Registro de bugs en backlog
 │   ├── orquestar/         # Bucle de la idea al producto
+│   ├── telegram_gateway/  # Gateway de Telegram (ingesta remota y alertas)
 │   └── ...
 ├── workflows/             # Proxies para slash commands (/task-dev, /bug-fix, etc.)
 └── README.md

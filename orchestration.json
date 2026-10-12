@@ -1,0 +1,7 @@
+{
+  "hades": {
+    "harness": "claude",
+    "model": "opus",
+    "effort": "medium"
+  }
+}
