@@ -84,7 +84,7 @@ Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. C
 
 ```mermaid
 flowchart TD
-  ini["Init + triaje delta-first<br/>in_progress, subfases EXEC/SKIP<br/>nivel de verificación"] --> bdd["A · generate-bdd<br/>escenarios del delta + evals"]
+  ini["Init + triaje delta-first<br/>in_progress, subfases EXEC/SKIP<br/>pruebas a verificar"] --> bdd["A · generate-bdd<br/>escenarios del delta + evals"]
   bdd --> rs["Hades · review-spec<br/>solo lo añadido o modificado<br/>respecto a los escenarios de origen"]
   rs --> dis["B · /design<br/>mapa de impacto obligatorio si cambia un contrato"]
   dis --> red["C · Red<br/>tests que fallan por la funcionalidad"]
