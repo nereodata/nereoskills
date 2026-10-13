@@ -28,7 +28,7 @@ Playbook para el desarrollo de tareas.
 > Si la tarea ya está `in_progress` y el árbol tiene cambios sin commitear, son de un intento interrumpido de esta misma tarea (p. ej. por falta de cuota): retómalos desde la subfase en que quedaron en lugar de exigir árbol limpio o descartarlos.
 > Si hay análisis de bloqueo de esta tarea en `docs/review/bloqueos/`, léelos antes de empezar y sigue la pista del último (desde la rama `wip/` que indique o desde cero). Cada intento empieza las revisiones de cero.
 > Cada revisión de Hades se repite mientras haya progreso. **Atasco** (se aplica el bloqueo): un mismo 🔴/🟠 sigue `persiste` en dos reevaluaciones seguidas, o el número de 🔴/🟠 no baja en dos reevaluaciones seguidas, o se llega a 6 rondas. Si solo quedan 🟡/🔵, se cierra aplicando su destino.
-> Durante las correcciones ejecuta solo las pruebas relevantes; al cierre, la verificación que marque el triaje (la suite completa solo si el cambio la exige: el bucle la pasa una vez al terminar la versión). En modo orquestado verifica con `orquestar.py --verificar` (suite) o `--verificar "<comando>"`: reutiliza el resultado en verde del mismo árbol exacto, y Hades y el bucle reutilizan esa misma evidencia.
+> **Pruebas**: lanza las que pueden fallar por tu cambio, no la suite: el bucle la pasa una vez al cerrar la versión. Si algo falla, itera solo sobre lo que falla hasta verlo en verde, y entonces repite una vez la verificación del triaje. En modo orquestado verifica con `orquestar.py --verificar "<comando>"`: reutiliza el resultado en verde del mismo árbol exacto, y Hades reutiliza esa evidencia.
 
 ## 1. Inicialización (inline)
 - **Validar Rama**: Debe ser `release/vX.Y` o `hotfix/vX.Y.Z`. Abortar si es `main`.
@@ -49,13 +49,7 @@ Crea un checklist explícito en `task.md` marcando qué subfases ejecutar:
 
 **Criterio**: Ejecuta una subfase solo si produce cambios reales y aporta valor. Omite subfases que no aplican al tipo de cambio.
 
-Marca también en el checklist la **verificación al cierre**, con su motivo en una línea. Elige la mínima que dé confianza razonable de no romper nada:
-- `ninguna`: el cambio no afecta a nada que se ejecute (documentación, comentarios, textos de ayuda que ninguna prueba compara).
-- `relevantes`: las pruebas de la tarea (las del rojo) y las del módulo que toca. Es la opción por defecto de un cambio localizado.
-- `regresión`: además, las pruebas de lo que depende de lo modificado: quienes llaman a la función o al contrato cambiado y los flujos que lo atraviesan. Para cambios en interfaces, contratos o comportamiento compartido.
-- `suite`: cambios transversales, como dependencias, configuración de build, CI o pruebas, esquemas o modelos de datos compartidos, utilidades base o refactors amplios.
-
-Si durante el desarrollo el cambio crece más allá de lo previsto, sube el nivel y anótalo.
+Anota también en el checklist la **verificación al cierre**: qué pruebas lanzarás y por qué, en una línea. Elígelas mirando el delta: las que ejercitan lo que cambias y lo que depende de ello, ni más ni menos (ninguna, si nada de lo que se ejecuta cambia). La suite completa solo cuando el alcance no se pueda acotar; lo que se escape lo caza la suite al cerrar la versión. Si el cambio crece, amplíala y anótalo.
 
 ## 3. Fase de Implementación (secuencial)
 
@@ -80,7 +74,7 @@ Si durante el desarrollo el cambio crece más allá de lo previsto, sube el nive
 
 **Green Phase:**
 1. Implementación mínima (docstrings sí, inline comments no).
-2. Tests relevantes en cada corrección; al final, la verificación marcada en el triaje.
+2. En cada corrección, solo las pruebas que fallan; en verde, la verificación anotada en el triaje.
 3. Lint y tipado limpios sobre todo el delta.
 
 ### Subfase D: QA [EXEC/SKIP]

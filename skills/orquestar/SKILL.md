@@ -29,7 +29,7 @@ Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla
 
 **Roles** (`orchestration.json` en la raíz, opcional): `development`, `hades`, `clio` y `cronos`, cada uno con `harness` (`claude` o `codex`), `model` y `effort` (y `instructions` si no es `.agents/agents/<rol>.md`). `development` fija el arnés y el modelo de los pasos; si hay `hades`, las revisiones se lanzan con `orquestar.py --agente hades --prompt-file <mandato>`, que usa su arnés y modelo y registra su consumo.
 
-**Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador y Hades con el alcance que marca el triaje de cada tarea (`ninguna`, `relevantes`, `regresión` o `suite`); el bucle pasa la suite completa una sola vez por versión, cuando no quedan tareas elegibles (antes de `revisar-version` y antes de parar para la revisión humana). Sin `--fondo` corre en primer plano.
+**Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador y Hades con las pruebas que marca el triaje de cada tarea; el bucle pasa la suite completa una sola vez por versión, cuando no quedan tareas elegibles (antes de `revisar-version` y antes de parar para la revisión humana). Sin `--fondo` corre en primer plano.
 
 **Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
@@ -108,6 +108,7 @@ Hasta **2 rescates** por tarea; si vuelve a bloquearse después, queda para el h
 ## 👤 Revisión de versión
 
 Cuando el bucle para con «Versión vX.Y terminada»:
+0. **Suite en rojo** (si paró por eso): corrige iterando solo sobre las pruebas que fallan y relanza; el bucle repasa la suite una vez.
 1. Lee `docs/review/versions/vX.Y-revision.md` (y `vX.Y-arquitectura.md` y `vX.Y-deuda.md`) y prueba el producto siguiendo sus pasos de validación.
 2. **Defectos:** regístralos con `/bug-add` en la rama `release/vX.Y` y relanza; el bucle los corrige con `/bug-fix`.
 3. **Bloqueadas:** desbloquéala (pista o simplificación, `status: planned`), muévela de versión o cancélala.

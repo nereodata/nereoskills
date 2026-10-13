@@ -650,8 +650,8 @@ def bucle(a, root):
 
     script = os.path.relpath(Path(__file__).resolve(), root).replace('\\', '/')
     skill = os.path.relpath(SKILL, root).replace('\\', '/')
-    extra = (f' Verifica con `python {script} --verificar` (suite completa, reutiliza la evidencia del mismo árbol)'
-             f' o `--verificar "<comando de pruebas>"`, con el alcance que marque el triaje de la tarea.')
+    extra = (f' Verifica con `python {script} --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol),'
+             f' solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión.')
     if 'hades' in config(root):
         extra += f' Lanza las revisiones de Hades con `python {script} --agente hades --prompt-file <mandato>`.'
     cmd_suite = suite(root, a)
