@@ -93,5 +93,64 @@ class OrquestarRegressionTests(unittest.TestCase):
         ejecutar.assert_not_called()
 
 
+class RevisionProductoTests(unittest.TestCase):
+    """Versión v0.1 cerrada (tarea completada y revisada, revisión de arquitectura hecha) y v0.2 pendiente."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
+                         ('docs/req_analysis.md', '**Estado:** ASUNCIONES_REALIZADAS'),
+                         ('docs/platform_plan.md', ''), ('docs/platform_review.md', '**Veredicto:** APROBADO'),
+                         ('docs/work_plan.md', ''), ('docs/review/code_reviews/T1-code-review.md', ''),
+                         ('docs/review/versions/v0.1-arquitectura.md', '')]:
+            (self.root / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / f).write_text(texto, encoding='utf-8')
+        self.items = [{'paso': 'task-dev', 'id': 'T1', 'status': 'completed', 'version': 'v0.1.0',
+                       'depende_de': [], 'weight': 0},
+                      {'paso': 'task-dev', 'id': 'T2', 'status': 'planned', 'version': 'v0.2.0',
+                       'depende_de': [], 'weight': 0}]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def estado(self, producto=None, rama='release/v0.1', decision=None):
+        if decision:
+            (self.root / motor.PRODUCTO.format(v='v0.1')).write_text(f'**Decisión:** {decision}\n', encoding='utf-8')
+        cfg = {} if producto is None else {'producto': producto}
+        with (patch.object(motor, 'backlog', return_value=self.items),
+              patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'git', side_effect=lambda *a, **k: rama if 'branch' in a else '')):
+            return motor.estado(self.root, 'docs')
+
+    def test_disabled_keeps_current_version_stop(self):
+        for producto in (None, False, ['v0.2']):
+            with self.subTest(producto=producto):
+                e = self.estado(producto)
+                self.assertEqual(e[0], 'PARAR')
+                self.assertTrue(e[1].startswith('Versión v0.1 terminada'))
+                self.assertNotIn('producto', e[1])
+
+    def test_enabled_without_report_runs_review(self):
+        for producto in (True, ['v0.1'], ['0.1']):
+            with self.subTest(producto=producto):
+                self.assertEqual(self.estado(producto), ('PASO', 'revisar-producto', 'v0.1', 'release/v0.1'))
+
+    def test_decisions_drive_the_version_stop(self):
+        e = self.estado(True, decision='PENDIENTE')
+        self.assertEqual(e[0], 'PARAR')
+        self.assertTrue(motor.cierre_de_version(e))
+        self.assertIn('APLICAR', e[1])
+        self.assertEqual(self.estado(True, decision='APLICAR'), ('PASO', 'aplicar-producto', 'v0.1', 'release/v0.1'))
+        self.assertTrue(self.estado(True, decision='APLICADA')[1].startswith('Versión v0.1 terminada'))
+
+    def test_pending_decisions_block_next_version_after_release(self):
+        e = self.estado(True, rama='', decision='PENDIENTE')
+        self.assertEqual(e[0], 'PARAR')
+        self.assertIn('v0.1-producto.md', e[1])
+        self.assertEqual(self.estado(True, rama='', decision='APLICAR'), ('PASO', 'aplicar-producto', 'v0.1', None))
+        self.assertEqual(self.estado(True, rama='', decision='APLICADA'), ('PASO', 'start-version', 'v0.2', None))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -22,12 +22,12 @@ inputs:
   2. Averigua el comando de la suite del proyecto (manifiestos, README, CI); si no lo encuentras, pregúntalo.
   3. Ejecuta `python <ruta>/orquestar.py --fondo --harness <arnés> --test "<suite>"` (más `--presupuesto` si lo piden). Vuelve enseguida: el bucle sigue desacoplado, con la salida en `orquestar.log`.
   4. Avisa: los pasos corren sin confirmaciones de permisos (mejor en contenedor o VM), y si tu arnés usa sandbox, puede que el bucle necesite lanzarse fuera de él.
-- **estado**: ejecuta `orquestar.py --estado` (fase actual, si hay bucle en marcha y consumo acumulado) y resume el final de `orquestar.log`. Si el bucle paró para la revisión humana, explica qué toca hacer (ver «Revisión de versión»).
+- **estado**: ejecuta `orquestar.py --estado` (fase actual, si hay bucle en marcha y consumo acumulado) y resume el final de `orquestar.log`. Si el bucle paró para la revisión humana, explica qué toca hacer (ver «Revisión de versión»). Si hay propuestas de producto pendientes, presenta la síntesis y la tabla de `vX.Y-producto.md`, recoge los cambios del usuario («mueve P-03 al backlog, rechaza P-05»), escríbelos en la tabla y, cuando confirme, marca `**Decisión:** APLICAR`, haz commit y relanza: el bucle crea las tareas.
 - **parar**: ejecuta `orquestar.py --parar`; el bucle termina el paso en curso y para. Relanzar sigue donde iba.
 
 Opciones del script: `--harness claude|codex|gemini|cursor` o `--cmd "<plantilla con {prompt}>"`, `--test` (por defecto, `validation.command` de `task_config.yaml`), `--idea`, `--max-pasos`, `--reintentos`, `--presupuesto`, `--espera-max`.
 
-**Roles** (`orchestration.json` en la raíz, opcional): `development`, `hades`, `clio` y `cronos`, cada uno con `harness` (`claude` o `codex`), `model` y `effort` (y `instructions` si no es `.agents/agents/<rol>.md`). `development` fija el arnés y el modelo de los pasos; si hay `hades`, las revisiones se lanzan con `orquestar.py --agente hades --prompt-file <mandato>`, que usa su arnés y modelo y registra su consumo.
+**Roles** (`orchestration.json` en la raíz, opcional): `development`, `hades`, `clio` y `cronos`, cada uno con `harness` (`claude` o `codex`), `model` y `effort` (y `instructions` si no es `.agents/agents/<rol>.md`). `development` fija el arnés y el modelo de los pasos; si hay `hades`, las revisiones se lanzan con `orquestar.py --agente hades --prompt-file <mandato>`, que usa su arnés y modelo y registra su consumo. La clave `producto` (`true` o lista de versiones, p. ej. `["v0.3", "v1.0"]`) activa la revisión de producto al cerrar esas versiones; sin ella, el bucle no la hace.
 
 **Verificación** (`orquestar.py --verificar ["<comando>"]`): sin comando ejecuta la suite. Guarda el resultado ligado al contenido exacto del árbol (incluidos los cambios sin commitear) y, si ya pasó en verde sobre ese mismo árbol, lo reutiliza sin ejecutar nada. La usan el desarrollador y Hades con las pruebas que marca el triaje de cada tarea; el bucle pasa la suite completa una sola vez por versión, cuando no quedan tareas elegibles (antes de `revisar-version` y antes de parar para la revisión humana). Sin `--fondo` corre en primer plano.
 
@@ -54,7 +54,10 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Rama `release/vX.Y` con pendientes elegibles (todas sus `depende_de` completadas) | paso `task-dev` / `bug-fix`: el ID en curso, si no el que más tareas desbloquea, y a igualdad el de menor `weight` |
 | Rama `release/vX.Y` sin elegibles ni `docs/review/versions/vX.Y-arquitectura.md` | paso `revisar-version` |
 | Rama `release/vX.Y` revisada, con bloqueadas o en espera | PARAR: bloqueos de la versión, con cada tarea en espera y la causa raíz que la retiene |
-| Rama `release/vX.Y` revisada y sin pendientes | PARAR: revisión de versión |
+| Rama `release/vX.Y` revisada, sin pendientes, con revisión de producto activa para vX.Y y sin `vX.Y-producto.md` | paso `revisar-producto` |
+| `vX.Y-producto.md` con `**Decisión:** APLICAR` | paso `aplicar-producto` |
+| Rama `release/vX.Y` revisada y sin pendientes | PARAR: revisión de versión (y decisiones de producto, si hay informe `PENDIENTE`) |
+| Sin rama abierta y algún `vX.Y-producto.md` con `**Decisión:** PENDIENTE` | PARAR: decisiones de producto pendientes (no se abre otra versión) |
 | Sin rama abierta y con pendientes | paso `start-version` de la menor versión pendiente |
 | Todo cerrado (la deuda registrada, sin versión, no cuenta) | FIN, con el número de mejoras pendientes |
 
@@ -90,6 +93,8 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 | `revisar-tarea` | Hades `/review-code` sobre los commits del ID; corrige y repite (regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
 | `analizar-bloqueo` | Analiza por qué se bloqueó el ID: la tarea, sus escenarios y diseño, los reportes de Hades rechazados y el diff de `wip/<ID>-<n>`. No eres el desarrollador ni Hades: clasifica la causa (ver «Análisis de bloqueo») | **rescate**: pista concreta, desde `wip/<ID>-<n>` o desde cero; `status: planned` en el ID (sus dependientes vuelven a ser elegibles solos). **bloqueo**: sigue `blocked`, con la pregunta concreta para el humano en la revisión de versión | existe `docs/review/bloqueos/<ID>-<n>.md` con primera línea `**Resultado:** RESCATE` o `BLOQUEO` |
 | `revisar-version` | Hades `/review-code` sobre `git diff main...release/vX.Y`, solo lo transversal: duplicados entre tareas, patrones incoherentes y capas mezcladas. Si el plan de plataforma cambió en la versión, además Hades `/review-design` sobre esas `DEC` | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → su destino (`registrar` → deuda registrada) | existe `vX.Y-arquitectura.md` |
+| `revisar-producto` | `/revisar-producto` sobre vX.Y | defectos frente a lo acordado → `/bug-add` en vX.Y | existe `vX.Y-producto.md` con `**Decisión:** PENDIENTE` |
+| `aplicar-producto` | `/revisar-producto`, paso `aplicar-producto`: crea las tareas de la tabla según el destino que dejó el usuario | idempotente por fila (columna Tarea) | `**Decisión:** APLICADA`, o `PENDIENTE` con `⚠` si alguna fila necesita al usuario |
 
 `/release` no es un paso del bucle: lo ejecuta el humano tras la revisión.
 
@@ -110,6 +115,7 @@ Hasta **2 rescates** por tarea; si vuelve a bloquearse después, queda para el h
 Cuando el bucle para con «Versión vX.Y terminada»:
 0. **Suite en rojo** (si paró por eso): corrige iterando solo sobre las pruebas que fallan y relanza; el bucle repasa la suite una vez.
 1. Lee `docs/review/versions/vX.Y-revision.md` (y `vX.Y-arquitectura.md` y `vX.Y-deuda.md`) y prueba el producto siguiendo sus pasos de validación.
+   **Propuestas de producto** (si hay `vX.Y-producto.md`): la tabla trae el destino recomendado de cada propuesta. Cambia lo que no te convenza (versión, `backlog` o `rechazar`), edita o añade filas, marca `**Decisión:** APLICAR` y relanza; el bucle crea las tareas sin preguntar. Puedes hacerlo editando el archivo o diciéndoselo a `/orquestar` en la conversación. Mientras siga `PENDIENTE`, el bucle no abre la siguiente versión.
 2. **Defectos:** regístralos con `/bug-add` en la rama `release/vX.Y` y relanza; el bucle los corrige con `/bug-fix`.
 3. **Bloqueadas:** desbloquéala (pista o simplificación, `status: planned`), muévela de versión o cancélala.
 4. **Mejoras:** para meter en una versión deuda que el bucle no incluyó, ponle esa versión.

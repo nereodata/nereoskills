@@ -31,6 +31,7 @@ Una **tarea padre representa una única capacidad, mejora o cambio que un usuari
 ### 2. Inicialización de Metadatos
 - `status: backlog` (por defecto) o `planned` (si se especifica versión).
 - `depende_de`: IDs de las tareas maestras cuyo resultado necesita esta para poder hacerse (código, contenido o datos que usa); `[]` si ninguna. Solo dependencias reales, no orden preferido: el orden lo da `weight`.
+- `origen`: (Opcional) de dónde viene la tarea, p. ej. `P-03 (v0.2-producto.md)` si sale de una revisión de producto.
 - `version`: Vacío por defecto, o detectado automáticamente de la rama `release/vX.Y` (ej: `"vX.Y.0"`).
 - Establecer fechas `created_at` y `updated_at`.
 

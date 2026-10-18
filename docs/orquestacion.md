@@ -54,7 +54,12 @@ flowchart TD
   rv --> q3{"¿🔴/🟠?"}
   q3 -- sí --> ba["bug-add en vX.Y"]
   ba --> sel
-  q3 -- no --> hum["PARAR: revisión humana de vX.Y<br/>vX.Y-revision.md + vX.Y-arquitectura.md"]
+  q3 -- no --> qp{"¿revisión de producto<br/>activa para vX.Y?"}
+  qp -- sí --> rpr["revisar-producto<br/>revisores independientes usan el producto<br/>defectos → bug-add · propuestas → tabla con destino"]
+  rpr --> hum
+  qp -- no --> hum["PARAR: revisión humana de vX.Y<br/>vX.Y-revision.md + vX.Y-arquitectura.md<br/>(+ tabla de vX.Y-producto.md)"]
+  hum -- "ajusta destinos y marca APLICAR" --> apl["aplicar-producto<br/>task-add desatendido por fila<br/>rechazadas → NO-xx"]
+  apl --> hum
   hum -- defectos --> ba2["/bug-add (humano)"]
   ba2 --> sel
   hum -- bloqueadas --> desb["desbloquear / mover / cancelar"]
@@ -73,7 +78,7 @@ flowchart TD
   class req,pp,wp,sv,td,ba paso
   class rp hades
   class rt,rv nuevo
-  class rd,qd,ab pnuevo
+  class rd,qd,ab,rpr,apl,qp pnuevo
   class hum,ba2,desb,rel humano
   class s1,s2 stop
 ```
@@ -122,5 +127,6 @@ flowchart TD
 | `review-design` | `revisar-plataforma` y `revisar-version` | Plan de plataforma y sus `DEC` | Código ni diseños por tarea |
 | `review-test` | Cada tarea, tras el rojo | Cobertura, aserciones, rojo correcto, estabilidad y preparación de las pruebas | Código de producción |
 | `review-code` | Cada tarea, tras el verde, y transversal en `revisar-version` | Corrección, seguridad, calidad, eficiencia, docs y conformidad con el diseño y la arquitectura (incluye build, CI y configuración) | Pruebas |
+| `revisar-producto` | Al cerrar la versión, si está activa (`producto` en `orchestration.json`), o a mano | El producto en uso: utilidad, contenido, diseño, usabilidad y accesibilidad frente a recorridos y criterios de éxito | Código, arquitectura ni pruebas |
 
 Lo determinista (lint, tipado, rojo de la suite) se ejecuta antes de llamar a Hades. Cada 🟡/🔵 lleva un destino: `resolver` (por defecto), `registrar` (bug de deuda sin versión, peso > 1000, con su origen) o `descartar`. `revisar-deuda`, al abrir cada versión, decide qué deuda entra.

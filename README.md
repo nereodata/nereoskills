@@ -24,6 +24,7 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 | `review-design` | Plan de plataforma y revisión de versión | Arquitectura y sus decisiones; nunca código |
 | `review-test` | Cada tarea, tras el rojo | Cobertura, aserciones, rojo correcto y estabilidad |
 | `review-code` | Cada tarea, tras el verde | Corrección, seguridad, calidad y conformidad con el diseño y la arquitectura |
+| `revisar-producto` | Al cerrar versión (opcional) o a mano | El producto en uso: utilidad, diseño y usabilidad; propone mejoras con destino y el usuario decide |
 
 Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, fuera de versión) o `descartar`.
 
@@ -47,7 +48,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix` y revisión de versión. El humano solo interviene al cerrar cada versión. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`.
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`.
 
 ---
 
@@ -69,6 +70,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 │   ├── task-add/          # Registro de tareas en backlog
 │   ├── bug-add/           # Registro de bugs en backlog
 │   ├── orquestar/         # Bucle de la idea al producto
+│   ├── revisar-producto/  # Revisión funcional de una versión y propuestas de mejora
 │   └── ...
 ├── workflows/             # Proxies para slash commands (/task-dev, /bug-fix, etc.)
 └── README.md

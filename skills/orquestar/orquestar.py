@@ -38,6 +38,7 @@ RESCATES = 2  # rescates máximos por tarea tras un bloqueo
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
+PRODUCTO = 'docs/review/versions/{v}-producto.md'  # revisión funcional, con su tabla de decisiones
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
@@ -209,6 +210,20 @@ def analisis(root, iid):
     return len(hechos), sum('RESCATE' in primera_linea(f) for f in hechos)
 
 
+def producto_activa(root, v):
+    """Revisión de producto al cerrar v según orchestration.json: `producto` true o lista de versiones."""
+    cfg = config(root).get('producto')
+    if isinstance(cfg, list):
+        return vkey(v) in {vkey(str(x)) for x in cfg}
+    return cfg is True
+
+
+def decision_producto(informe):
+    """PENDIENTE | APLICAR | APLICADA según la primera línea del informe ('' si no existe)."""
+    m = re.search(r'Decisi[oó]n:\*\*\s*(\w+)', primera_linea(informe)) if informe.exists() else None
+    return m[1].upper() if m else ''
+
+
 def estado(root, docs):
     """Devuelve ('PASO', paso, arg, rama) | ('PARAR', motivo) | ('FIN', motivo)."""
     d = root / docs
@@ -266,8 +281,25 @@ def estado(root, docs):
             return ('PARAR', f'{FIN_VERSION[0]}{v}: ' + '; '.join(partes)
                              + f'. Revisa docs/review/versions/{v}-revision.md y docs/review/bloqueos/: '
                                'desbloquea, mueve de versión o cancela, y relanza.')
+        informe = root / PRODUCTO.format(v=v)
+        if producto_activa(root, v) and not informe.exists():
+            return ('PASO', 'revisar-producto', v, rama)
+        if decision_producto(informe) == 'APLICAR':
+            return ('PASO', 'aplicar-producto', v, rama)
+        if decision_producto(informe) == 'PENDIENTE':
+            return ('PARAR', f'{FIN_VERSION[1]}{v} terminada. Revisa docs/review/versions/{v}-revision.md y decide '
+                             f'las propuestas de {PRODUCTO.format(v=v)}: ajusta destinos, marca APLICAR y relanza '
+                             '(el bucle crea las tareas); registra defectos con /bug-add o cierra con /release.')
         return ('PARAR', f'{FIN_VERSION[1]}{v} terminada. Revisa docs/review/versions/{v}-revision.md'
                          ': registra defectos con /bug-add o cierra con /release, y relanza.')
+    versiones = root / 'docs/review/versions'
+    for informe in sorted(versiones.glob('*-producto.md')) if versiones.is_dir() else []:
+        v = informe.name.split('-')[0]
+        if decision_producto(informe) == 'APLICAR':
+            return ('PASO', 'aplicar-producto', v, None)
+        if decision_producto(informe) == 'PENDIENTE':
+            return ('PARAR', f'Decisiones de producto pendientes en {PRODUCTO.format(v=v)}: ajusta destinos, '
+                             'marca APLICAR y relanza. No abro otra versión hasta entonces.')
     if not pendientes:
         mejoras = len(deuda(items))
         return ('FIN', 'Todas las tareas con versión están cerradas'
