@@ -3,7 +3,8 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -206,6 +207,74 @@ class EnrutadoBloqueoTests(unittest.TestCase):
         e = self.estado('humano', otra='completed')
         self.assertEqual(e[0], 'PARAR')
         self.assertIn('bloqueadas T1', e[1])
+
+
+class AvisosTelegramTests(unittest.TestCase):
+    """Avisos del bucle: fin de versión, cuota, respuesta del humano y fallos; solo los eventos activos."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness='claude', estado=False,
+                                             max_pasos=3, reintentos=2, espera_max=2, cmd=None)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def avisos(self, estado, cfg=None, ejecucion=(0, {}, ''), env=None):
+        """Ejecuta el bucle y devuelve (código, [(evento, texto)] enviados a Telegram)."""
+        cfg = {'telegram': {'chat_id': '42'}} if cfg is None else cfg
+        enviados = []
+
+        def urlopen(url, datos, timeout):
+            enviados.append((url, parse_qs(datos.decode())['text'][0]))
+            return MagicMock(**{'__enter__.return_value.status': 200})
+
+        with (patch.dict(motor.os.environ, env if env is not None else {'TELEGRAM_BOT_TOKEN': 'tok'}, clear=True),
+              patch.object(motor, 'estado', side_effect=estado if callable(estado) else lambda *a: estado),
+              patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'ejecutar', return_value=ejecucion),
+              patch.object(motor, 'esperar', return_value=True),
+              patch.object(motor, 'registrar'), patch.object(motor, 'firma', return_value='igual'),
+              patch.object(motor, 'git', return_value=''),
+              patch('urllib.request.urlopen', side_effect=urlopen)):
+            codigo = motor.bucle(self.args, self.root)
+        return codigo, enviados
+
+    def test_version_end_and_product_end_notify(self):
+        codigo, enviados = self.avisos(('PARAR', 'Versión v0.1 terminada. Revisa'))
+        self.assertEqual(codigo, 2)
+        self.assertEqual(len(enviados), 1)
+        self.assertIn('bottok/sendMessage', enviados[0][0])
+        self.assertIn('Versión v0.1 terminada', enviados[0][1])
+        self.assertIn(self.root.name, enviados[0][1])
+        codigo, enviados = self.avisos(('FIN', 'Todas las tareas con versión están cerradas.'))
+        self.assertEqual(codigo, 0)
+        self.assertIn('Producto terminado', enviados[0][1])
+
+    def test_human_answer_needed_notifies(self):
+        _, enviados = self.avisos(('PARAR', 'Requisitos con preguntas sin valor por defecto seguro.'))
+        self.assertIn('preguntas', enviados[0][1])
+
+    def test_quota_wait_and_quota_stop_notify(self):
+        sin_cuota = (1, {}, 'You hit your usage limit. try again in 1h 30m')
+        _, enviados = self.avisos(('PASO', 'task-dev', 'T1', None), ejecucion=sin_cuota)
+        self.assertIn('Sin cuota', enviados[0][1])
+        self.assertIn('código 1', enviados[-1][1])
+
+    def test_only_enabled_events_are_sent(self):
+        cfg = {'telegram': {'chat_id': '42', 'eventos': ['cuota']}}
+        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), cfg=cfg)[1], [])
+
+    def test_unconfigured_or_without_token_sends_nothing(self):
+        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), cfg={})[1], [])
+        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), env={})[1], [])
+
+    def test_send_failure_does_not_break_the_loop(self):
+        with (patch.dict(motor.os.environ, {'TELEGRAM_BOT_TOKEN': 'tok'}),
+              patch.object(motor, 'config', return_value={'telegram': {'chat_id': '42'}}),
+              patch('urllib.request.urlopen', side_effect=OSError('sin red'))):
+            self.assertFalse(motor.avisar(self.root, 'version', 'hola'))
 
 
 if __name__ == '__main__':

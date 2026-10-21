@@ -1,4 +1,4 @@
-# 🤖 NereoSkills — AI Agent Workflows & Skills
+# 🤖 Adevv — AI Agent Workflows & Skills
 
 Este repositorio centraliza los **agentes**, **skills** y **workflows** reutilizables para herramientas de IA (Claude Code, Cursor, Antigravity, etc.) que siguen el estándar **Issue-as-Code distribuido v3.0**.
 
@@ -48,7 +48,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`.
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`, igual que los avisos por Telegram (fin de versión, falta de cuota y paradas que necesitan respuesta).
 
 ---
 
@@ -82,7 +82,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 
 1. **Añadir como submódulo**:
    ```bash
-   git submodule add https://github.com/imoremu/Wokflows.git .agents
+   git submodule add https://github.com/nereodata/adevv.git .agents
    ```
 2. **Symlink para runtime** (ej. Claude Code):
    ```bash

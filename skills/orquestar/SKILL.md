@@ -69,6 +69,21 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 
 **Sin cuota** (Claude, Codex u otro arnés): si un paso falla y su salida indica límite de uso, el bucle no para. Espera hasta la hora de recuperación que indique el arnés (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Cualquier otro fallo del arnés para el bucle.
 
+**Avisos por Telegram** (opcional): con la clave `telegram` en `orchestration.json`, el bucle avisa al chat configurado de lo que pasa mientras nadie mira. El token del bot nunca va en el fichero: se lee de la variable de entorno `TELEGRAM_BOT_TOKEN` (o la que indique `token_env`); `chat_id` puede ir en el fichero o en `TELEGRAM_CHAT_ID`. `eventos` limita qué se avisa (por defecto, todos):
+
+| Evento | Cuándo |
+|---|---|
+| `version` | La versión no tiene más tareas elegibles (terminada, con bloqueos o con la suite en rojo) y FIN del producto |
+| `cuota` | Empieza una espera por falta de cuota, o el bucle para porque la espera supera `--espera-max` |
+| `respuesta` | Cualquier otra parada que necesita al humano: requisitos con preguntas, plataforma rechazada, dependencias inválidas, decisiones de producto pendientes |
+| `error` | Fallo del arnés, paso sin progreso, cambios sin commitear o `--max-pasos` |
+
+```json
+"telegram": {"chat_id": "123456789", "eventos": ["version", "cuota", "respuesta"]}
+```
+
+`orquestar.py --aviso-prueba` envía un mensaje de prueba. Un aviso que no se puede enviar se anota en el log y el bucle sigue. Parar con `--parar` no avisa.
+
 ## ⚙️ Modo orquestado
 
 1. **Un paso por ejecución.** Ejecuta solo el paso indicado y termina: el bucle decide el siguiente.

@@ -477,6 +477,58 @@ def esperar(root, segundos):
         (root / ESPERA).unlink(missing_ok=True)
 
 
+# ---------------------------------------------------------------- avisos por Telegram
+
+EVENTOS = ('version', 'cuota', 'respuesta', 'error')  # fin de versión/producto, sin cuota, te toca, fallo
+
+
+def telegram(root):
+    """(token, chat_id, eventos) de la clave `telegram` de orchestration.json; None si no está configurado.
+
+    El token nunca va en el fichero: se lee de la variable de entorno `token_env` (TELEGRAM_BOT_TOKEN por
+    defecto). `chat_id` puede venir también de TELEGRAM_CHAT_ID.
+    """
+    cfg = config(root).get('telegram')
+    if not cfg:
+        return None
+    cfg = cfg if isinstance(cfg, dict) else {}
+    token = os.environ.get(cfg.get('token_env', 'TELEGRAM_BOT_TOKEN'), '').strip()
+    chat = str(cfg.get('chat_id') or os.environ.get('TELEGRAM_CHAT_ID', '')).strip()
+    if not token or not chat:
+        return None
+    return token, chat, set(cfg.get('eventos') or EVENTOS)
+
+
+def avisar(root, evento, texto):
+    """Envía el aviso al chat configurado si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
+    cfg = telegram(root)
+    if not cfg or (evento and evento not in cfg[2]):
+        return False
+    token, chat, _ = cfg
+    import urllib.parse
+    import urllib.request
+    datos = urllib.parse.urlencode({'chat_id': chat, 'text': f'[{root.name}] {texto}',
+                                    'disable_web_page_preview': 'true'}).encode()
+    try:
+        with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/sendMessage', datos, timeout=15) as r:
+            return r.status == 200
+    except Exception as ex:  # sin red, token malo…: se informa y se sigue
+        print(f'[orquestar] aviso de Telegram no enviado ({type(ex).__name__})', flush=True)
+        return False
+
+
+def parar(root, evento, texto):
+    """Para el bucle para el humano: lo escribe en la salida y lo avisa."""
+    print(f'[orquestar] PARAR: {texto}', flush=True)
+    avisar(root, evento, f'⏸ {texto}')
+    return 2
+
+
+def evento_de(e):
+    """Evento de aviso de un estado final: cierre de versión o producto terminado, o respuesta del humano."""
+    return 'version' if e[0] == 'FIN' or cierre_de_version(e) else 'respuesta'
+
+
 # ---------------------------------------------------------------- evidencia de verificación
 
 def arbol(root):
@@ -620,6 +672,7 @@ def main():
     ap.add_argument('--prompt-file', type=Path, help='mandato para --agente (si no, por la entrada estándar)')
     ap.add_argument('--verificar', nargs='?', const='suite', metavar='CMD',
                     help='ejecuta la suite (o CMD) o reutiliza su resultado en verde para el mismo árbol')
+    ap.add_argument('--aviso-prueba', action='store_true', help=f'envía un aviso de prueba a Telegram ({CONFIG})')
     a = ap.parse_args()
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
@@ -636,6 +689,12 @@ def main():
         if not cmd:
             sys.exit('Sin suite: usa --test o define validation.command en task_config.yaml.')
         return verificar(root, cmd)
+    if a.aviso_prueba:
+        if not telegram(root):
+            sys.exit(f'Telegram sin configurar: clave "telegram" con chat_id en {CONFIG} y TELEGRAM_BOT_TOKEN.')
+        ok = avisar(root, None, '🔔 Aviso de prueba del orquestador.')
+        print('[orquestar] aviso enviado' if ok else '[orquestar] el aviso no se pudo enviar')
+        return 0 if ok else 1
     if a.parar:
         if not (root / PID).exists():
             print('[orquestar] no hay ningún bucle en marcha')
@@ -686,15 +745,18 @@ def bucle(a, root):
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
         if not a.estado and cmd_suite and cierre_de_version(e) and verificar(root, cmd_suite):
-            print(f'[orquestar] PARAR: la versión no tiene más tareas elegibles pero la suite falla ({cmd_suite}).')
-            return 2
-        if a.estado or e[0] != 'PASO':
+            return parar(root, 'version', f'la versión no tiene más tareas elegibles pero la suite falla ({cmd_suite}).')
+        if a.estado:
             return 0 if e[0] in ('FIN', 'PASO') else 2
+        if e[0] == 'FIN':
+            avisar(root, 'version', f'✅ Producto terminado: {e[1]}')
+            return 0
+        if e[0] == 'PARAR':
+            return parar(root, evento_de(e), e[1])
         _, paso, arg, rama = e
         if rama and git('branch', '--show-current') != rama:
             if git('status', '--porcelain'):
-                print(f'[orquestar] PARAR: cambios sin commitear; no puedo cambiar a {rama}.')
-                return 2
+                return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama}.')
             git('checkout', '-q', rama)
 
         antes = firma(root, a.docs)
@@ -708,6 +770,8 @@ def bucle(a, root):
                          **({'sin_cuota': True} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
+            avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
+                                  f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
             inicio = time.monotonic()
             seguir = esperar(root, cuota)
             registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
@@ -719,20 +783,18 @@ def bucle(a, root):
         if codigo:
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
-            print(f'[orquestar] PARAR: el arnés terminó con código {codigo} ({motivo}). Relanza cuando se resuelva.')
-            return 2
+            return parar(root, 'cuota' if cuota is not None else 'error',
+                         f'el arnés terminó con código {codigo} ({motivo}). Relanza cuando se resuelva.')
         esperado = 0
 
         if firma(root, a.docs) == antes:
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')
             if sin_progreso >= a.reintentos:
-                print(f'[orquestar] PARAR: "{paso}" no avanza tras {a.reintentos} intentos.')
-                return 2
+                return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
-    print(f'[orquestar] PARAR: alcanzado --max-pasos={a.max_pasos}.')
-    return 2
+    return parar(root, 'error', f'alcanzado --max-pasos={a.max_pasos}.')
 
 
 if __name__ == '__main__':
