@@ -34,7 +34,6 @@ PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
 PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA)  # ficheros del bucle, excluidos de git
-RESCATES = 2  # rescates máximos por tarea tras un bloqueo
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -94,7 +93,7 @@ def backlog(root):
                 continue
             peso = str(fm.get('weight', ''))
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
-                        'version': fm.get('version', ''),
+                        'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
                         'weight': int(peso) if peso.lstrip('-').isdigit() else 0})
     return out
@@ -203,13 +202,6 @@ def revisada(root, iid):
     return d.is_dir() and any(d.glob(f'{iid}*'))
 
 
-def analisis(root, iid):
-    """(análisis de bloqueo hechos, cuántos acabaron en rescate) de un ID."""
-    d = root / 'docs/review/bloqueos'
-    hechos = sorted(d.glob(f'{iid}-*.md')) if d.is_dir() else []
-    return len(hechos), sum('RESCATE' in primera_linea(f) for f in hechos)
-
-
 def producto_activa(root, v):
     """Revisión de producto al cerrar v según orchestration.json: `producto` true o lista de versiones."""
     cfg = config(root).get('producto')
@@ -265,9 +257,8 @@ def estado(root, docs):
             return ('PASO', 'revisar-tarea', sin_revisar[0]['id'], rama)
         bloqueadas = sorted((i for i in suyas if i['status'] == 'blocked'), key=lambda i: -alcance.get(i['id'], 0))
         for i in bloqueadas:  # primero la causa raíz que más tareas retiene
-            hechos, rescates = analisis(root, i['id'])
-            if hechos == rescates and rescates < RESCATES:
-                return ('PASO', 'analizar-bloqueo', i['id'], rama)
+            if i['pendiente_de'] == 'especificador':
+                return ('PASO', 'especificar', i['id'], rama)
         pend = [i for i in suyas if i['status'] not in FUERA]
         elegibles = [i for i in pend if not pendientes_de(i, por_id)]
         if elegibles:
@@ -279,8 +270,8 @@ def estado(root, docs):
             partes = ([f'bloqueadas {", ".join(i["id"] for i in bloqueadas)}'] if bloqueadas else []) + \
                      ([f'en espera {i["id"]} (por {", ".join(raices(i["id"], por_id))})' for i in pend])
             return ('PARAR', f'{FIN_VERSION[0]}{v}: ' + '; '.join(partes)
-                             + f'. Revisa docs/review/versions/{v}-revision.md y docs/review/bloqueos/: '
-                               'desbloquea, mueve de versión o cancela, y relanza.')
+                             + f'. Revisa docs/review/versions/{v}-revision.md: '
+                               'responde a las preguntas de las bloqueadas, mueve de versión o cancela, y relanza.')
         informe = root / PRODUCTO.format(v=v)
         if producto_activa(root, v) and not informe.exists():
             return ('PASO', 'revisar-producto', v, rama)

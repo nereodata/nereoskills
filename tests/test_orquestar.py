@@ -152,5 +152,61 @@ class RevisionProductoTests(unittest.TestCase):
         self.assertEqual(self.estado(True, rama='', decision='APLICADA'), ('PASO', 'start-version', 'v0.2', None))
 
 
+class EnrutadoBloqueoTests(unittest.TestCase):
+    """Tarea bloqueada en v0.1 según a quién la envió Hades, junto a otra elegible."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
+                         ('docs/req_analysis.md', ''), ('docs/platform_plan.md', ''),
+                         ('docs/platform_review.md', '**Veredicto:** APROBADO'), ('docs/work_plan.md', '')]:
+            (self.root / f).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / f).write_text(texto, encoding='utf-8')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def estado(self, pendiente_de, otra='planned'):
+        items = [{'paso': 'task-dev', 'id': 'T1', 'status': 'blocked', 'pendiente_de': pendiente_de,
+                  'version': 'v0.1.0', 'depende_de': [], 'weight': 0},
+                 {'paso': 'task-dev', 'id': 'T2', 'status': otra, 'pendiente_de': '',
+                  'version': 'v0.1.0', 'depende_de': [], 'weight': 0}]
+        with (patch.object(motor, 'backlog', return_value=items), patch.object(motor, 'config', return_value={}),
+              patch.object(motor, 'revisada', return_value=True),
+              patch.object(motor, 'git', side_effect=lambda *a, **k: 'release/v0.1' if 'branch' in a else '')):
+            return motor.estado(self.root, 'docs')
+
+    def test_specifier_gets_the_task(self):
+        self.assertEqual(self.estado('especificador'), ('PASO', 'especificar', 'T1', 'release/v0.1'))
+
+    def test_backlog_reads_who_the_task_waits_for(self):
+        tarea = self.root / 'docs/plan/tasks/T1.md'
+        tarea.parent.mkdir(parents=True)
+        tarea.write_text('---\nid: T1\nstatus: blocked\npendiente_de: Especificador \n---\n', encoding='utf-8')
+        self.assertEqual(motor.backlog(self.root)[0]['pendiente_de'], 'especificador')
+
+    def test_specifier_starts_with_the_block_that_holds_more_tasks(self):
+        items = [{'paso': 'task-dev', 'id': i, 'status': 'blocked', 'pendiente_de': 'especificador',
+                  'version': 'v0.1.0', 'depende_de': [], 'weight': 0} for i in ('T1', 'T3')]
+        items.append({'paso': 'task-dev', 'id': 'T4', 'status': 'planned', 'pendiente_de': '',
+                      'version': 'v0.1.0', 'depende_de': ['T3'], 'weight': 0})
+        with (patch.object(motor, 'backlog', return_value=items), patch.object(motor, 'config', return_value={}),
+              patch.object(motor, 'git', side_effect=lambda *a, **k: 'release/v0.1' if 'branch' in a else '')):
+            self.assertEqual(motor.estado(self.root, 'docs'), ('PASO', 'especificar', 'T3', 'release/v0.1'))
+
+    def test_human_block_lets_the_rest_continue(self):
+        for pendiente_de in ('humano', ''):
+            with self.subTest(pendiente_de=pendiente_de):
+                self.assertEqual(self.estado(pendiente_de), ('PASO', 'task-dev', 'T2', 'release/v0.1'))
+
+    def test_human_block_stops_only_at_version_end(self):
+        (self.root / 'docs/review/versions').mkdir(parents=True)
+        (self.root / 'docs/review/versions/v0.1-arquitectura.md').write_text('', encoding='utf-8')
+        e = self.estado('humano', otra='completed')
+        self.assertEqual(e[0], 'PARAR')
+        self.assertIn('bloqueadas T1', e[1])
+
+
 if __name__ == '__main__':
     unittest.main()

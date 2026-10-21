@@ -47,9 +47,10 @@ flowchart TD
   sel -- sí --> td["task-dev / bug-fix del ID<br/>(en curso, el que más desbloquea, menor weight)"]
   td --> rt["revisar-tarea<br/>solo si falta el reporte de review-code"]
   rt --> sel
-  td -. "bloqueada por atasco" .-> ab["analizar-bloqueo<br/>contexto limpio: ni desarrollador ni Hades"]
-  ab -- "rescate con pista (máx. 2)" --> sel
-  ab -- "bloqueo: decisión crítica o algo externo" --> hum
+  td -. "Hades: para el especificador" .-> ab["especificar<br/>ajusta requisito, escenarios o DEC"]
+  ab --> sel
+  td -. "Hades: para el humano · espera a la revisión de versión" .-> hum
+  ab -. "falta un recurso externo" .-> hum
   sel -- no --> rv["revisar-version<br/>Hades · review-code: duplicados y coherencia entre tareas<br/>Hades · review-design: solo si cambió el plan de plataforma"]
   rv --> q3{"¿🔴/🟠?"}
   q3 -- sí --> ba["bug-add en vX.Y"]
@@ -85,7 +86,7 @@ flowchart TD
 
 ## 2. Dentro de una tarea (`task-dev` / `bug-fix` en modo orquestado)
 
-Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. Cada revisión se repite mientras haya progreso y se bloquea por atasco. Una desviación de la arquitectura se registra como `DEC` en el plan de plataforma; la revisa `review-design` en la revisión de versión.
+Sin pausas para el humano: lo que se habría validado va a `vX.Y-revision.md`. Cada revisión se repite mientras Hades deje algo al desarrollador; lo que deja al especificador o al humano bloquea la tarea y el bucle sigue con el resto. Una desviación de la arquitectura se registra como `DEC` en el plan de plataforma; la revisa `review-design` en la revisión de versión.
 
 ```mermaid
 flowchart TD
@@ -104,9 +105,9 @@ flowchart TD
   q -- "con DEC o no se desvía" --> docs["E · manage-docs"]
   docs --> deu["F · deuda según Hades<br/>resolver · registrar como bug · descartar"]
   deu --> cie["cierre + entrada en vX.Y-revision.md<br/>y commit"]
-  rs -. "atasco con 🔴/🟠" .-> blk["wip/ID-n + status: blocked<br/>→ analizar-bloqueo"]
-  rtst -. "atasco con 🔴/🟠" .-> blk
-  rc -. "atasco con 🔴/🟠" .-> blk
+  rs -. "🔴/🟠 para especificador o humano" .-> blk["wip/ID + status: blocked<br/>pendiente_de: especificador o humano"]
+  rtst -.-> blk
+  rc -.-> blk
 
   classDef paso fill:#e4efe9,stroke:#2f6f5e,color:#1d2421
   classDef hades fill:#e6e0f3,stroke:#5b4a8a,color:#1d2421

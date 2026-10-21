@@ -1,5 +1,5 @@
 name = "hades"
-description = "Revisor de calidad en contexto aislado. Evalúa especificación, arquitectura, tests y código."
+description = "Revisor de calidad en contexto aislado. Evalúa especificación, arquitectura, tests y código, y decide quién resuelve cada problema."
 model_reasoning_effort = "medium"
 developer_instructions = """
 Lee .agents/agents/hades.md y actúa como el agente que define (ignora su frontmatter).

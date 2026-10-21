@@ -26,21 +26,21 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 | `review-code` | Cada tarea, tras el verde | Corrección, seguridad, calidad y conformidad con el diseño y la arquitectura |
 | `revisar-producto` | Al cerrar versión (opcional) o a mano | El producto en uso: utilidad, diseño y usabilidad; propone mejoras con destino y el usuario decide |
 
-Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, fuera de versión) o `descartar`.
+Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, fuera de versión) o `descartar`. Cada 🔴/🟠 lleva quién lo resuelve: `desarrollador`, `especificador` o `humano` (solo recursos externos); el orquestador se lo envía y el resto del trabajo sigue.
 
 ### Flujo de Desarrollo Canónico (`task-dev` / `bug-fix`)
 
 ```
 📋 Init          → inline:   delta-first, status, versión
 📝 Especificación → inline:   BDD del delta (generate-bdd)
-🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado, hasta atasco)
+🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado)
                  ↓ [HITL: validación de especificación]
 📐 Diseño        → inline:   diseño de la solución (design), sin revisión
 🔴 Red           → inline:   tests que fallan + lint/tipado limpios
-🔎 review-test   → Hades:    audita calidad de tests (aislado, hasta atasco)
+🔎 review-test   → Hades:    audita calidad de tests (aislado)
 🟢 Green/Fix     → inline:   implementación mínima + verificación del triaje + lint/tipado
                  ↓ [HITL: validación funcional]
-🔎 review-code   → Hades:    audita código y conformidad (aislado, hasta atasco)
+🔎 review-code   → Hades:    audita código y conformidad (aislado)
 📄 Docs          → inline:   manage-docs
 ✅ Cierre        → inline:   deuda (resolver/registrar/descartar), cierre de tareas
 💾 Commit        → inline:   commit semántico

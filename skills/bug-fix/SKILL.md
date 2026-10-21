@@ -26,8 +26,9 @@ Playbook para la resolución de bugs.
 
 > **Modo orquestado** (invocada desde `/orquestar`): mismo ciclo, pero ningún HITL detiene el flujo. Lo que se habría validado se añade a `docs/review/versions/vX.Y-revision.md` (formato en `/orquestar`) para la revisión humana al cerrar la versión. Donde se pregunte al usuario, se toma la opción recomendada y se registra. Las revisiones de Hades se mantienen.
 > Si la tarea ya está `in_progress` y el árbol tiene cambios sin commitear, son de un intento interrumpido de esta misma tarea (p. ej. por falta de cuota): retómalos desde la subfase en que quedaron en lugar de exigir árbol limpio o descartarlos.
-> Si hay análisis de bloqueo de esta tarea en `docs/review/bloqueos/`, léelos antes de empezar y sigue la pista del último (desde la rama `wip/` que indique o desde cero). Cada intento empieza las revisiones de cero.
-> Cada revisión de Hades se repite mientras haya progreso. **Atasco** (se aplica el bloqueo): un mismo 🔴/🟠 sigue `persiste` en dos reevaluaciones seguidas, o el número de 🔴/🟠 no baja en dos reevaluaciones seguidas, o se llega a 6 rondas. Si solo quedan 🟡/🔵, se cierra aplicando su destino.
+> Si la tarea vuelve tras un bloqueo, parte de la rama `wip/<ID>` si existe y lee en la revisión de versión cómo se resolvió (ajuste del especificador o respuesta del humano). Cada intento empieza las revisiones de cero.
+> Cada revisión de Hades se repite mientras quede algo para el desarrollador. Lo que Hades asigne a otro: en modo orquestado, regla 5 de `/orquestar`; en interactivo, se plantea al usuario. Si solo quedan 🟡/🔵, se cierra aplicando su destino.
+> **Impedimentos**: si no puedes resolver algo que la tarea necesita, no lo sortees ni lo finjas: en cuanto lo veas, llévalo tal como esté a la revisión de Hades en curso, describiendo el impedimento. Él decide de quién es.
 > **Pruebas**: lanza las que pueden fallar por tu cambio, no la suite: el bucle la pasa una vez al cerrar la versión. Si algo falla, itera solo sobre lo que falla hasta verlo en verde, y entonces repite una vez la verificación del triaje. En modo orquestado verifica con `orquestar.py --verificar "<comando>"`: reutiliza el resultado en verde del mismo árbol exacto, y Hades reutiliza esa evidencia.
 > En modo orquestado el bug no es urgente: se corrige en la `release/vX.Y` activa.
 
@@ -65,7 +66,7 @@ Anota también en el checklist la **verificación al cierre**: qué pruebas lanz
 ### Subfase A: Definición [EXEC/SKIP]
 1. `/generate-bdd`: Escenarios BDD en español → `.feature` existentes (no nominales). Solo si bug destapa requisito faltante/alterado.
 2. Evals: Golden Tests en Gherkin (aislados).
-3. `Hades /review-spec` (aislado, hasta atasco) sobre los escenarios añadidos o modificados.
+3. `Hades /review-spec` (aislado) sobre los escenarios añadidos o modificados.
 4. **HITL**: Validar reproducción.
 
 ### Subfase B: Diseño [EXEC/SKIP]
@@ -79,7 +80,7 @@ Anota también en el checklist la **verificación al cierre**: qué pruebas lanz
 1. Steps + unit tests que capturen fallo.
 2. Verificar que fallan (solo tests relevantes) y guardar esa salida. En deuda sin fallo reproducible (p. ej. un refactor), no hay rojo: los tests existentes deben seguir en verde.
 3. Lint y tipado limpios sobre las pruebas.
-4. `Hades /review-test` (aislado, hasta atasco), con la salida del rojo.
+4. `Hades /review-test` (aislado), con la salida del rojo.
 
 **Fix Phase:**
 1. Corrección mínima (docstrings sí, inline comments no).
@@ -87,7 +88,7 @@ Anota también en el checklist la **verificación al cierre**: qué pruebas lanz
 3. Lint y tipado limpios sobre todo el delta.
 
 ### Subfase D: QA [EXEC/SKIP]
-1. `Hades /review-code` (aislado, hasta atasco). Obligatoria si hay cambios de código de producción.
+1. `Hades /review-code` (aislado). Obligatoria si hay cambios de código de producción.
 2. **HITL**: Validar funcionalidad e integración visual.
 
 ### Subfase E: Documentación [EXEC/SKIP]
