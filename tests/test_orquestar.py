@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
 
@@ -209,6 +210,9 @@ class EnrutadoBloqueoTests(unittest.TestCase):
         self.assertIn('bloqueadas T1', e[1])
 
 
+CREDENCIALES = {'TELEGRAM_BOT_TOKEN': 'tok', 'TELEGRAM_ALLOWED_USER_IDS': '42, 43'}
+
+
 class AvisosTelegramTests(unittest.TestCase):
     """Avisos del bucle: fin de versión, cuota, respuesta del humano y fallos; solo los eventos activos."""
 
@@ -222,17 +226,17 @@ class AvisosTelegramTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def avisos(self, estado, cfg=None, ejecucion=(0, {}, ''), env=None):
-        """Ejecuta el bucle y devuelve (código, [(evento, texto)] enviados a Telegram)."""
-        cfg = {'telegram': {'chat_id': '42'}} if cfg is None else cfg
+        """Ejecuta el bucle y devuelve (código, [(url, chat, texto)] enviados a Telegram)."""
         enviados = []
 
         def urlopen(url, datos, timeout):
-            enviados.append((url, parse_qs(datos.decode())['text'][0]))
+            campos = parse_qs(datos.decode())
+            enviados.append((url, campos['chat_id'][0], campos['text'][0]))
             return MagicMock(**{'__enter__.return_value.status': 200})
 
-        with (patch.dict(motor.os.environ, env if env is not None else {'TELEGRAM_BOT_TOKEN': 'tok'}, clear=True),
-              patch.object(motor, 'estado', side_effect=estado if callable(estado) else lambda *a: estado),
-              patch.object(motor, 'config', return_value=cfg),
+        with (patch.dict(motor.os.environ, CREDENCIALES if env is None else env, clear=True),
+              patch.object(motor, 'estado', side_effect=lambda *a: estado),
+              patch.object(motor, 'config', return_value=cfg or {}),
               patch.object(motor, 'ejecutar', return_value=ejecucion),
               patch.object(motor, 'esperar', return_value=True),
               patch.object(motor, 'registrar'), patch.object(motor, 'firma', return_value='igual'),
@@ -241,40 +245,103 @@ class AvisosTelegramTests(unittest.TestCase):
             codigo = motor.bucle(self.args, self.root)
         return codigo, enviados
 
-    def test_version_end_and_product_end_notify(self):
+    def test_version_end_and_product_end_notify_every_authorized_user(self):
         codigo, enviados = self.avisos(('PARAR', 'Versión v0.1 terminada. Revisa'))
         self.assertEqual(codigo, 2)
-        self.assertEqual(len(enviados), 1)
+        self.assertEqual([chat for _, chat, _ in enviados], ['42', '43'])
         self.assertIn('bottok/sendMessage', enviados[0][0])
-        self.assertIn('Versión v0.1 terminada', enviados[0][1])
-        self.assertIn(self.root.name, enviados[0][1])
+        self.assertIn('Versión v0.1 terminada', enviados[0][2])
+        self.assertIn(self.root.name, enviados[0][2])
         codigo, enviados = self.avisos(('FIN', 'Todas las tareas con versión están cerradas.'))
         self.assertEqual(codigo, 0)
-        self.assertIn('Producto terminado', enviados[0][1])
+        self.assertIn('Producto terminado', enviados[0][2])
 
     def test_human_answer_needed_notifies(self):
         _, enviados = self.avisos(('PARAR', 'Requisitos con preguntas sin valor por defecto seguro.'))
-        self.assertIn('preguntas', enviados[0][1])
+        self.assertIn('preguntas', enviados[0][2])
 
     def test_quota_wait_and_quota_stop_notify(self):
         sin_cuota = (1, {}, 'You hit your usage limit. try again in 1h 30m')
         _, enviados = self.avisos(('PASO', 'task-dev', 'T1', None), ejecucion=sin_cuota)
-        self.assertIn('Sin cuota', enviados[0][1])
-        self.assertIn('código 1', enviados[-1][1])
+        self.assertIn('Sin cuota', enviados[0][2])
+        self.assertIn('código 1', enviados[-1][2])
 
     def test_only_enabled_events_are_sent(self):
-        cfg = {'telegram': {'chat_id': '42', 'eventos': ['cuota']}}
+        cfg = {'telegram': {'eventos': ['cuota']}}
         self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), cfg=cfg)[1], [])
 
-    def test_unconfigured_or_without_token_sends_nothing(self):
-        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), cfg={})[1], [])
+    def test_disabled_or_without_credentials_sends_nothing(self):
+        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), cfg={'telegram': False})[1], [])
+        self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), env={'TELEGRAM_BOT_TOKEN': 'tok'})[1], [])
         self.assertEqual(self.avisos(('PARAR', 'Versión v0.1 terminada.'), env={})[1], [])
 
     def test_send_failure_does_not_break_the_loop(self):
-        with (patch.dict(motor.os.environ, {'TELEGRAM_BOT_TOKEN': 'tok'}),
-              patch.object(motor, 'config', return_value={'telegram': {'chat_id': '42'}}),
+        with (patch.dict(motor.os.environ, CREDENCIALES),
+              patch.object(motor, 'config', return_value={}),
               patch('urllib.request.urlopen', side_effect=OSError('sin red'))):
             self.assertFalse(motor.avisar(self.root, 'version', 'hola'))
+
+    def test_markdown_rejected_is_retried_as_plain_text(self):
+        modos = []
+
+        def urlopen(url, datos, timeout):
+            modos.append(parse_qs(datos.decode()).get('parse_mode'))
+            if len(modos) == 1:
+                raise HTTPError('https://api.telegram.org', 400, 'Bad Request', {}, None)
+            return MagicMock(**{'__enter__.return_value.status': 200})
+
+        with patch('urllib.request.urlopen', side_effect=urlopen):
+            self.assertTrue(motor.enviar('tok', '42', '*x', markdown=True))
+        self.assertEqual(modos, [['Markdown'], None])
+
+
+class BuzonTests(unittest.TestCase):
+    """Altas desde Telegram: sin versión, con el ID siguiente y un commit que solo lleva esos ficheros."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.git('init', '-q')
+        self.git('config', 'user.email', 't@t')
+        self.git('config', 'user.name', 't')
+        (self.root / 'task_config.yaml').write_text('project:\n  prefix: ADV\n', encoding='utf-8')
+        (self.root / 'docs/plan/tasks').mkdir(parents=True)
+        (self.root / 'docs/plan/tasks/T-ADV-0007-previa.md').write_text('---\nid: T-ADV-0007\n---\n', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-q', '-m', 'base')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.root, check=True, capture_output=True, text=True).stdout
+
+    def test_inbox_is_registered_without_version_and_committed_alone(self):
+        (self.root / 'ajeno.txt').write_text('cambio del usuario', encoding='utf-8')
+        with patch.object(motor, 'excluir'):
+            motor.apuntar(self.root, 'tarea', 'Exportar a CSV', '42')
+            motor.apuntar(self.root, 'bug', 'El login falla con tildes', '42')
+        self.assertEqual(motor.ingerir(self.root), [('T-ADV-0008', 'Exportar a CSV'),
+                                                    ('B-ADV-0001', 'El login falla con tildes')])
+        tarea = motor.frontmatter(self.root / 'docs/plan/tasks/T-ADV-0008-exportar-a-csv.md')
+        self.assertEqual((tarea['status'], tarea['version']), ('backlog', ''))
+        self.assertNotIn('depende_de', tarea)
+        self.assertTrue((self.root / 'docs/plan/bugs/B-ADV-0001-el-login-falla-con-tildes.md').exists())
+        commit = self.git('show', '--name-only', '--format=%s', 'HEAD')
+        self.assertIn('T-ADV-0008, B-ADV-0001', commit)
+        self.assertNotIn('ajeno.txt', commit)
+        self.assertFalse((self.root / motor.BUZON).exists())
+        self.assertEqual(motor.ingerir(self.root), [])
+
+    def test_unversioned_task_does_not_trigger_dependencies_step(self):
+        items = [{'paso': 'task-dev', 'id': 'T1', 'status': 'backlog', 'version': '', 'depende_de': None,
+                  'pendiente_de': '', 'weight': 0}]
+        for f in ('requirements.md', 'req_analysis.md', 'platform_plan.md', 'platform_review.md', 'work_plan.md'):
+            (self.root / 'docs' / f).write_text('', encoding='utf-8')
+        with (patch.object(motor, 'backlog', return_value=items), patch.object(motor, 'git', return_value='')):
+            self.assertEqual(motor.estado(self.root, 'docs')[0], 'FIN')
+            items[0]['version'] = 'v0.2.0'
+            self.assertEqual(motor.estado(self.root, 'docs')[1], 'calcular-dependencias')
 
 
 if __name__ == '__main__':

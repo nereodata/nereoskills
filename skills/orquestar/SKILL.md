@@ -46,7 +46,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Sin `<docs>/platform_review.md` | paso `revisar-plataforma` |
 | `platform_review.md` con `RECHAZADO` | PARAR: plataforma rechazada |
 | Sin `work_plan.md` o backlog vacío | paso `work-plan` |
-| Alguna tarea maestra abierta sin el campo `depende_de` | paso `calcular-dependencias` |
+| Alguna tarea maestra abierta con versión y sin el campo `depende_de` | paso `calcular-dependencias` |
 | `depende_de` con IDs inexistentes o ciclos | PARAR: dependencias inválidas |
 | Rama `release/vX.Y` recién abierta (ninguna tarea empezada), con deuda registrada pendiente y sin `docs/review/versions/vX.Y-deuda.md` | paso `revisar-deuda` |
 | Rama `release/vX.Y` con un ID `completed` sin reporte en `docs/review/code_reviews/` | paso `revisar-tarea` |
@@ -69,7 +69,7 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 
 **Sin cuota** (Claude, Codex u otro arnés): si un paso falla y su salida indica límite de uso, el bucle no para. Espera hasta la hora de recuperación que indique el arnés (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Cualquier otro fallo del arnés para el bucle.
 
-**Avisos por Telegram** (opcional): con la clave `telegram` en `orchestration.json`, el bucle avisa al chat configurado de lo que pasa mientras nadie mira. El token del bot nunca va en el fichero: se lee de la variable de entorno `TELEGRAM_BOT_TOKEN` (o la que indique `token_env`); `chat_id` puede ir en el fichero o en `TELEGRAM_CHAT_ID`. `eventos` limita qué se avisa (por defecto, todos):
+**Avisos por Telegram** (opcional): con `TELEGRAM_BOT_TOKEN` y `TELEGRAM_ALLOWED_USER_IDS` (IDs separados por comas) en el entorno, el bucle avisa a esos usuarios de lo que pasa mientras nadie mira. Son las mismas variables del gateway (`/telegram-gateway`), que además atiende `/estado`, `/tarea` y `/bug`. El token nunca va en un fichero. En `orchestration.json`, la clave `telegram` solo elige los eventos (`eventos`; por defecto, todos) o los apaga (`"telegram": false`):
 
 | Evento | Cuándo |
 |---|---|
@@ -79,10 +79,12 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 | `error` | Fallo del arnés, paso sin progreso, cambios sin commitear o `--max-pasos` |
 
 ```json
-"telegram": {"chat_id": "123456789", "eventos": ["version", "cuota", "respuesta"]}
+"telegram": {"eventos": ["version", "cuota", "respuesta"]}
 ```
 
 `orquestar.py --aviso-prueba` envía un mensaje de prueba. Un aviso que no se puede enviar se anota en el log y el bucle sigue. Parar con `--parar` no avisa.
+
+**Buzón.** Las tareas y bugs pedidos por Telegram con el bucle en marcha esperan en `orquestar_buzon.jsonl`. Al empezar cada paso, el bucle los registra sin versión (`status: backlog`), los commitea solos (`docs(plan): altas desde Telegram (…)`) y avisa del ID. No entran en la versión en curso: les pones versión tú, o `revisar-deuda` si son bugs.
 
 ## ⚙️ Modo orquestado
 
@@ -100,7 +102,7 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 | `platform-plan` | `/platform-plan` | — | existe `platform_plan.md` |
 | `revisar-plataforma` | Hades `/review-design` sobre `platform_plan.md`, frente a los requisitos; corrige lo que no deje al humano y repite; lo que deje al humano, `RECHAZADO` con su pregunta | — | `platform_review.md` con primera línea `**Veredicto:** APROBADO` o `RECHAZADO` |
 | `work-plan` | `/work-plan` | — | `work_plan.md` y tareas con versión y `depende_de` en el backlog |
-| `calcular-dependencias` | Lee `work_plan.md` y todas las tareas maestras abiertas y declara en cada una `depende_de` (ver `/task-add`), una sola vez para todo el backlog | sin ciclos ni dependencias a versiones posteriores; las tareas `blocked` solo por depender de otra (bloqueo en cascada anterior) vuelven a `planned` y pierden esa nota de bloqueo | todas las maestras abiertas tienen `depende_de` |
+| `calcular-dependencias` | Lee `work_plan.md` y todas las tareas maestras abiertas y declara en cada una `depende_de` (ver `/task-add`), una sola vez para todo el backlog | sin ciclos ni dependencias a versiones posteriores; las tareas `blocked` solo por depender de otra (bloqueo en cascada anterior) vuelven a `planned` y pierden esa nota de bloqueo | todas las maestras abiertas con versión tienen `depende_de` |
 | `start-version` | `/start-version` con la versión indicada | — | existe `release/vX.Y` |
 | `revisar-deuda` | Repasa la deuda registrada frente al código actual y a las tareas de vX.Y | **incluir** la que afecta a lo que toca esta versión (mismos módulos o una tarea citada en `origen`): `version: vX.Y.0`, `status: planned` y peso que la ordena antes de las tareas a las que afecta; **cancelar** con motivo la ya resuelta o irrelevante; **dejar** el resto como mejora futura. La deuda no relacionada con la versión no se incluye: la decide el humano | existe `vX.Y-deuda.md` con las tres listas |
 | `task-dev` | `/task-dev <ID>` en modo orquestado | — | tarea `completed` y commit |

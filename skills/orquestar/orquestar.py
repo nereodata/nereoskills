@@ -33,7 +33,8 @@ LOG = 'orquestar.log'
 PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA)  # ficheros del bucle, excluidos de git
+BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
+PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp')  # ficheros del bucle, excluidos de git
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -179,6 +180,89 @@ def en_espera(items):
             if i['status'] not in FUERA and pendientes_de(i, por_id)}
 
 
+# ---------------------------------------------------------------- buzón: altas desde fuera del bucle
+
+def prefijo(root):
+    """Prefijo del proyecto en los IDs: `prefix` de task_config.yaml, el de los IDs existentes o PRJ."""
+    try:
+        m = re.search(r'^\s*prefix:\s*["\']?([A-Za-z0-9]+)', (root / 'task_config.yaml').read_text(encoding='utf-8'), re.M)
+        if m:
+            return m[1]
+    except OSError:
+        pass
+    vistos = [m[1] for d in backlog_dirs(root) if d.is_dir() for f in d.glob('*.md')
+              for m in [re.match(r'[TB]-([A-Za-z0-9]+)-\d+', f.name)] if m]
+    return max(set(vistos), key=vistos.count) if vistos else 'PRJ'
+
+
+def siguiente_id(root, letra):
+    """Siguiente ID maestro libre (T- o B-) según los ficheros del backlog."""
+    pre = f'{letra}-{prefijo(root)}-'
+    d = backlog_dirs(root)[letra == 'B']
+    nums = [int(m[1]) for f in (d.glob('*.md') if d.is_dir() else []) for m in [re.match(re.escape(pre) + r'(\d+)', f.name)] if m]
+    return f'{pre}{max(nums, default=0) + 1:04d}'
+
+
+def slug(texto):
+    import unicodedata
+    plano = ''.join(c for c in unicodedata.normalize('NFKD', texto) if not unicodedata.combining(c))
+    return re.sub(r'[^a-z0-9]+', '-', plano.lower()).strip('-')[:60].strip('-')
+
+
+def alta(root, tipo, titulo, autor=''):
+    """Crea una tarea o un bug maestro sin versión (`backlog`): el bucle no lo trabaja hasta que alguien le pone versión.
+
+    Las tareas van sin `depende_de`: se calculan cuando entren en una versión.
+    """
+    titulo = ' '.join(titulo.split())
+    letra = 'B' if tipo == 'bug' else 'T'
+    d = backlog_dirs(root)[letra == 'B']
+    d.mkdir(parents=True, exist_ok=True)
+    iid = siguiente_id(root, letra)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    origen = f'Telegram{f" (usuario {autor})" if autor else ""}, {hoy}'
+    cabecera = (f'---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n'
+                f'type: {"bug" if letra == "B" else "funcional"}\nweight: 100\nversion: ""\nstatus: backlog\n'
+                f'created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n')
+    cuerpo = (f'## 🎯 Descripción del Fallo\n{titulo}\n\n## 📋 Reproducir\n1. Por detallar.\n\n'
+              f'## 📋 Evidencias\n- Registrado desde {origen}.\n') if letra == 'B' else \
+             (f'## 🎯 Objetivo de Negocio\n{titulo}\n\n## 📋 Criterios de Aceptación (Nivel Máster)\n'
+              f'- [ ] **CA-M-1:** Por concretar (registrada desde {origen}).\n')
+    f = d / (f'{iid}-{slug(titulo)}.md' if slug(titulo) else f'{iid}.md')
+    f.write_text(cabecera + cuerpo, encoding='utf-8')
+    return iid, f
+
+
+def apuntar(root, tipo, titulo, autor=''):
+    """Deja en el buzón una tarea o un bug pedido desde fuera; el bucle lo registra entre pasos."""
+    excluir(root)
+    with (root / BUZON).open('a', encoding='utf-8') as f:
+        f.write(json.dumps({'tipo': tipo, 'titulo': titulo, 'autor': autor, 'fecha': ahora()}, ensure_ascii=False) + '\n')
+
+
+def ingerir(root):
+    """Registra el buzón en el backlog y commitea solo esos ficheros. Devuelve [(id, título)] registrados."""
+    f, tmp = root / BUZON, root / (BUZON + '.tmp')
+    try:
+        if not tmp.exists():  # si existe, quedó de una ingesta interrumpida
+            f.replace(tmp)
+    except OSError:  # no hay buzón, o el gateway lo está escribiendo: a la siguiente
+        return []
+    hechos = []
+    for linea in tmp.read_text(encoding='utf-8').splitlines():
+        if linea.strip():
+            e = json.loads(linea)
+            iid, fichero = alta(root, e['tipo'], e['titulo'], e.get('autor', ''))
+            hechos.append((iid, e['titulo'], fichero))
+    if hechos:
+        rutas = [str(x[2].relative_to(root)) for x in hechos]
+        subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True)
+        subprocess.run(['git', 'commit', '-q', '-m', 'docs(plan): altas desde Telegram (' + ', '.join(x[0] for x in hechos) + ')',
+                        '--', *rutas], cwd=root, capture_output=True)
+    tmp.unlink()
+    return [(iid, titulo) for iid, titulo, _ in hechos]
+
+
 # ---------------------------------------------------------------- estado
 
 def deuda(items):
@@ -236,7 +320,8 @@ def estado(root, docs):
     items = backlog(root)
     if not (d / 'work_plan.md').exists() or not items:
         return ('PASO', 'work-plan', '', None)
-    if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None for i in items):
+    if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None and vkey(i['version'])
+           for i in items):
         return ('PASO', 'calcular-dependencias', '', None)
     errores = errores_dependencias(items)
     if errores:
@@ -482,39 +567,51 @@ def esperar(root, segundos):
 EVENTOS = ('version', 'cuota', 'respuesta', 'error')  # fin de versión/producto, sin cuota, te toca, fallo
 
 
-def telegram(root):
-    """(token, chat_id, eventos) de la clave `telegram` de orchestration.json; None si no está configurado.
+def credenciales():
+    """(token, usuarios autorizados) de TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS (lista separada por comas)."""
+    usuarios = [u.strip() for u in os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '').split(',') if u.strip()]
+    return os.environ.get('TELEGRAM_BOT_TOKEN', '').strip(), usuarios
 
-    El token nunca va en el fichero: se lee de la variable de entorno `token_env` (TELEGRAM_BOT_TOKEN por
-    defecto). `chat_id` puede venir también de TELEGRAM_CHAT_ID.
+
+def telegram(root):
+    """(token, usuarios, eventos) para los avisos; None sin credenciales o con `"telegram": false`.
+
+    Los avisos van a los mismos usuarios que atiende el gateway. La clave `telegram` de orchestration.json
+    solo elige los eventos (`{"eventos": [...]}`); sin ella se avisan todos.
     """
-    cfg = config(root).get('telegram')
-    if not cfg:
+    cfg = config(root).get('telegram', {})
+    token, usuarios = credenciales()
+    if cfg is False or not token or not usuarios:
         return None
-    cfg = cfg if isinstance(cfg, dict) else {}
-    token = os.environ.get(cfg.get('token_env', 'TELEGRAM_BOT_TOKEN'), '').strip()
-    chat = str(cfg.get('chat_id') or os.environ.get('TELEGRAM_CHAT_ID', '')).strip()
-    if not token or not chat:
-        return None
-    return token, chat, set(cfg.get('eventos') or EVENTOS)
+    return token, usuarios, set((cfg if isinstance(cfg, dict) else {}).get('eventos') or EVENTOS)
+
+
+def enviar(token, chat, texto, markdown=False):
+    """Envía un mensaje; si Telegram rechaza el Markdown, lo reintenta en texto plano. Nunca lanza."""
+    import urllib.parse
+    import urllib.request
+    error = None
+    for modo in ('Markdown', None) if markdown else (None,):
+        campos = {'chat_id': chat, 'text': texto, 'disable_web_page_preview': 'true', **({'parse_mode': modo} if modo else {})}
+        try:
+            with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/sendMessage',
+                                        urllib.parse.urlencode(campos).encode(), timeout=15) as r:
+                return r.status == 200
+        except Exception as ex:  # sin red, token malo…: se informa y se sigue
+            error = ex
+            if not (modo and getattr(ex, 'code', None) == 400):
+                break
+    print(f'[orquestar] mensaje de Telegram no enviado ({type(error).__name__})', flush=True)
+    return False
 
 
 def avisar(root, evento, texto):
-    """Envía el aviso al chat configurado si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
+    """Envía el aviso a los usuarios autorizados si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
     cfg = telegram(root)
     if not cfg or (evento and evento not in cfg[2]):
         return False
-    token, chat, _ = cfg
-    import urllib.parse
-    import urllib.request
-    datos = urllib.parse.urlencode({'chat_id': chat, 'text': f'[{root.name}] {texto}',
-                                    'disable_web_page_preview': 'true'}).encode()
-    try:
-        with urllib.request.urlopen(f'https://api.telegram.org/bot{token}/sendMessage', datos, timeout=15) as r:
-            return r.status == 200
-    except Exception as ex:  # sin red, token malo…: se informa y se sigue
-        print(f'[orquestar] aviso de Telegram no enviado ({type(ex).__name__})', flush=True)
-        return False
+    token, usuarios, _ = cfg
+    return all([enviar(token, u, f'[{root.name}] {texto}') for u in usuarios])
 
 
 def parar(root, evento, texto):
@@ -633,6 +730,35 @@ def resumen(root):
     print(f'[orquestar] último paso: {ultima.get("paso", "")} {ultima.get("id", "")} ({ultima.get("fecha", "")})')
 
 
+def parte(root, docs='docs/requirements'):
+    """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
+    if (root / ESPERA).exists():
+        marcha = f'esperando cuota hasta {(root / ESPERA).read_text().strip()[-5:]}'
+    else:
+        marcha = 'en marcha' if (root / PID).exists() else 'parado'
+    e = estado(root, docs)
+    lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
+    items = backlog(root)
+    abiertas = sorted({i['version'] for i in items if vkey(i['version']) and i['status'] not in CERRADO}, key=vkey)
+    for v in abiertas[:1]:
+        suyas = [i for i in items if i['version'] == v]
+        cuenta = lambda *s: [i['id'] for i in suyas if i['status'] in s]
+        lineas.append(f'*{v}:* {len(cuenta("completed"))}/{len(suyas)} cerradas'
+                      + (f' · en curso {", ".join(cuenta("in_progress"))}' if cuenta('in_progress') else '')
+                      + (f' · bloqueadas {", ".join(cuenta("blocked"))}' if cuenta('blocked') else ''))
+    sin_version = [i for i in items if not vkey(i['version']) and i['status'] not in FUERA]
+    lineas.append(f'*Backlog sin versión:* {len(sin_version)}')
+    if (root / BUZON).exists():
+        pendientes = sum(1 for l in (root / BUZON).read_text(encoding='utf-8').splitlines() if l.strip())
+        lineas.append(f'*Por registrar:* {pendientes} (entre pasos del bucle)')
+    if (root / METRICAS).exists():
+        pasos = [json.loads(l) for l in (root / METRICAS).read_text(encoding='utf-8').splitlines()
+                 if l.strip() and json.loads(l).get('tipo', 'paso') == 'paso']
+        if pasos:
+            lineas.append(f'*Último paso:* {pasos[-1].get("paso", "")} {pasos[-1].get("id") or ""} ({pasos[-1].get("fecha", "")[:16]})')
+    return '\n'.join(lineas)
+
+
 def en_fondo(root):
     """Relanza el bucle desacoplado, con la salida en LOG, y vuelve enseguida."""
     if (root / PID).exists():
@@ -691,7 +817,8 @@ def main():
         return verificar(root, cmd)
     if a.aviso_prueba:
         if not telegram(root):
-            sys.exit(f'Telegram sin configurar: clave "telegram" con chat_id en {CONFIG} y TELEGRAM_BOT_TOKEN.')
+            sys.exit('Telegram sin configurar: define TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS '
+                     f'(y que "telegram" no sea false en {CONFIG}).')
         ok = avisar(root, None, '🔔 Aviso de prueba del orquestador.')
         print('[orquestar] aviso enviado' if ok else '[orquestar] el aviso no se pudo enviar')
         return 0 if ok else 1
@@ -742,6 +869,10 @@ def bucle(a, root):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
             return 2
+        if not a.estado:
+            for iid, titulo in ingerir(root):
+                print(f'[orquestar] alta desde Telegram: {iid} {titulo}', flush=True)
+                avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
         if not a.estado and cmd_suite and cierre_de_version(e) and verificar(root, cmd_suite):
