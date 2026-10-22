@@ -102,5 +102,28 @@ class GatewayTests(unittest.TestCase):
                          [(555, 'No he podido procesarlo; mira el log del gateway.'), (555, 'ayuda')])
 
 
+
+    def test_credenciales_reads_from_env_file(self):
+        env_file = self.root / '.env'
+        env_file.write_text('TELEGRAM_BOT_TOKEN=token_archivo\nTELEGRAM_ALLOWED_USER_IDS="111, 222"\n', encoding='utf-8')
+        tok, usr = motor.credenciales(self.root)
+        self.assertEqual(tok, 'token_archivo')
+        self.assertEqual(usr, ['111', '222'])
+
+    def test_credenciales_falls_back_to_os_environ(self):
+        with patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'token_env', 'TELEGRAM_ALLOWED_USER_IDS': '333, 444'}):
+            tok, usr = motor.credenciales(self.root)
+            self.assertEqual(tok, 'token_env')
+            self.assertEqual(usr, ['333', '444'])
+
+    def test_credenciales_env_file_takes_precedence(self):
+        env_file = self.root / '.env'
+        env_file.write_text('TELEGRAM_BOT_TOKEN=token_local\n', encoding='utf-8')
+        with patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'token_global', 'TELEGRAM_ALLOWED_USER_IDS': '555'}):
+            tok, usr = motor.credenciales(self.root)
+            self.assertEqual(tok, 'token_local')
+            self.assertEqual(usr, ['555'])
+
+
 if __name__ == '__main__':
     unittest.main()

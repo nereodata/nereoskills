@@ -7,8 +7,10 @@ description: Gateway de Telegram de Adevv. Atiende a los usuarios autorizados mi
 
 Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los avisos de salida (fin de versión, falta de cuota, paradas que necesitan respuesta, errores) no son del gateway: los envía el bucle (ver «Avisos por Telegram» en `/orquestar`).
 
-## 🔐 Configuración (variables de entorno, compartidas con el bucle)
-- `TELEGRAM_BOT_TOKEN`: token del bot (de `@BotFather`). Nunca en un fichero del repositorio.
+## 🔐 Configuración (fichero `.env` en la raíz o variables de entorno)
+- Fichero `.env` en la raíz (recomendado para aislar el bot de cada proyecto; excluido de git por defecto).
+- `TELEGRAM_BOT_TOKEN`: token del bot (de `@BotFather`). Nunca commitear en git.
+- `TELEGRAM_ALLOWED_USER_IDS`: IDs numéricos de Telegram autorizados, separados por comas. Solo ellos reciben respuesta, y son también los destinatarios de los avisos del bucle. Los mensajes de cualquier otro usuario se ignoran sin tocar nada.
 - `TELEGRAM_ALLOWED_USER_IDS`: IDs numéricos de Telegram autorizados, separados por comas. Solo ellos reciben respuesta, y son también los destinatarios de los avisos del bucle. Los mensajes de cualquier otro usuario se ignoran sin tocar nada.
 
 ## 📋 Comandos

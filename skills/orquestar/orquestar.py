@@ -36,7 +36,7 @@ PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp')  # ficheros del bucle, excluidos de git
+PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env')  # ficheros del bucle, excluidos de git
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -565,6 +565,8 @@ def agente(root, rol, prompt):
     elif harness == 'codex':
         base = ['codex', 'exec', '--ephemeral', '--json', '-c', 'approval_policy="never"',
                 '--sandbox', 'workspace-write', '-']
+    elif harness == 'agy':
+        base = ['agy', '--dangerously-skip-permissions', '--output-format', 'json', '-p', prompt]
     else:
         sys.exit(f'Arnés no soportado para roles: {harness}')
     exe = shutil.which(base[0])
@@ -648,10 +650,35 @@ def esperar(root, segundos):
 EVENTOS = ('version', 'cuota', 'respuesta', 'error')  # fin de versión/producto, sin cuota, te toca, fallo
 
 
-def credenciales():
-    """(token, usuarios autorizados) de TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS (lista separada por comas)."""
-    usuarios = [u.strip() for u in os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '').split(',') if u.strip()]
-    return os.environ.get('TELEGRAM_BOT_TOKEN', '').strip(), usuarios
+def leer_env(ruta):
+    """Lee un fichero clave=valor (.env) sin dependencias externas."""
+    valores = {}
+    p = Path(ruta)
+    if p.is_file():
+        try:
+            for linea in p.read_text(encoding='utf-8', errors='replace').splitlines():
+                linea = linea.strip()
+                if not linea or linea.startswith('#'):
+                    continue
+                if '=' in linea:
+                    k, _, v = linea.partition('=')
+                    k, v = k.strip(), v.strip()
+                    if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
+                        v = v[1:-1]
+                    valores[k] = v
+        except OSError:
+            pass
+    return valores
+
+
+def credenciales(root=None):
+    """(token, usuarios autorizados) de .env (en root o CWD) o del entorno de ejecución."""
+    base = Path(root) if root else Path.cwd()
+    env = leer_env(base / '.env')
+    token = env.get('TELEGRAM_BOT_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN', '')
+    raw_usr = env.get('TELEGRAM_ALLOWED_USER_IDS') or os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '')
+    usuarios = [u.strip() for u in str(raw_usr).split(',') if u.strip()]
+    return token.strip(), usuarios
 
 
 def telegram(root):
@@ -661,7 +688,7 @@ def telegram(root):
     solo elige los eventos (`{"eventos": [...]}`); sin ella se avisan todos.
     """
     cfg = config(root).get('telegram', {})
-    token, usuarios = credenciales()
+    token, usuarios = credenciales(root)
     if cfg is False or not token or not usuarios:
         return None
     return token, usuarios, set((cfg if isinstance(cfg, dict) else {}).get('eventos') or EVENTOS)

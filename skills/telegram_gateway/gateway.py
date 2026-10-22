@@ -90,9 +90,9 @@ def main():
     if a.estado:
         print(motor.parte(root))
         return 0
-    token, autorizados = motor.credenciales()
+    token, autorizados = motor.credenciales(root)
     if not token or not autorizados:
-        sys.exit('Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_ALLOWED_USER_IDS.')
+        sys.exit('Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_ALLOWED_USER_IDS (en .env o en el entorno).')
     print(f'[gateway] escuchando para {root.name} ({len(autorizados)} usuarios autorizados)', flush=True)
     try:
         escuchar(root, token, set(autorizados))
