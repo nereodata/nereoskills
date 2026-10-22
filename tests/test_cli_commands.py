@@ -20,6 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from adevv.cli import main_cli
+from adevv.store import set_config
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -62,11 +63,26 @@ class TestCliCommands(unittest.TestCase):
     """Pruebas completas de despacho CLI, validaciones y auto-inicialización."""
 
     def setUp(self):
+        os.environ.pop("ORQUESTAR_PASO", None)
+        os.environ.pop("ADEVV_BOOTSTRAPPED", None)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name).resolve()
         self.repo_root = Path(__file__).resolve().parents[1]
+        self.adevv_home = self.root / ".adevv"
+        self.claude_home = self.root / ".claude"
+        self.codex_home = self.root / ".codex"
+        self.agy_home = self.root / ".gemini"
+        os.environ["ADEVV_HOME"] = str(self.adevv_home)
+        os.environ["CLAUDE_HOME"] = str(self.claude_home)
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+        os.environ["AGY_HOME"] = str(self.agy_home)
+        set_config({"auto_update": False})
 
     def tearDown(self):
+        os.environ.pop("ADEVV_HOME", None)
+        os.environ.pop("CLAUDE_HOME", None)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("AGY_HOME", None)
         self.temp_dir.cleanup()
 
     def _init_dummy_project(self, folder: Path, prefix="PRJ", version="v0.1.0"):
@@ -225,6 +241,7 @@ class TestCliCommands(unittest.TestCase):
         casos_elementos = [
             (".claude/skills/orquestar", True),
             (".codex/agents/hades.toml", False),
+            (".claude/skills/telegram-gateway", True),
             (".agents", True),
         ]
 
@@ -407,6 +424,13 @@ class TestCliCommands(unittest.TestCase):
             prompt_fuente = motor.construir_prompt_paso(self.repo_root, "ciclo-requisitos", None)
             self.assertIn(expected_skill, prompt_fuente.replace("\\", "/"))
             self.assertIn('Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.', prompt_fuente)
+
+    def test_h02_version_es_consulta_pura_sin_efectos_secundarios(self):
+        """H-02: adevv --version no invoca evaluar_comprobacion_actualizacion."""
+        with patch("adevv.updater.evaluar_comprobacion_actualizacion") as mock_update:
+            code, out, err = self._ejecutar_cli(["--version"], self.root)
+            self.assertEqual(code, 0)
+            mock_update.assert_not_called()
 
 
 if __name__ == "__main__":

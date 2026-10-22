@@ -212,6 +212,31 @@ class TestSyncEngine(unittest.TestCase):
         self.assertFalse((self.claude_home / "skills" / "orquestar" / "scripts").exists())
         self.assertFalse((self.claude_home / "skills" / "orquestar" / "orquestar.py").exists())
 
+    def test_h01_resolver_rutas_contenido_formato_limpio_codex_y_workflows(self):
+        """H-01 / CA-F01-03: Rutas como agents/hades.md o skills/task-dev/SKILL.md se resuelven a absolutas sin duplicar."""
+        version_dir = Path("/tmp/adevv/versions/0.1.0")
+        contenido_codex = b'developer_instructions = """\nLee agents/hades.md y actua.\nLas skills estan en skills/<nombre>/SKILL.md.\n"""'
+        res_codex = resolver_rutas_contenido("agents/codex/hades.toml", contenido_codex, version_dir).decode("utf-8")
+        self.assertIn("Lee /tmp/adevv/versions/0.1.0/agents/hades.md", res_codex)
+        self.assertIn("skills estan en /tmp/adevv/versions/0.1.0/skills/<nombre>/SKILL.md", res_codex)
+        self.assertEqual(res_codex.count("/tmp/adevv/versions/0.1.0"), 2)
+
+        contenido_wf = b"Ejecuta solo los pasos definidos en `skills/task-dev/SKILL.md`.\n"
+        res_wf = resolver_rutas_contenido("workflows/task-dev.md", contenido_wf, version_dir).decode("utf-8")
+        self.assertIn("`/tmp/adevv/versions/0.1.0/skills/task-dev/SKILL.md`", res_wf)
+        self.assertEqual(res_wf.count("/tmp/adevv/versions/0.1.0"), 1)
+
+        # Probar que con prefijo .agents/ o ruta ya absoluta no se duplica el prefijo
+        contenido_mixto = (
+            b'Lee .agents/agents/hades.md y actua.\n'
+            b'O lee /tmp/adevv/versions/0.1.0/agents/hades.md directamente.\n'
+            b'Y `../skills/orquestar/SKILL.md` tambien.\n'
+        )
+        res_mixto = resolver_rutas_contenido("agents/codex/hades.toml", contenido_mixto, version_dir).decode("utf-8")
+        self.assertNotIn("/tmp/adevv/versions/0.1.0/tmp/adevv/versions/0.1.0", res_mixto)
+        self.assertNotIn("/tmp/adevv/versions/0.1.0/.agents", res_mixto)
+        self.assertEqual(res_mixto.count("/tmp/adevv/versions/0.1.0"), 3)
+
     def test_ca_f01_04_skill_ajena_no_se_sobrescribe_y_deja_incompleto(self):
         """CA-F01-04 / RF-F01-05 / RF-F01-06 / RF-F01-13: Skill ajena produce conflicto alien, no se toca y destino queda INCOMPLETO."""
         self.claude_home.mkdir(parents=True, exist_ok=True)

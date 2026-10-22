@@ -108,7 +108,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 
 1. **Instalar Adevv**:
    ```bash
-   pip install adevv
+   pip install --user git+https://github.com/nereodata/nereoskills.git@v0.1.0
    ```
 2. **Sincronizar arneses**:
    ```bash

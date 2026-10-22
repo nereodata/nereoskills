@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Set, TextIO, Tuple
 
+from adevv._build import is_symlink_or_junction
 from adevv.store import get_active_version_dir
 
 
@@ -24,20 +25,18 @@ class ResultadoDiagnostico(NamedTuple):
 
 def info_enlace(path: Path) -> Tuple[bool, str, str]:
     """Determina si una ruta es enlace o junction y retorna (es_enlace, destino, tipo)."""
+    if not is_symlink_or_junction(path):
+        return False, "", ""
     try:
-        if hasattr(os.path, "isjunction") and os.path.isjunction(path):
-            target = os.readlink(str(path))
-            if target.startswith("\\\\?\\"):
-                target = target[4:]
-            return True, target, "junction"
-        if os.path.islink(path) or path.is_symlink():
-            target = os.readlink(str(path))
-            if target.startswith("\\\\?\\"):
-                target = target[4:]
-            return True, target, "enlace"
+        is_junc = hasattr(os.path, "isjunction") and os.path.isjunction(path)
+        tipo = "junction" if is_junc else "enlace"
+        target = os.readlink(str(path))
+        if target.startswith("\\\\?\\"):
+            target = target[4:]
+        return True, target, tipo
     except (OSError, ValueError):
         pass
-    return False, "", ""
+    return True, "", "enlace"
 
 
 def es_repositorio_fuente_adevv(root: Path) -> bool:

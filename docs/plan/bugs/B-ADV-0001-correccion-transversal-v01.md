@@ -4,7 +4,7 @@ title: "Corrección transversal v0.1: resolución de rutas en sync, aislamiento 
 type: bug
 weight: 10
 version: "v0.1.0"
-status: planned
+status: completed
 created_at: 2026-10-22
 updated_at: 2026-10-22
 depende_de: []
@@ -57,6 +57,17 @@ La revisión transversal de arquitectura y código de la versión `v0.1` (`docs/
 
 6. **[H-06 · 🔵 BAJA (`destino: resolver`)] Imports sin usar en `adevv/cli.py`**:
    - Eliminar los imports no utilizados en `adevv/cli.py` (`obtener_versiones_publicadas`, etc.).
+
+## 📋 Triaje de Alcance
+
+- [x] **Subfase A: Definición** [SKIP]: Criterios de aceptación y BDD existentes cubren los requisitos.
+- [x] **Subfase B: Diseño** [EXEC]: Estructurado en `docs/design/B-ADV-0001-design.md`.
+- [x] **Subfase C: Desarrollo** [EXEC]: Fase Red verificada y aprobada por Hades (`review-test` APROBADO 9.5/10), y Fix completado con verde limpio.
+- [x] **Subfase D: QA** [EXEC]: Revisión por Hades completada (`review-code` APROBADO 9.42/10 en `docs/review/code_reviews/B-ADV-0001-code-review.md`).
+- [x] **Subfase E: Documentación** [EXEC]: Corregida instrucción de instalación consumer en `README.md`.
+- [x] **Subfase F: Cierre** [EXEC]: Bug cerrado a `completed` y commit semántico `fix(B-ADV-0001)`.
+
+**Verificación al cierre**: `python -m unittest tests/test_sync.py tests/test_updater.py tests/test_cli_commands.py tests/test_install_and_release.py tests/test_orquestar.py` (ejercita la resolución de rutas en sync, la pureza y aislamiento del updater, los comandos de la CLI sin efectos colaterales, los criterios de aceptación E2E y el validador de orquestación).
 
 ## 📋 Reproducir
 

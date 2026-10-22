@@ -34,7 +34,7 @@ class ForbiddenContentError(Exception):
     pass
 
 
-def _is_symlink_or_junction(path: Path) -> bool:
+def is_symlink_or_junction(path: Path) -> bool:
     """Detecta enlaces simbolicos o junctions en Windows y POSIX."""
     try:
         st = os.lstat(path)
@@ -47,6 +47,9 @@ def _is_symlink_or_junction(path: Path) -> bool:
     except OSError:
         pass
     return path.is_symlink()
+
+
+_is_symlink_or_junction = is_symlink_or_junction
 
 
 def is_forbidden(rel_path: str) -> bool:

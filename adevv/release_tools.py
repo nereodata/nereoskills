@@ -69,34 +69,10 @@ def _get_origin_url(repo_dir: Path, explicit_origin: str | None = None) -> str:
 
 
 def obtener_versiones_publicadas(origin_url: str) -> List[str]:
-    """Consulta las versiones publicadas (etiquetas vX.Y.Z) en el origen remoto."""
-    try:
-        res = subprocess.run(
-            ["git", "ls-remote", "--tags", origin_url],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=_get_git_env(),
-            timeout=5,
-        )
-    except subprocess.TimeoutExpired:
-        return []
-
-    if res.returncode != 0:
-        return []
-
-    versions: set[str] = set()
-    tag_pattern = re.compile(r"refs/tags/v?(\d+\.\d+\.\d+)(\^\{\})?$")
-
-    for line in res.stdout.splitlines():
-        parts = line.strip().split()
-        if len(parts) >= 2:
-            ref = parts[1]
-            match = tag_pattern.search(ref)
-            if match:
-                versions.add(match.group(1))
-
-    return sorted(list(versions))
+    """Consulta las versiones publicadas (etiquetas anotadas vX.Y.Z) en el origen remoto."""
+    from adevv.updater import consultar_versiones_publicadas
+    versiones, _, _ = consultar_versiones_publicadas(origin_url=origin_url)
+    return versiones
 
 
 def _compute_next_patch(tag_str: str) -> str:

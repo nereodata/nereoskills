@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from adevv import __version__
+from adevv._build import is_symlink_or_junction
 from adevv.store import (
     get_active_info,
     get_active_version_dir,
@@ -70,16 +71,7 @@ def calcular_sha256(content: bytes) -> str:
 
 def es_enlace(path: Path) -> bool:
     """Verifica si la ruta es un enlace simbólico o un reparse point en NTFS."""
-    try:
-        st = os.lstat(path)
-        import stat
-        if stat.S_ISLNK(st.st_mode):
-            return True
-        if hasattr(st, "st_file_attributes") and (st.st_file_attributes & 0x0400):
-            return True
-    except OSError:
-        pass
-    return False
+    return is_symlink_or_junction(path)
 
 
 def ruta_segura_dentro_de(base_dir: Path, rel_path: str) -> Optional[Path]:
@@ -116,6 +108,22 @@ def resolver_rutas_contenido(rel_path: str, content: bytes, version_dir: Path) -
         text = re.sub(r"\.agents/", f"{posix_root}/", text)
         text = re.sub(r"\.\./skills/", f"{posix_root}/skills/", text)
 
+        text = re.sub(
+            r"(?<![/\w.-])agents/([a-zA-Z0-9_\-]+)\.md",
+            rf"{posix_root}/agents/\1.md",
+            text,
+        )
+        text = re.sub(
+            r"(?<![/\w.-])skills/([a-zA-Z0-9_\-]+)/SKILL\.md",
+            rf"{posix_root}/skills/\1/SKILL.md",
+            text,
+        )
+        text = re.sub(
+            r"(?<![/\w.-])skills/<nombre>/SKILL\.md",
+            rf"{posix_root}/skills/<nombre>/SKILL.md",
+            text,
+        )
+
     elif rel_path.startswith("workflows/"):
         text = re.sub(
             r"\.\./skills/([a-zA-Z0-9_\-]+)/SKILL\.md",
@@ -129,6 +137,12 @@ def resolver_rutas_contenido(rel_path: str, content: bytes, version_dir: Path) -
         )
         text = re.sub(r"\.agents/", f"{posix_root}/", text)
         text = re.sub(r"\.\./skills/", f"{posix_root}/skills/", text)
+
+        text = re.sub(
+            r"(?<![/\w.-])skills/([a-zA-Z0-9_\-]+)/SKILL\.md",
+            rf"{posix_root}/skills/\1/SKILL.md",
+            text,
+        )
 
     return text.encode("utf-8")
 

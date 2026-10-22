@@ -195,6 +195,85 @@ def limpiar_versiones_antiguas() -> None:
             shutil.rmtree(item, ignore_errors=True)
 
 
+def filtrar_por_lista_blanca(directory: Path) -> None:
+    """Conserva únicamente archivos de la lista blanca y elimina contenido prohibido."""
+    from adevv._build import WHITELIST_DIRS, WHITELIST_FILES, is_forbidden
+
+    for item in list(directory.iterdir()):
+        if item.is_dir():
+            if item.name not in WHITELIST_DIRS:
+                shutil.rmtree(item, ignore_errors=True)
+        else:
+            if item.name not in WHITELIST_FILES:
+                try:
+                    item.unlink()
+                except OSError:
+                    pass
+
+    for root, dirs, files in os.walk(str(directory), topdown=False):
+        root_path = Path(root)
+        for d in list(dirs):
+            dir_path = root_path / d
+            rel = dir_path.relative_to(directory).as_posix()
+            if is_forbidden(rel):
+                shutil.rmtree(dir_path, ignore_errors=True)
+                dirs.remove(d)
+        for f in files:
+            file_path = root_path / f
+            rel = file_path.relative_to(directory).as_posix()
+            if is_forbidden(rel):
+                try:
+                    file_path.unlink()
+                except OSError:
+                    pass
+
+
+def materializar_version_local(version: str) -> Path:
+    """Materializa la versión local activa filtrada por lista blanca en ~/.adevv/versions/<V>/."""
+    from adevv._build import WHITELIST_DIRS, WHITELIST_FILES
+
+    adevv_home = get_adevv_home()
+    versions_parent = adevv_home / "versions"
+    versions_parent.mkdir(parents=True, exist_ok=True)
+    target_dir = versions_parent / version
+
+    source_dir = Path(__file__).resolve().parents[1]
+    staging_dir = versions_parent / f".staging-local-{version}-{os.getpid()}"
+    if staging_dir.exists():
+        shutil.rmtree(staging_dir, ignore_errors=True)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        for d_name in WHITELIST_DIRS:
+            s_d = source_dir / d_name
+            if s_d.is_dir():
+                shutil.copytree(s_d, staging_dir / d_name, dirs_exist_ok=True)
+        for f_name in WHITELIST_FILES:
+            s_f = source_dir / f_name
+            if s_f.is_file():
+                shutil.copy2(s_f, staging_dir / f_name)
+
+        filtrar_por_lista_blanca(staging_dir)
+
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        try:
+            os.replace(str(staging_dir), str(target_dir))
+        except OSError:
+            shutil.move(str(staging_dir), str(target_dir))
+
+        set_active_info({
+            "version": version,
+            "id": version,
+            "origen": "publicada",
+            "commit": "",
+        })
+        return target_dir
+    finally:
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+
 def instalar_version_publicada(
     target_version: str,
     commit_hash: Optional[str] = None,
@@ -279,6 +358,8 @@ def instalar_version_publicada(
         shutil.rmtree(staging_dir, ignore_errors=True)
         return False, f"la versión instalada no es {target_version}", []
 
+    filtrar_por_lista_blanca(staging_dir)
+
     if target_dir.exists():
         shutil.rmtree(target_dir, ignore_errors=True)
     try:
@@ -317,6 +398,77 @@ def instalar_version_publicada(
     return True, "OK", desfasados
 
 
+def evaluar_tabla(
+    state: Dict[str, Any],
+    config: Dict[str, Any],
+    active_info: Optional[Dict[str, Any]],
+    ahora: datetime.datetime,
+    forzada: bool = False,
+    es_instalar: bool = False,
+    dentro_orquestacion: bool = False,
+) -> Dict[str, Any]:
+    """Evalúa la tabla de actualización de forma pura sin efectos secundarios de E/S."""
+    version_actual = active_info.get("version", __version__) if active_info else __version__
+    origen_tipo = active_info.get("origen", "publicada") if active_info else "publicada"
+
+    if not forzada and not config.get("auto_update", True):
+        return {
+            "resultado": ResultadoActualizacion.DESACTIVADA,
+            "mensaje": None,
+            "target_version": None,
+            "consultar_remoto": False,
+        }
+
+    if (not forzada and not es_instalar) and dentro_orquestacion:
+        return {
+            "resultado": ResultadoActualizacion.DENTRO_DE_ORQUESTACION,
+            "mensaje": None,
+            "target_version": None,
+            "consultar_remoto": False,
+        }
+
+    if not forzada and origen_tipo == "desarrollo":
+        return {
+            "resultado": ResultadoActualizacion.DESARROLLO,
+            "mensaje": None,
+            "target_version": None,
+            "consultar_remoto": False,
+        }
+
+    if not forzada and not es_instalar:
+        if _horas_transcurridas(state.get("last_sin_red_at"), ahora) < 1.0:
+            return {
+                "resultado": ResultadoActualizacion.ESPERA,
+                "mensaje": None,
+                "target_version": None,
+                "consultar_remoto": False,
+            }
+        if not state.get("aplazada"):
+            if _horas_transcurridas(state.get("last_checked_at"), ahora) < 24.0:
+                return {
+                    "resultado": ResultadoActualizacion.ESPERA,
+                    "mensaje": None,
+                    "target_version": None,
+                    "consultar_remoto": False,
+                }
+
+    if state.get("aplazada") and not forzada:
+        target_version = state.get("aplazada")
+        return {
+            "resultado": ResultadoActualizacion.APLAZADA,
+            "mensaje": None,
+            "target_version": target_version,
+            "consultar_remoto": False,
+        }
+
+    return {
+        "resultado": None,
+        "mensaje": None,
+        "target_version": None,
+        "consultar_remoto": True,
+    }
+
+
 def evaluar_comprobacion_actualizacion(
     forzada: bool = False,
     ahora: Optional[datetime.datetime] = None,
@@ -328,27 +480,24 @@ def evaluar_comprobacion_actualizacion(
     cfg = get_config()
     act = get_active_info()
     version_actual = act.get("version", __version__) if act else __version__
-    origen_tipo = act.get("origen", "publicada") if act else "publicada"
     state = get_update_state()
+    dentro_orquestacion = bool(os.environ.get("ORQUESTAR_PASO") or os.environ.get("ADEVV_BOOTSTRAPPED"))
 
-    if not forzada and not cfg.get("auto_update", True):
-        return ResultadoActualizacion.DESACTIVADA, None, None
+    decision = evaluar_tabla(
+        state=state,
+        config=cfg,
+        active_info=act,
+        ahora=ahora_dt,
+        forzada=forzada,
+        es_instalar=es_instalar,
+        dentro_orquestacion=dentro_orquestacion,
+    )
 
-    if os.environ.get("ORQUESTAR_PASO") or os.environ.get("ADEVV_BOOTSTRAPPED"):
-        return ResultadoActualizacion.DENTRO_DE_ORQUESTACION, None, None
+    if not decision["consultar_remoto"]:
+        if decision["resultado"] != ResultadoActualizacion.APLAZADA:
+            return decision["resultado"], decision["mensaje"], decision["target_version"]
 
-    if not forzada and origen_tipo == "desarrollo":
-        return ResultadoActualizacion.DESARROLLO, None, None
-
-    if not forzada and not es_instalar:
-        if _horas_transcurridas(state.get("last_sin_red_at"), ahora_dt) < 1.0:
-            return ResultadoActualizacion.ESPERA, None, None
-        if not state.get("aplazada"):
-            if _horas_transcurridas(state.get("last_checked_at"), ahora_dt) < 24.0:
-                return ResultadoActualizacion.ESPERA, None, None
-
-    if state.get("aplazada") and not forzada:
-        target_version = state.get("aplazada")
+        target_version = decision["target_version"]
         bucles = hay_bucles_en_marcha()
         if bucles:
             lista_bucles = ", ".join(formatear_proceso_ui(b) for b in bucles)

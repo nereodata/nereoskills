@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
 from adevv import __version__, migrate, processes, updater
-from adevv.release_tools import obtener_versiones_publicadas
 from adevv.store import (
     get_active_info,
     get_active_version_dir,
@@ -16,7 +15,6 @@ from adevv.store import (
     get_config,
     get_sync_registry,
     get_update_state,
-    set_active_info,
     set_config,
     set_update_state,
 )
@@ -139,7 +137,7 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
         sincronizar_destinos(origen_dir=origen_dir, version=version_activa)
         for _, nombre, _ in desfasados:
             msg = f"{nombre} sincronizado con la {version_activa}."
-            print(msg, file=out)
+            print(msg, file=err)
 
 
 def _describir_escritos_destino(destino_key: str, origen_dir: Path) -> str:
@@ -185,8 +183,13 @@ def comando_instalar(forzar: bool, out: TextIO, err: TextIO) -> int:
     """Ejecuta la orden adevv instalar [--forzar]."""
     act = get_active_info()
     version = act.get("version", __version__) if act else __version__
-    origen_dir = get_active_version_dir()
+    origen = act.get("origen", "publicada") if act else "publicada"
+    versions_dir = get_adevv_home() / "versions" / version
 
+    if origen != "desarrollo" and (not act or not versions_dir.exists()):
+        updater.materializar_version_local(version)
+
+    origen_dir = get_active_version_dir()
     resultados = sincronizar_destinos(origen_dir=origen_dir, version=version, forzar=forzar)
 
     for destino_key, res in resultados.items():
@@ -257,7 +260,15 @@ def comando_version(out: TextIO) -> int:
     last_check_at = update_state.get("last_checked_at")
     last_check_status = update_state.get("last_checked_status")
     if last_check_at and last_check_status:
-        print(f"última comprobación: {last_check_at} ({last_check_status})", file=out)
+        status_map = {
+            "AL_DIA": "al día",
+            "APLICADA": "aplicada",
+            "APLAZADA": "aplazada",
+            "FALLIDA": "fallida",
+            "SIN_RED": "sin red",
+        }
+        status_str = status_map.get(last_check_status, str(last_check_status).lower())
+        print(f"última comprobación: {last_check_at} ({status_str})", file=out)
 
     last_applied_at = update_state.get("last_applied_at")
     last_applied_ver = update_state.get("last_applied_version")
@@ -324,7 +335,7 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
 
     parsed, remaining = parser.parse_known_args(args)
 
-    if parsed.subcommand != "actualizar":
+    if parsed.subcommand is not None and parsed.subcommand != "actualizar":
         es_instalar = (parsed.subcommand == "instalar")
         res, msg, ver = updater.evaluar_comprobacion_actualizacion(es_instalar=es_instalar)
         if msg:

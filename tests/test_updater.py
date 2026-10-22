@@ -41,6 +41,12 @@ class TestUpdaterUnit(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.adevv_home = Path(self.temp_dir.name) / ".adevv"
         os.environ["ADEVV_HOME"] = str(self.adevv_home)
+        self.claude_home = Path(self.temp_dir.name) / ".claude"
+        self.codex_home = Path(self.temp_dir.name) / ".codex"
+        self.agy_home = Path(self.temp_dir.name) / ".gemini"
+        os.environ["CLAUDE_HOME"] = str(self.claude_home)
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+        os.environ["AGY_HOME"] = str(self.agy_home)
 
         self.patch_bucles = patch("adevv.processes.hay_bucles_en_marcha", return_value=[])
         self.mock_bucles = self.patch_bucles.start()
@@ -59,6 +65,9 @@ class TestUpdaterUnit(unittest.TestCase):
     def tearDown(self):
         self.patch_bucles.stop()
         os.environ.pop("ADEVV_HOME", None)
+        os.environ.pop("CLAUDE_HOME", None)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("AGY_HOME", None)
         self.temp_dir.cleanup()
 
     def test_version_es_mayor(self):
@@ -67,6 +76,41 @@ class TestUpdaterUnit(unittest.TestCase):
         self.assertTrue(_version_es_mayor("1.0.0", "0.10.5"))
         self.assertFalse(_version_es_mayor("0.1.0", "0.1.0"))
         self.assertFalse(_version_es_mayor("0.9.3", "0.10.0"))
+
+    def test_h04_evaluar_tabla_pura(self):
+        """H-04 / Regla 1: evaluar_tabla es una función pura que no toca disco ni red."""
+        from adevv.updater import evaluar_tabla, ResultadoActualizacion
+        ahora = datetime.datetime(2026, 10, 22, 12, 0, 0)
+        # Desactivada por config
+        res = evaluar_tabla(state={}, config={"auto_update": False}, active_info={}, ahora=ahora)
+        self.assertEqual(res["resultado"], ResultadoActualizacion.DESACTIVADA)
+
+        # Dentro de orquestacion cuando no es forzada ni es_instalar
+        res = evaluar_tabla(state={}, config={}, active_info={}, ahora=ahora, dentro_orquestacion=True)
+        self.assertEqual(res["resultado"], ResultadoActualizacion.DENTRO_DE_ORQUESTACION)
+
+        # Si es_instalar=True, dentro_orquestacion no bloquea
+        res = evaluar_tabla(state={}, config={}, active_info={}, ahora=ahora, dentro_orquestacion=True, es_instalar=True)
+        self.assertNotEqual(res["resultado"], ResultadoActualizacion.DENTRO_DE_ORQUESTACION)
+
+        # Origen desarrollo
+        res_des = evaluar_tabla(state={}, config={}, active_info={"origen": "desarrollo"}, ahora=ahora)
+        self.assertEqual(res_des["resultado"], ResultadoActualizacion.DESARROLLO)
+
+        # Espera < 24 h desde last_checked_at
+        hace_2h = (ahora - datetime.timedelta(hours=2)).isoformat()
+        res_esp24 = evaluar_tabla(state={"last_checked_at": hace_2h}, config={}, active_info={}, ahora=ahora)
+        self.assertEqual(res_esp24["resultado"], ResultadoActualizacion.ESPERA)
+
+        # Espera < 1 h desde last_sin_red_at
+        hace_30m = (ahora - datetime.timedelta(minutes=30)).isoformat()
+        res_esp1 = evaluar_tabla(state={"last_sin_red_at": hace_30m}, config={}, active_info={}, ahora=ahora)
+        self.assertEqual(res_esp1["resultado"], ResultadoActualizacion.ESPERA)
+
+        # Aplazada previa
+        res_apl = evaluar_tabla(state={"aplazada": "0.3.0"}, config={}, active_info={}, ahora=ahora)
+        self.assertEqual(res_apl["resultado"], ResultadoActualizacion.APLAZADA)
+        self.assertEqual(res_apl["target_version"], "0.3.0")
 
     def test_consultar_versiones_publicadas_filtro_etiquetas(self):
         salida_git = (
@@ -331,6 +375,12 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.adevv_home = Path(self.temp_dir.name) / ".adevv"
         os.environ["ADEVV_HOME"] = str(self.adevv_home)
+        self.claude_home = Path(self.temp_dir.name) / ".claude"
+        self.codex_home = Path(self.temp_dir.name) / ".codex"
+        self.agy_home = Path(self.temp_dir.name) / ".gemini"
+        os.environ["CLAUDE_HOME"] = str(self.claude_home)
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+        os.environ["AGY_HOME"] = str(self.agy_home)
 
         # Crear instalación base 0.1.0
         self.v010_dir = self.adevv_home / "versions" / "0.1.0"
@@ -352,7 +402,66 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
     def tearDown(self):
         self.patch_bucles.stop()
         os.environ.pop("ADEVV_HOME", None)
+        os.environ.pop("CLAUDE_HOME", None)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("AGY_HOME", None)
         self.temp_dir.cleanup()
+
+    def test_h03_instalar_version_publicada_filtra_lista_blanca(self):
+        """H-03 / RF-F05-01: instalar_version_publicada elimina docs/, tests/ y archivos no permitidos."""
+        repo_origen = Path(self.temp_dir.name) / "repo_origen"
+        repo_origen.mkdir()
+        subprocess.run(["git", "init", str(repo_origen)], check=True, capture_output=True)
+        (repo_origen / "pyproject.toml").write_text('[project]\nname = "adevv"\nversion = "0.2.0"\n', encoding="utf-8")
+        (repo_origen / "README.md").write_text("# Adevv\n", encoding="utf-8")
+        (repo_origen / "skills" / "demo").mkdir(parents=True)
+        (repo_origen / "skills" / "demo" / "SKILL.md").write_text("# Demo\n", encoding="utf-8")
+        (repo_origen / "docs").mkdir()
+        (repo_origen / "docs" / "secret.md").write_text("# Secret\n", encoding="utf-8")
+        (repo_origen / "tests").mkdir()
+        (repo_origen / "tests" / "test_dummy.py").write_text("# test\n", encoding="utf-8")
+        (repo_origen / "task_config.yaml").write_text("project: {}\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo_origen), "config", "user.name", "Test"], check=True)
+        subprocess.run(["git", "-C", str(repo_origen), "config", "user.email", "t@a.com"], check=True)
+        subprocess.run(["git", "-C", str(repo_origen), "add", "."], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo_origen), "commit", "-m", "v0.2.0"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo_origen), "tag", "-a", "v0.2.0", "-m", "v0.2.0"], check=True, capture_output=True)
+
+        ok, msg, desfasados = instalar_version_publicada("0.2.0", origin_url=str(repo_origen))
+        self.assertTrue(ok, msg)
+        target_dir = self.adevv_home / "versions" / "0.2.0"
+        self.assertTrue((target_dir / "pyproject.toml").exists())
+        self.assertTrue((target_dir / "skills" / "demo" / "SKILL.md").exists())
+        self.assertFalse((target_dir / "docs").exists())
+        self.assertFalse((target_dir / "tests").exists())
+        self.assertFalse((target_dir / "task_config.yaml").exists())
+
+    def test_h03_adevv_instalar_materializa_version_local_cuando_esta_al_dia(self):
+        """H-03 / §2: adevv instalar sin versión remota superior materializa ~/.adevv/versions/<V>/ y active.json."""
+        from adevv.cli import main_cli
+        active_file = self.adevv_home / "active.json"
+        if active_file.exists():
+            active_file.unlink()
+        versions_dir = self.adevv_home / "versions"
+        if versions_dir.exists():
+            shutil.rmtree(versions_dir, ignore_errors=True)
+
+        set_config({"auto_update": False})
+        out = io.StringIO()
+        err = io.StringIO()
+        code = main_cli(["instalar"], out=out, err=err)
+        self.assertEqual(code, 0)
+        self.assertTrue(active_file.exists())
+        act = get_active_info()
+        self.assertIsNotNone(act)
+        v = act.get("version")
+        self.assertTrue(v)
+        v_dir = versions_dir / v
+        self.assertTrue(v_dir.exists())
+        self.assertTrue((v_dir / "pyproject.toml").exists())
+        self.assertTrue((v_dir / "skills").exists())
+        self.assertFalse((v_dir / "docs").exists())
+        self.assertFalse((v_dir / "tests").exists())
 
     def test_instalar_version_publicada_exito_y_limpieza(self):
         # Crear versión vieja 0.0.9 para comprobar su limpieza

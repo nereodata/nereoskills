@@ -246,11 +246,18 @@ def validar_lanzamiento_bucle(root, a):
         for f in agents_dist.iterdir():
             if f.is_file() and f.suffix in (".md", ".toml"):
                 nombres_distribuidos.add(f.stem)
+        codex_dist = agents_dist / "codex"
+        if codex_dist.is_dir():
+            for f in codex_dist.iterdir():
+                if f.is_file() and f.suffix == ".toml":
+                    nombres_distribuidos.add(f.stem)
     wf_dist = version_dir / "workflows"
     if wf_dist.is_dir():
         for f in wf_dist.iterdir():
             if f.is_file() and f.suffix == ".md":
                 nombres_distribuidos.add(f.stem)
+    if "telegram_gateway" in nombres_distribuidos:
+        nombres_distribuidos.add("telegram-gateway")
 
     rutas_ocultan = []
     rutas_candidatas = [

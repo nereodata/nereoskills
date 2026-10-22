@@ -20,8 +20,18 @@ class TestInstallAndRelease(unittest.TestCase):
     """Verifica las reglas de publicación de etiquetas y alineación de versiones."""
 
     def setUp(self):
+        os.environ.pop("ORQUESTAR_PASO", None)
+        os.environ.pop("ADEVV_BOOTSTRAPPED", None)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        self.adevv_home = self.root / ".adevv"
+        self.claude_home = self.root / ".claude"
+        self.codex_home = self.root / ".codex"
+        self.agy_home = self.root / ".gemini"
+        os.environ["ADEVV_HOME"] = str(self.adevv_home)
+        os.environ["CLAUDE_HOME"] = str(self.claude_home)
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+        os.environ["AGY_HOME"] = str(self.agy_home)
 
         self.origin_dir = self.root / "origin.git"
         subprocess.run(["git", "init", "--bare", str(self.origin_dir)], check=True, capture_output=True)
@@ -73,6 +83,10 @@ class TestInstallAndRelease(unittest.TestCase):
         )
 
     def tearDown(self):
+        os.environ.pop("ADEVV_HOME", None)
+        os.environ.pop("CLAUDE_HOME", None)
+        os.environ.pop("CODEX_HOME", None)
+        os.environ.pop("AGY_HOME", None)
         self.temp_dir.cleanup()
 
     def test_ca_f05_03_version_mismatch_fails_with_exact_message(self):
@@ -100,6 +114,23 @@ class TestInstallAndRelease(unittest.TestCase):
         ).stdout.splitlines()
         self.assertEqual(local_tags, [])
         self.assertEqual(origin_tags, [])
+
+    def test_h04_obtener_versiones_publicadas_filtro_y_orden_semver(self):
+        """H-04 / RF-F03-02: obtener_versiones_publicadas ignora etiquetas ligeras/pre-releases y ordena por semver."""
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.2.0", "-m", "v0.2.0"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.10.0", "-m", "v0.10.0"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "v0.9.0"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.3.0-rc1", "-m", "rc"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "--tags"], check=True, capture_output=True)
+
+        versiones = obtener_versiones_publicadas(str(self.origin_dir))
+        self.assertIn("0.2.0", versiones)
+        self.assertIn("0.10.0", versiones)
+        self.assertNotIn("0.9.0", versiones)
+        self.assertNotIn("0.3.0-rc1", versiones)
+        idx_02 = versiones.index("0.2.0")
+        idx_10 = versiones.index("0.10.0")
+        self.assertLess(idx_02, idx_10)
 
     def test_ca_f05_04_already_published_tag_fails_with_exact_message(self):
         """CA-M-4: Falla si la etiqueta ya existe publicada en el origen remoto."""
