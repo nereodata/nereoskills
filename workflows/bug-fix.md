@@ -8,7 +8,7 @@ description: Proxy para el workflow /bug-fix
 
 # /bug-fix [BUG_ID]
 
-Ejecuta solo los pasos definidos en `../skills/bug-fix/SKILL.md`:
+Ejecuta solo los pasos definidos en `skills/bug-fix/SKILL.md`:
 
 1. **Urgencia**: Hotfix (`hotfix/vX.Y.(Z+1)` from latest tag) o Release (`release/vX.Y`).
 2. **Init**: Carga metadatos, status → `in_progress`.

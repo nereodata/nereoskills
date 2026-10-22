@@ -1,8 +1,7 @@
 # Releasing — {{PROJECT_NAME}}
 
 > Documento humano-legible que describe cómo se cierra una versión de
-> este proyecto. La automatización vive en la skill `/release` (montada
-> como submódulo en `.agents/skills/release/`); este documento es el
+> este proyecto. La automatización vive en la skill `/release`; este documento es el
 > contrato que esa skill ejecuta.
 
 ## 1. Modelo de versionado
@@ -36,7 +35,7 @@ Ejemplo:
 | `services/api/pyproject.toml` | toml | `project.version` |
 
 Para sincronizarlos: `/start-version` (al abrir el bloque) o edición
-manual seguida de `python .agents/skills/release/scripts/check_manifests_versions.py`.
+manual seguida de `adevv release manifiestos`.
 
 ## 3. Flujo de release ordinario
 
@@ -45,8 +44,8 @@ Tras completar todas las tareas asignadas a `vX.Y` en la rama
 
 1. **Pre-flight (local)** — desde la rama `release/vX.Y`:
    - `/review-code` y `/review-test` globales si procede.
-   - `python .agents/skills/release/scripts/check_release_completeness.py --version vX.Y.0`
-   - `python .agents/skills/release/scripts/check_manifests_versions.py`
+   - `adevv release completitud --version vX.Y.0`
+   - `adevv release manifiestos`
    - `actionlint .github/workflows/*.yml` (si el repo tiene workflows)
    - Comandos declarados en `task_config.yaml::release.preflight`
      (lint, type-check, tests, full build con flag `--dir` o equivalente
@@ -54,7 +53,7 @@ Tras completar todas las tareas asignadas a `vX.Y` en la rama
 2. **CHANGELOG** — confirmar que la sección `[X.Y.Z]` existe y resume
    los cambios. Si no:
    ```
-   python .agents/skills/release/scripts/generate_changelog_section.py --version vX.Y.0
+   adevv release changelog --version vX.Y.0
    ```
    Pegar la salida en `CHANGELOG.md`, escribir el resumen ejecutivo
    ("Highlights") a mano, commitear.

@@ -11,9 +11,9 @@ Formaliza el cierre de una versión del proyecto y su etiquetado.
 
 ### 1. Pre-Release (Validación)
 - **Rama**: `release/vX.Y` o `hotfix/vX.Y.Z` → coincide con `task_config.yaml::project.version`.
-- **Backlog**: Tareas cerradas (ver scripts en `skills/release/scripts/` si necesario).
-- **Manifiestos**: Versiones alineadas.
-- **Changelog**: Sección de versión presente; generar si falta.
+- **Backlog**: Tareas cerradas (ver `adevv release completitud` si necesario).
+- **Manifiestos**: Versiones alineadas (`adevv release manifiestos`).
+- **Changelog**: Sección de versión presente; generar si falta (`adevv release changelog`).
 - **CI Preflight**: Ejecutar comandos en `task_config.yaml::release.preflight`.
 
 ### 2. Ejecución del Bump

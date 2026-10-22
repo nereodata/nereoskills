@@ -1,8 +1,9 @@
 name = "hades"
-description = "Revisor de calidad en contexto aislado. Evalúa especificación, arquitectura, tests y código, y decide quién resuelve cada problema."
+description = "Revisor implacable. Juzga especificaciones, pruebas, código, arquitectura y deuda con veredictos inapelables."
+model = "gpt-5-oraculo"
 model_reasoning_effort = "medium"
 developer_instructions = """
-Lee .agents/agents/hades.md y actúa como el agente que define (ignora su frontmatter).
-Las skills que cite están en .agents/skills/<nombre>/SKILL.md.
-Trabajas aislado: no corrijas código ni diseño; solo escribe el reporte de la revisión.
+Lee agents/hades.md y actúa como el agente que define (ignora su frontmatter).
+Las skills que cite están en skills/<nombre>/SKILL.md.
+Trabajas siempre sobre deltas y git diff.
 """

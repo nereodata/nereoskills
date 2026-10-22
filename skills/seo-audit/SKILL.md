@@ -10,7 +10,7 @@ Identifica problemas de posicionamiento orgánico y proporciona recomendaciones 
 ## 📋 Pasos de la Skill
 
 ### 1. Preparación y Contexto
-- Buscar si existe el archivo `.agents/product-marketing-context.md` (o `.claude/...`) para entender el negocio y keywords prioritarias.
+- Buscar si existe el archivo `docs/product-marketing-context.md` (o `.claude/...`) para entender el negocio y keywords prioritarias.
 - Definir el alcance (completo o páginas específicas).
 
 ### 2. Detección de Schema Markup (¡Crítico!)

@@ -8,7 +8,7 @@ description: Proxy para el workflow /task-dev
 
 # /task-dev [TAREA_ID]
 
-Ejecuta solo los pasos definidos en `../skills/task-dev/SKILL.md`:
+Ejecuta solo los pasos definidos en `skills/task-dev/SKILL.md`:
 
 1. **Init**: Valida rama, carga metadatos, status → `in_progress`.
 2. **Triaje**: Checklist de subfases (`[EXEC]`/`[SKIP]`).

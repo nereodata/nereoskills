@@ -258,6 +258,40 @@ def comando_version(out: TextIO) -> int:
     return 0
 
 
+def _resolver_script(rel_path: str) -> Path:
+    """Resuelve la ruta de un script en la versión instalada o en el paquete fuente."""
+    candidate = get_active_version_dir() / rel_path
+    if candidate.exists():
+        return candidate
+    repo_fallback = Path(__file__).resolve().parents[1] / rel_path
+    if repo_fallback.exists():
+        return repo_fallback
+    return candidate
+
+
+def _despachar_script(script_path: Path, script_args: List[str], out: TextIO, err: TextIO) -> int:
+    """Ejecuta un script de Python respetando los streams de salida proporcionados."""
+    if not script_path.exists():
+        print(f"Error: no se encuentra el script {script_path}", file=err)
+        return 1
+
+    if out is sys.stdout and err is sys.stderr:
+        proc = subprocess.run([sys.executable, str(script_path), *script_args])
+        return proc.returncode
+    else:
+        proc = subprocess.run(
+            [sys.executable, str(script_path), *script_args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if proc.stdout:
+            out.write(proc.stdout)
+        if proc.stderr:
+            err.write(proc.stderr)
+        return proc.returncode
+
+
 def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err: Optional[TextIO] = None) -> int:
     """Punto de entrada de adevv."""
     out_stream = out if out is not None else sys.stdout
@@ -272,6 +306,9 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
     subparsers = parser.add_subparsers(dest="subcommand")
     instalar_parser = subparsers.add_parser("instalar", help="sincroniza las carpetas de los arneses")
     instalar_parser.add_argument("--forzar", action="store_true", help="sobrescribe archivos del registro editados a mano")
+    subparsers.add_parser("orquestar", add_help=False, help="despacha el bucle o comandos de orquestación")
+    subparsers.add_parser("telegram", add_help=False, help="despacha el gateway de Telegram")
+    subparsers.add_parser("release", add_help=False, help="despacha scripts de gestión de lanzamientos")
 
     parsed, remaining = parser.parse_known_args(args)
 
@@ -282,6 +319,37 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
 
     if parsed.subcommand == "instalar":
         return comando_instalar(parsed.forzar, out_stream, err_stream)
+
+    if parsed.subcommand == "orquestar":
+        idx = args.index("orquestar")
+        sub_args = args[idx + 1:]
+        script_path = _resolver_script("skills/orquestar/orquestar.py")
+        return _despachar_script(script_path, sub_args, out_stream, err_stream)
+
+    if parsed.subcommand == "telegram":
+        idx = args.index("telegram")
+        sub_args = args[idx + 1:]
+        script_path = _resolver_script("skills/telegram_gateway/gateway.py")
+        return _despachar_script(script_path, sub_args, out_stream, err_stream)
+
+    if parsed.subcommand == "release":
+        idx = args.index("release")
+        sub_args = args[idx + 1:]
+        if not sub_args:
+            print("Uso: adevv release manifiestos|completitud|changelog [argumentos...]", file=err_stream)
+            return 1
+        sub = sub_args[0]
+        scripts_map = {
+            "manifiestos": "skills/release/scripts/check_manifests_versions.py",
+            "completitud": "skills/release/scripts/check_release_completeness.py",
+            "changelog": "skills/release/scripts/generate_changelog_section.py",
+        }
+        if sub in scripts_map:
+            script_path = _resolver_script(scripts_map[sub])
+            return _despachar_script(script_path, sub_args[1:], out_stream, err_stream)
+        else:
+            print(f"Subcomando de release no reconocido: '{sub}'. Opciones: manifiestos, completitud, changelog", file=err_stream)
+            return 1
 
     if not parsed.subcommand:
         return comando_version(out_stream)
