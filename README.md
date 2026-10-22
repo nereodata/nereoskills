@@ -6,6 +6,29 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 
 ---
 
+## 🚀 Instalación y sincronización global
+
+Instala Adevv una sola vez por máquina mediante una única orden desde una versión publicada fija en el origen, y sincroniza las carpetas globales de tus arneses (Claude Code, Codex y Antigravity):
+
+```bash
+pip install --user git+https://github.com/nereodata/nereoskills.git@v0.1.0 && adevv instalar
+```
+
+> Si usas `uv`: `uv tool install git+https://github.com/nereodata/nereoskills.git@v0.1.0 && adevv instalar`.
+> Si `adevv` no está en tu PATH, añade el directorio de scripts de usuario de Python (`%APPDATA%\Python\Python312\Scripts` en Windows o `~/.local/bin` en Linux/macOS).
+
+Al ejecutar `adevv instalar`:
+1. Comprueba si existe una versión publicada superior en el origen y la actualiza automáticamente.
+2. Sincroniza las skills, agentes y workflows en las carpetas globales confirmadas de cada arnés detectado (`~/.claude`, `~/.codex`, `~/.gemini/config`).
+3. Registra huellas SHA-256 de los archivos instalados para proteger tus archivos ajenos o editados a mano.
+
+Para comprobar el estado y las versiones sincronizadas en cualquier momento:
+```bash
+adevv --version
+```
+
+---
+
 ## 🏗️ Arquitectura: Agentes + Skills
 
 ### Agentes — El Equipo

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from adevv.release_tools import (
     ReleaseValidationError,
@@ -187,6 +188,180 @@ class TestInstallAndRelease(unittest.TestCase):
         # 7. Comprobar que Adevv considera v0.1.0 como versión publicada
         versiones = obtener_versiones_publicadas(str(self.origin_dir))
         self.assertIn("0.1.0", versiones)
+
+    def test_ca_f01_01_primera_instalacion_actualiza_y_sincroniza(self):
+        """CA-F01-01 / RF-F01-01 / RF-F01-03: Primera instalación actualiza a la última versión publicada y sincroniza destinos detectados."""
+        from adevv.cli import main_cli
+
+        # 1. Configurar origen remoto con v0.1.0 y v0.1.1
+        # Ya tenemos el commit inicial. Etiquetar v0.1.0
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.1.0", "-m", "v0.1.0"], check=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "v0.1.0"], check=True)
+
+        # Crear commit v0.1.1
+        (self.repo_dir / "pyproject.toml").write_text('[project]\nname = "adevv"\nversion = "0.1.1"\n', encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo_dir), "commit", "-am", "feat: bump v0.1.1"], check=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.1.1", "-m", "v0.1.1"], check=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "main", "v0.1.1"], check=True)
+
+        # 2. Entorno limpio sin Adevv, con Claude y Codex, sin Antigravity
+        adevv_home = self.root / ".adevv_user"
+        claude_home = self.root / ".claude_user"
+        codex_home = self.root / ".codex_user"
+        agy_home = self.root / ".gemini" / "config"
+
+        claude_home.mkdir(parents=True, exist_ok=True)
+        codex_home.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "ADEVV_HOME": str(adevv_home),
+            "CLAUDE_HOME": str(claude_home),
+            "CODEX_HOME": str(codex_home),
+            "AGY_HOME": str(agy_home),
+            "ADEVV_ORIGIN_URL": str(self.origin_dir),
+        }
+
+        # Simular instalación del paquete en 0.1.0
+        # Ejecutar `adevv instalar`
+        import io
+
+        out = io.StringIO()
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, env), mock.patch("adevv.processes.detectar_procesos_adevv", return_value=[]):
+            ret = main_cli(["instalar"], out=out, err=err)
+            self.assertEqual(ret, 0)
+
+            # Ejecutar `adevv --version`
+            out_ver = io.StringIO()
+            err_ver = io.StringIO()
+            ret_ver = main_cli(["--version"], out=out_ver, err=err_ver)
+            self.assertEqual(ret_ver, 0)
+
+        version_output = out_ver.getvalue()
+        self.assertIn("0.1.1", version_output)
+        self.assertIn("Claude Code 0.1.1", version_output)
+        self.assertIn("Codex 0.1.1", version_output)
+        self.assertIn("Antigravity: no detectado", version_output)
+
+        # Verificar que la carpeta de Antigravity no fue creada
+        self.assertFalse(agy_home.exists())
+
+    def test_ca_f01_10_resincronizacion_al_desfasarse_sin_bucles(self):
+        """CA-F01-10 / RF-F01-11: Resincronización al arrancar sin bucles en marcha."""
+        from adevv.cli import main_cli
+        from adevv.store import set_active_info, set_config, set_sync_registry
+
+        adevv_home = self.root / ".adevv_ca10"
+        claude_home = self.root / ".claude_ca10"
+        claude_home.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "ADEVV_HOME": str(adevv_home),
+            "CLAUDE_HOME": str(claude_home),
+            "CODEX_HOME": str(self.root / ".no_codex"),
+            "AGY_HOME": str(self.root / ".no_agy"),
+            "ORQUESTAR_PASO": "",
+        }
+
+        with mock.patch.dict(os.environ, env), mock.patch("adevv.processes.detectar_procesos_adevv", return_value=[]):
+            # Versión activa 0.1.0
+            set_active_info({"version": "0.1.0", "origen": "publicada"})
+            set_config({"auto_update": False})
+            # Registro en Claude con 0.2.0 (desfasado respecto a activa 0.1.0)
+            set_sync_registry("claude", {"version": "0.2.0", "files": {}})
+
+            import io
+            out = io.StringIO()
+            err = io.StringIO()
+            ret = main_cli(["--version"], out=out, err=err)
+            self.assertEqual(ret, 0)
+
+        # Se debe resincronizar antes de la orden
+        combined = out.getvalue() + err.getvalue()
+        self.assertIn("Claude Code sincronizado con la 0.1.0.", combined)
+
+    def test_ca_f01_11_no_resincroniza_con_bucle_en_marcha(self):
+        """CA-F01-11 / RF-F01-11: Con bucle en marcha no resincroniza y avisa."""
+        from adevv.cli import main_cli
+        from adevv.store import set_active_info, set_sync_registry
+
+        adevv_home = self.root / ".adevv_ca11"
+        claude_home = self.root / ".claude_ca11"
+        claude_home.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "ADEVV_HOME": str(adevv_home),
+            "CLAUDE_HOME": str(claude_home),
+            "CODEX_HOME": str(self.root / ".no_codex"),
+            "AGY_HOME": str(self.root / ".no_agy"),
+            "ORQUESTAR_PASO": "",
+        }
+
+        with mock.patch.dict(os.environ, env):
+            set_active_info({"version": "0.1.0", "origen": "publicada"})
+            set_sync_registry("claude", {"version": "0.2.0", "files": {}})
+
+            # Simulamos detección de bucle vivo en C:\SW\Afinn
+            with mock.patch("adevv.processes.detectar_procesos_adevv") as mock_proc:
+                mock_proc.return_value = [
+                    {"pid": 1234, "tipo": "bucle", "cwd": r"C:\SW\Afinn"}
+                ]
+                import io
+                out = io.StringIO()
+                err = io.StringIO()
+                ret = main_cli(["--version"], out=out, err=err)
+                self.assertEqual(ret, 0)
+
+        combined = out.getvalue() + err.getvalue()
+        self.assertIn(
+            r"Claude Code sigue con la 0.2.0; se sincronizará cuando no haya bucles en marcha: bucle en C:\SW\Afinn.",
+            combined,
+        )
+
+    def test_ca_f01_12_ver_que_version_hay_en_cada_arnes(self):
+        """CA-F01-12 / RF-F01-12: adevv --version muestra detalle completo de versión, destinos y auto-update."""
+        from adevv.cli import main_cli
+        from adevv.store import set_active_info, set_config, set_sync_registry, set_update_state
+
+        adevv_home = self.root / ".adevv_ca12"
+        claude_home = self.root / ".claude_ca12"
+        codex_home = self.root / ".codex_ca12"
+        claude_home.mkdir(parents=True, exist_ok=True)
+        codex_home.mkdir(parents=True, exist_ok=True)
+
+        env = {
+            "ADEVV_HOME": str(adevv_home),
+            "CLAUDE_HOME": str(claude_home),
+            "CODEX_HOME": str(codex_home),
+            "AGY_HOME": str(self.root / ".no_agy"),
+        }
+
+        with mock.patch.dict(os.environ, env):
+            set_active_info({"version": "0.2.0", "origen": "publicada"})
+            set_config({"auto_update": True})
+            set_sync_registry("claude", {"version": "0.2.0", "files": {}})
+            set_sync_registry("codex", {"version": "0.2.0", "files": {}})
+            set_update_state({
+                "last_checked_at": "hace 3 h",
+                "last_checked_status": "al día",
+                "last_applied_at": "el día 20",
+                "last_applied_version": "0.2.0",
+            })
+
+            import io
+            out = io.StringIO()
+            err = io.StringIO()
+            ret = main_cli(["--version"], out=out, err=err)
+            self.assertEqual(ret, 0)
+
+        output = out.getvalue()
+        self.assertIn("Adevv 0.2.0", output)
+        self.assertIn("Claude Code 0.2.0", output)
+        self.assertIn("Codex 0.2.0", output)
+        self.assertIn("Antigravity: no detectado", output)
+        self.assertIn("actualización automática: sí", output)
+        self.assertIn("última comprobación: hace 3 h (al día)", output)
+        self.assertIn("actualizado a 0.2.0 el día 20", output)
 
 
 if __name__ == "__main__":
