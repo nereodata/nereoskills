@@ -106,17 +106,69 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 
 ## 🛠️ Integración en proyectos consumer
 
-1. **Añadir como submódulo**:
+1. **Instalar Adevv**:
    ```bash
-   git submodule add https://github.com/nereodata/adevv.git .agents
+   pip install adevv
    ```
-2. **Symlink para runtime** (ej. Claude Code):
+2. **Sincronizar arneses**:
    ```bash
-   ln -s ../.agents/skills .claude/skills
-   ln -s ../.agents/agents .claude/agents
+   adevv instalar
    ```
-   Para Codex, los agentes están en `agents/codex/`: `clio` y `cronos` en luna con esfuerzo bajo, y `hades` con el modelo configurado en Codex y esfuerzo medio. El cuerpo de cada agente vive solo en `agents/<nombre>.md`; los ficheros de cada arnés (`agents/codex/*.toml`) solo llevan su configuración y lo referencian, con la `description` copiada literalmente del `.md`:
-   ```bash
-   ln -s ../.agents/agents/codex .codex/agents
-   ```
+   Instala y sincroniza automáticamente las skills y agentes en los arneses de IA detectados (`.claude`, `.codex`, etc.) a nivel de usuario sin requerir submódulos ni enlaces en cada repositorio.
 3. **Configurar `task_config.yaml`** en la raíz del proyecto para definir los prefijos y rutas del backlog del proyecto.
+4. **Lanzar el bucle**:
+   ```bash
+   adevv orquestar
+   ```
+
+---
+
+## 🔄 Guía de migración desde submódulo `.agents`
+
+Para migrar proyectos consumidores que todavía utilizan el antiguo submódulo `.agents/` hacia la instalación desacoplada de Adevv, sigue estrictamente estos pasos en el orden indicado:
+
+1. **Parar el bucle**:
+   Ejecuta `/orquestar parar` o `adevv orquestar --parar` y espera a que el proceso termine y ya no exista el archivo `orquestar.pid`.
+2. **Diagnosticar estado actual**:
+   Ejecuta `adevv migrar` en la raíz del proyecto para auditar de forma segura y de solo lectura qué elementos quedan por migrar.
+3. **Quitar el submódulo Git**:
+   ```bash
+   git submodule deinit -f .agents
+   git rm -f .agents
+   rm -rf .git/modules/.agents
+   ```
+   (en Windows PowerShell: `Remove-Item -Recurse -Force .git/modules/.agents`).
+4. **Quitar enlaces y elementos locales**:
+   Retira los enlaces simbólicos o junctions creados previamente en `.claude/skills`, `.codex/agents`, etc., así como elementos locales que oculten los distribuidos.
+   > **⚠️ ADVERTENCIA CRÍTICA DE SEGURIDAD EN WINDOWS:**
+   > Para retirar un enlace simbólico o junction **sin seguirlo ni borrar su contenido de destino**, utiliza siempre:
+   > ```cmd
+   > cmd /c rmdir <ruta_del_enlace_o_junction>
+   > ```
+   > **NUNCA utilices `Remove-Item -Recurse` (PowerShell) ni `rm -rf` (Bash) sobre un enlace o junction**, ya que en Windows seguirán el enlace y **borrarán recursivamente los archivos reales del destino** (como tu copia congelada o repositorio de agentes).
+5. **Quitar o corregir `instructions` en `orchestration.json`**:
+   Elimina o ajusta cualquier clave `instructions` que apunte a rutas `.agents/` para que los agentes utilicen las versiones instaladas globalmente.
+6. **Actualizar adaptadores propios**:
+   Si dispones de scripts personalizados en `scripts/` u otras carpetas que importaban directamente desde `.agents/`, adáptalos para invocar las herramientas globales mediante el CLI `adevv` (ej. `adevv orquestar`, `adevv release`, etc.).
+7. **Borrar copias locales de Adevv**:
+   Elimina cualquier carpeta clonada o congelada de Adevv que resida dentro del árbol del proyecto (carpetas distintas de la raíz que contengan `skills/orquestar/SKILL.md`).
+8. **Diagnosticar hasta «Sin pendientes»**:
+   Ejecuta nuevamente `adevv migrar` y repite los ajustes necesarios hasta que la salida concluya con `Sin pendientes` (o `Sin pendientes (N citas históricas).`).
+9. **Registrar commit de migración**:
+   ```bash
+   git commit -m "chore: migración de submódulo .agents a adevv"
+   ```
+10. **Relanzar el bucle**:
+    Ejecuta `/orquestar` o `adevv orquestar` para continuar con el desarrollo de forma desacoplada.
+
+### Migración del propio repositorio de desarrollo de Adevv
+
+Para migrar el propio repositorio fuente de Adevv (que utiliza una junction `.agents` hacia la copia congelada en `~/.adevv/congelado` durante la transición):
+1. Parar cualquier bucle en marcha que esté corriendo desde la copia congelada (`adevv orquestar --parar`).
+2. Instalar la versión publicada de Adevv (`adevv instalar`).
+3. Quitar la junction `.agents` sin seguirla:
+   ```cmd
+   cmd /c rmdir .agents
+   ```
+4. Relanzar el bucle con `adevv orquestar`.
+5. La copia congelada en `~/.adevv/congelado` solo debe borrarse cuando se confirme que ningún proceso ni arnés en el sistema la está utilizando.

@@ -107,17 +107,9 @@ En ese momento, considerar añadir una rama `staging` o un entorno de preview de
 
 ## 8. Gestión de Submódulos (Carpeta `.agents`)
 
-Los submódulos mantienen punteros a commits específicos de otro repositorio (como las skills o los workflows). Es vital seguir estas reglas para evitar conflictos al "viajar en el tiempo" entre `hotfixes` y `releases`:
+El uso del submódulo `.agents/` ha quedado obsoleto y reemplazado por la instalación global desacoplada de Adevv (`adevv instalar` y `adevv orquestar`).
 
-1. **Auto-actualización (Recomendado):** Configurar Git para sincronizar automáticamente el contenido del submódulo al cambiar de rama:
-   ```bash
-   git config --global submodule.recurse true
-   ```
-2. **Edición Aislada:** Si se necesita modificar una skill o componente del submódulo:
-   * Navegar al directorio `.agents`.
-   * Crear allí una rama alineada con el repositorio origen de los agentes.
-   * Comprometer los cambios (Commit) y enviar (Push).
-   * Volver a la raíz del repositorio consumidor y hacer commit del cambio en el puntero del submódulo. (Ejemplo de commit: `chore(agents): update tasking workflows`).
+Para migrar proyectos existentes que todavía utilizan el submódulo o retirar junctions locales de forma segura, consulta la [Guía de migración desde submódulo .agents en el README](README.md#--guía-de-migración-desde-submódulo-agents).
 
 ## 9. Resumen Visual del Flujo de Trabajo
 

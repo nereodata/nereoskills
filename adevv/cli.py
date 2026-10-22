@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
-from adevv import __version__, processes, updater
+from adevv import __version__, migrate, processes, updater
 from adevv.release_tools import obtener_versiones_publicadas
 from adevv.store import (
     get_active_info,
@@ -320,6 +320,7 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
     subparsers.add_parser("orquestar", add_help=False, help="despacha el bucle o comandos de orquestación")
     subparsers.add_parser("telegram", add_help=False, help="despacha el gateway de Telegram")
     subparsers.add_parser("release", add_help=False, help="despacha scripts de gestión de lanzamientos")
+    subparsers.add_parser("migrar", help="diagnostica la migración de submódulo .agents a adevv")
 
     parsed, remaining = parser.parse_known_args(args)
 
@@ -339,6 +340,9 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
 
     if parsed.subcommand == "instalar":
         return comando_instalar(parsed.forzar, out_stream, err_stream)
+
+    if parsed.subcommand == "migrar":
+        return migrate.ejecutar_migrar(Path.cwd(), out_stream, err_stream)
 
     if parsed.subcommand == "orquestar":
         idx = args.index("orquestar")
