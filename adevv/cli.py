@@ -7,8 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO
 
-from adevv import __version__
-from adevv.processes import formatear_proceso_ui, hay_bucles_en_marcha
+from adevv import __version__, processes, updater
 from adevv.release_tools import obtener_versiones_publicadas
 from adevv.store import (
     get_active_info,
@@ -18,6 +17,7 @@ from adevv.store import (
     get_sync_registry,
     get_update_state,
     set_active_info,
+    set_config,
     set_update_state,
 )
 from adevv.sync import (
@@ -28,73 +28,84 @@ from adevv.sync import (
 )
 
 
-def _version_es_mayor(v1: str, v2: str) -> bool:
-    """Compara si la versión v1 es estrictamente mayor que v2 numéricamente."""
-    try:
-        p1 = [int(x) for x in v1.split(".")]
-        p2 = [int(x) for x in v2.split(".")]
-        return p1 > p2
-    except ValueError:
-        return v1 > v2
-
-
-def _comprobar_actualizacion_en_instalacion(err: TextIO) -> None:
-    """Comprueba si hay una versión publicada superior y la instala lado a lado."""
-    config = get_config()
-    if not config.get("auto_update", True):
-        return
-
-    if hay_bucles_en_marcha():
-        return
-
-    origin_url = os.environ.get("ADEVV_ORIGIN_URL")
-    if not origin_url:
-        return
-
-    try:
-        versiones = obtener_versiones_publicadas(origin_url)
-    except Exception:
-        return
-
-    if not versiones:
-        return
-
+def comando_actualizar(target_version: Optional[str], out: TextIO, err: TextIO) -> int:
+    """Ejecuta la orden adevv actualizar [target_version]."""
     act = get_active_info()
     version_actual = act.get("version", __version__) if act else __version__
 
-    versiones_ordenadas = sorted(versiones, key=lambda v: [int(x) for x in v.split(".") if x.isdigit()])
-    mayor_publicada = versiones_ordenadas[-1]
+    if target_version is None:
+        state = get_update_state()
+        state.pop("fallida", None)
+        set_update_state(state)
 
-    if _version_es_mayor(mayor_publicada, version_actual):
-        adevv_home = get_adevv_home()
-        nueva_version_dir = adevv_home / "versions" / mayor_publicada
-        nueva_version_dir.mkdir(parents=True, exist_ok=True)
+        config = get_config()
+        if not config.get("auto_update", True):
+            config["auto_update"] = True
+            set_config(config)
+            print("Actualización automática reactivada.", file=out)
 
-        try:
-            # Extraer archivos del commit de la etiqueta vX.Y.Z
-            tag_name = f"v{mayor_publicada}"
-            tar_proc = subprocess.run(
-                ["git", "archive", "--format=tar", tag_name],
-                cwd=origin_url if Path(origin_url).is_dir() else None,
-                capture_output=True,
-                check=True,
-            )
-            import io
-            import tarfile
+        res, msg, ver = updater.evaluar_comprobacion_actualizacion(forzada=True)
+        if res == updater.ResultadoActualizacion.APLICADA:
+            if msg:
+                print(msg, file=out)
+            return 0
+        elif res == updater.ResultadoActualizacion.AL_DIA:
+            if msg:
+                print(msg, file=out)
+            return 0
+        elif res == updater.ResultadoActualizacion.APLAZADA:
+            if msg:
+                print(msg, file=err)
+            return 1
+        elif res in (updater.ResultadoActualizacion.FALLIDA, updater.ResultadoActualizacion.SIN_RED):
+            if msg:
+                print(msg, file=err)
+            return 1
+        else:
+            if msg:
+                print(msg, file=out)
+            return 0
 
-            with tarfile.open(fileobj=io.BytesIO(tar_proc.stdout), mode="r:") as tar:
-                if hasattr(tarfile, "data_filter"):
-                    tar.extractall(path=nueva_version_dir, filter="data")
-                else:
-                    tar.extractall(path=nueva_version_dir)
+    versiones, mapa_commits, err_q = updater.consultar_versiones_publicadas()
+    if err_q:
+        remote = os.environ.get("ADEVV_ORIGIN_URL") or "https://github.com/nereodata/nereoskills.git"
+        print(f"No se pudo consultar {remote}: {err_q}. Sigues con la {version_actual}.", file=err)
+        return 1
 
-            set_active_info({
-                "version": mayor_publicada,
-                "id": mayor_publicada,
-                "origen": "publicada",
-            })
-        except Exception:
-            pass
+    if target_version not in versiones:
+        top5 = list(reversed(versiones))[:5]
+        print(f"{target_version} no es una versión publicada. Publicadas: {', '.join(top5)}.", file=err)
+        return 1
+
+    if target_version == version_actual:
+        print(f"Adevv {target_version} ya está instalado.", file=out)
+        return 0
+
+    bucles = processes.hay_bucles_en_marcha()
+    if bucles:
+        lista_bucles = ", ".join(processes.formatear_proceso_ui(b) for b in bucles)
+        print(f"No se puede instalar {target_version} con bucles en marcha: {lista_bucles}.", file=err)
+        return 1
+
+    commit_hash = mapa_commits.get(target_version)
+    state = get_update_state()
+    state.pop("aplazada", None)
+    set_update_state(state)
+    ok, causa, desfasados = updater.instalar_version_publicada(target_version=target_version, commit_hash=commit_hash)
+    if not ok:
+        print(f"No se pudo instalar {target_version}: {causa}.", file=err)
+        return 1
+
+    mayor_publicada = versiones[-1]
+    if updater._version_es_mayor(mayor_publicada, target_version):
+        cfg = get_config()
+        cfg["auto_update"] = False
+        set_config(cfg)
+        print(f"Actualización automática desactivada; `adevv actualizar` la reactiva.", file=out)
+    else:
+        print(f"Adevv {target_version} instalado con éxito.", file=out)
+
+    return 0
 
 
 def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
@@ -106,7 +117,7 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
     version_activa = act.get("version", __version__) if act else __version__
     origen_dir = get_active_version_dir()
 
-    bucles_vivos = hay_bucles_en_marcha()
+    bucles_vivos = processes.hay_bucles_en_marcha()
 
     desfasados = []
     for target_key in DESTINOS.keys():
@@ -120,7 +131,7 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
         return
 
     if bucles_vivos:
-        lista_bucles = ", ".join(formatear_proceso_ui(b) for b in bucles_vivos)
+        lista_bucles = ", ".join(processes.formatear_proceso_ui(b) for b in bucles_vivos)
         for _, nombre, v_reg in desfasados:
             msg = f"{nombre} sigue con la {v_reg}; se sincronizará cuando no haya bucles en marcha: {lista_bucles}."
             print(msg, file=err)
@@ -172,8 +183,6 @@ def _describir_escritos_destino(destino_key: str, origen_dir: Path) -> str:
 
 def comando_instalar(forzar: bool, out: TextIO, err: TextIO) -> int:
     """Ejecuta la orden adevv instalar [--forzar]."""
-    _comprobar_actualizacion_en_instalacion(err)
-
     act = get_active_info()
     version = act.get("version", __version__) if act else __version__
     origen_dir = get_active_version_dir()
@@ -306,16 +315,27 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
     subparsers = parser.add_subparsers(dest="subcommand")
     instalar_parser = subparsers.add_parser("instalar", help="sincroniza las carpetas de los arneses")
     instalar_parser.add_argument("--forzar", action="store_true", help="sobrescribe archivos del registro editados a mano")
+    actualizar_parser = subparsers.add_parser("actualizar", help="actualiza adevv a la última versión publicada o a una específica")
+    actualizar_parser.add_argument("target_version", nargs="?", default=None, help="versión específica X.Y.Z a instalar")
     subparsers.add_parser("orquestar", add_help=False, help="despacha el bucle o comandos de orquestación")
     subparsers.add_parser("telegram", add_help=False, help="despacha el gateway de Telegram")
     subparsers.add_parser("release", add_help=False, help="despacha scripts de gestión de lanzamientos")
 
     parsed, remaining = parser.parse_known_args(args)
 
+    if parsed.subcommand != "actualizar":
+        es_instalar = (parsed.subcommand == "instalar")
+        res, msg, ver = updater.evaluar_comprobacion_actualizacion(es_instalar=es_instalar)
+        if msg:
+            print(msg, file=err_stream)
+
     _resincronizar_desfasados_al_arrancar(out_stream, err_stream)
 
     if parsed.version:
         return comando_version(out_stream)
+
+    if parsed.subcommand == "actualizar":
+        return comando_actualizar(parsed.target_version, out_stream, err_stream)
 
     if parsed.subcommand == "instalar":
         return comando_instalar(parsed.forzar, out_stream, err_stream)
