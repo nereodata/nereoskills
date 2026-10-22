@@ -1,0 +1,24 @@
+# Configuración de Issue-as-Code para Adevv: el propio Adevv se desarrolla como un proyecto Adevv.
+# El backlog (docs/plan/) no forma parte de lo que se distribuye a otros proyectos.
+project:
+  name: Adevv
+  prefix: ADV
+  version: "v0.0.0"
+
+levels:
+  master:
+    id_prefix: ADV
+    path: docs/plan/
+    folders:
+      tasks: tasks/
+      bugs: bugs/
+  components: []
+
+validation:
+  command: python -m unittest discover -s tests
+
+release:
+  manifests:
+    - path: task_config.yaml
+      type: yaml
+      key: project.version
