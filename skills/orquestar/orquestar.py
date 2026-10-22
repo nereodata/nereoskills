@@ -23,10 +23,12 @@ HARNESS = {
     'codex': ['codex', 'exec', '--full-auto', '--json', '{prompt}'],
     'gemini': ['gemini', '--yolo', '-p', '{prompt}'],
     'cursor': ['cursor-agent', '-p', '--force', '{prompt}'],
+    'agy': ['agy', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
 }
 SKILL = Path(__file__).resolve().parent / 'SKILL.md'
 AGENTES = Path(__file__).resolve().parents[2] / 'agents'
-CONFIG = 'orchestration.json'  # roles: development, hades, clio, cronos → harness, model, effort
+CONFIG = 'orchestration.json'  # roles: atenea, artemisa, hades, clio, cronos → harness, model, effort
+DESARROLLO = {'task-dev', 'bug-fix', 'revisar-tarea'}  # pasos de Artemisa; el resto (análisis y decisión), de Atenea
 METRICAS = 'orquestar_metricas.jsonl'
 EVIDENCIAS = 'orquestar_evidencias.jsonl'
 LOG = 'orquestar.log'
@@ -397,12 +399,26 @@ def config(root):
     return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
 
 
+def rol_de(root, paso):
+    """(rol, configuración) que ejecuta un paso del bucle: Artemisa desarrolla, Atenea analiza y decide.
+
+    Sin la clave del rol en orchestration.json se usa `development` (y Atenea, sin ella, la de Artemisa).
+    """
+    cfg = config(root)
+    dev = cfg.get('artemisa') or cfg.get('development', {})
+    rol = 'artemisa' if paso in DESARROLLO else 'atenea'
+    return rol, (dev if rol == 'artemisa' else cfg.get('atenea') or dev)
+
+
 def con_modelo(cmd, harness, rol):
     """Añade el modelo y el esfuerzo del rol, si no vienen ya en el comando."""
     cmd = list(cmd)
     if harness == 'claude' and '--model' not in cmd:
         cmd += (['--model', rol['model']] if rol.get('model') else []) + \
                (['--effort', rol['effort']] if rol.get('effort') else [])
+    elif harness in ('gemini', 'agy') and '--model' not in cmd and '-m' not in cmd:
+        cmd += (['--model', rol['model']] if rol.get('model') else []) + \
+               (['--effort', rol['effort']] if harness == 'agy' and rol.get('effort') else [])
     elif harness == 'codex' and '--model' not in cmd and '-m' not in cmd:
         i = cmd.index('exec') + 1
         cmd[i:i] = (['-m', rol['model']] if rol.get('model') else []) + \
@@ -410,27 +426,47 @@ def con_modelo(cmd, harness, rol):
     return cmd
 
 
-def comando(a, prompt, root=None):
-    plantilla = a.cmd.split() if a.cmd else HARNESS[a.harness]
+def arnes(a, rol):
+    """Arnés de un paso: --harness o el de su rol (claude por defecto); None con --cmd."""
+    return None if a.cmd else a.harness or rol.get('harness', 'claude')
+
+
+def comando(a, prompt, root=None, rol=None):
+    rol = rol if rol is not None else rol_de(root or Path.cwd(), 'task-dev')[1]
+    harness = arnes(a, rol)
+    plantilla = a.cmd.split() if a.cmd else HARNESS[harness]
     exe = shutil.which(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
     cmd = [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
-    dev = config(root or Path.cwd()).get('development', {})
-    if not a.cmd and dev.get('harness', a.harness) == a.harness:
-        cmd = con_modelo(cmd, a.harness, dev)
-    if a.presupuesto and json_claude(a):
+    if harness and rol.get('harness', harness) == harness:
+        cmd = con_modelo(cmd, harness, rol)
+    if a.presupuesto and harness == 'claude':
         cmd += ['--max-budget-usd', str(a.presupuesto)]
     return cmd
 
 
-def json_claude(a):
-    return a.harness == 'claude' and not a.cmd
-
-
 def lanzar(cmd, root, harness, entrada=None, env=None):
-    """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude y codex."""
+    """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
     inicio = time.monotonic()
+    if harness == 'agy' and '--output-format' in cmd:
+        r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', env=env)
+        m = {'duracion_s': round(time.monotonic() - inicio)}
+        salida = r.stdout + '\n' + r.stderr
+        try:
+            d = json.loads(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            print(salida, flush=True)
+            return r.returncode, m, salida
+        print(d.get('response', ''), flush=True)
+        u = d.get('usage') or {}
+        modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
+        m.update(turnos=d.get('num_turns'), error=d.get('status') != 'SUCCESS',
+                 modelos={modelo: {'entrada': u.get('input_tokens'), 'salida': u.get('output_tokens'),
+                                   'cache_leida': u.get('cache_read_tokens'),
+                                   'razonamiento': u.get('thinking_tokens')}})
+        return (1 if m['error'] and not r.returncode else r.returncode), m, salida
     if harness == 'claude' and '--output-format' in cmd:
         r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
                            encoding='utf-8', errors='replace', env=env)
@@ -484,9 +520,10 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
     return p.returncode, m, ''.join(lineas[-200:])
 
 
-def ejecutar(a, root, prompt, env=None):
-    """Lanza el paso y devuelve (código, métricas, salida)."""
-    return lanzar(comando(a, prompt, root), root, None if a.cmd else a.harness, env=env)
+def ejecutar(a, root, prompt, env=None, rol=None):
+    """Lanza el paso con el arnés y el modelo de su rol y devuelve (código, métricas, salida)."""
+    rol = rol if rol is not None else rol_de(root, 'task-dev')[1]
+    return lanzar(comando(a, prompt, root, rol), root, arnes(a, rol), env=env)
 
 
 def agente(root, rol, prompt):
@@ -781,7 +818,7 @@ def en_fondo(root):
 def main():
     ap = argparse.ArgumentParser(description='Orquestador: de la idea al producto, paso a paso.')
     ap.add_argument('--harness', choices=HARNESS, default=None,
-                    help=f'arnés de desarrollo (por defecto, el de {CONFIG} o claude)')
+                    help=f'arnés de todos los pasos (por defecto, el de cada rol en {CONFIG}, o claude)')
     ap.add_argument('--cmd', help='plantilla propia del arnés, con {prompt} (sustituye a --harness)')
     ap.add_argument('--docs', default='docs/requirements', help='carpeta de requisitos y planes')
     ap.add_argument('--test', help='comando de la suite (por defecto, validation.command de task_config.yaml)')
@@ -803,7 +840,6 @@ def main():
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
-    a.harness = a.harness or config(root).get('development', {}).get('harness', 'claude')
 
     if a.agente:
         prompt = a.prompt_file.read_text(encoding='utf-8') if a.prompt_file else sys.stdin.read()
@@ -891,13 +927,16 @@ def bucle(a, root):
             git('checkout', '-q', rama)
 
         antes = firma(root, a.docs)
-        prompt = PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
+        rol, cfg_rol = rol_de(root, paso)
+        persona = AGENTES / f'{rol}.md'
+        prompt = (f'Lee {os.path.relpath(persona, root).replace(chr(92), "/")} y actúa como ese agente; '
+                  'ignora el modelo de su frontmatter. ' if persona.exists() else '') + PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '') + extra
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
-        codigo, m, salida = ejecutar(a, root, prompt, env=env)
+        codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
         cuota = espera_cuota(salida) if codigo else None
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                         'arnes': a.cmd or a.harness, 'codigo': codigo, **m,
+                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
                          **({'sin_cuota': True} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota

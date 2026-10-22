@@ -344,5 +344,53 @@ class BuzonTests(unittest.TestCase):
             self.assertEqual(motor.estado(self.root, 'docs')[1], 'calcular-dependencias')
 
 
+class RolesTests(unittest.TestCase):
+    """Atenea analiza y decide, Artemisa desarrolla; cada una con su arnés, modelo y esfuerzo."""
+
+    CFG = {'atenea': {'harness': 'claude', 'model': 'claude-opus-5-5', 'effort': 'medium'},
+           'artemisa': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium'}}
+
+    def args(self, harness=None, cmd=None):
+        return motor.argparse.Namespace(harness=harness, cmd=cmd, presupuesto=None)
+
+    def test_development_steps_go_to_artemisa_and_the_rest_to_atenea(self):
+        with patch.object(motor, 'config', return_value=self.CFG):
+            for paso in ('task-dev', 'bug-fix', 'revisar-tarea'):
+                self.assertEqual(motor.rol_de(Path('.'), paso), ('artemisa', self.CFG['artemisa']))
+            for paso in ('ciclo-requisitos', 'platform-plan', 'work-plan', 'especificar', 'revisar-version'):
+                self.assertEqual(motor.rol_de(Path('.'), paso), ('atenea', self.CFG['atenea']))
+
+    def test_without_roles_every_step_uses_development(self):
+        dev = {'harness': 'codex', 'model': 'gpt'}
+        with patch.object(motor, 'config', return_value={'development': dev}):
+            self.assertEqual(motor.rol_de(Path('.'), 'platform-plan')[1], dev)
+            self.assertEqual(motor.rol_de(Path('.'), 'task-dev')[1], dev)
+
+    def test_each_role_launches_its_own_harness_and_model(self):
+        with patch.object(motor.shutil, 'which', side_effect=lambda x: x):
+            atenea = motor.comando(self.args(), 'p', rol=self.CFG['atenea'])
+            artemisa = motor.comando(self.args(), 'p', rol=self.CFG['artemisa'])
+            forzado = motor.comando(self.args(harness='codex'), 'p', rol=self.CFG['artemisa'])
+        self.assertEqual(atenea[0], 'claude')
+        self.assertEqual(atenea[-4:], ['--model', 'claude-opus-5-5', '--effort', 'medium'])
+        self.assertEqual(artemisa[0], 'agy')
+        self.assertEqual(artemisa[-2:], ['--model', 'gemini-3.8-flash-medium'])
+        self.assertEqual(forzado[:2], ['codex', 'exec'])
+        self.assertNotIn('-m', forzado)
+
+    def test_agy_json_output_gives_usage_and_errors(self):
+        salida = ('{"status":"SUCCESS","response":"hecho","num_turns":3,"usage":{"input_tokens":10,'
+                  '"output_tokens":5,"thinking_tokens":2,"cache_read_tokens":1}}')
+        cmd = ['agy', '-p', 'x', '--output-format', 'json', '--model', 'gemini-3.8-flash-medium']
+        with patch.object(motor.subprocess, 'run', return_value=subprocess.CompletedProcess(cmd, 0, salida, '')):
+            codigo, m, _ = motor.lanzar(cmd, Path('.'), 'agy')
+        self.assertEqual((codigo, m['turnos']), (0, 3))
+        self.assertEqual(m['modelos']['gemini-3.8-flash-medium'],
+                         {'entrada': 10, 'salida': 5, 'cache_leida': 1, 'razonamiento': 2})
+        fallo = salida.replace('SUCCESS', 'ERROR')
+        with patch.object(motor.subprocess, 'run', return_value=subprocess.CompletedProcess(cmd, 0, fallo, '')):
+            self.assertEqual(motor.lanzar(cmd, Path('.'), 'agy')[0], 1)
+
+
 if __name__ == '__main__':
     unittest.main()

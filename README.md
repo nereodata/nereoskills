@@ -12,6 +12,8 @@ La arquitectura separa **conocimiento** (skills) de **ejecución**: las skills d
 
 | Agente | Rol | Modelo | Skills que usa | Uso en `task-dev`/`bug-fix` |
 |--------|-----|--------|---------------|------------------------------|
+| **Atenea** | Analista — Define, diseña la arquitectura, planifica y decide | Opus | ciclo-requisitos, platform-plan, work-plan, generate-bdd | Pasos de análisis de `/orquestar` |
+| **Artemisa** | Desarrolladora — Implementa hasta que los tests pasan | Configurable | task-dev, bug-fix | Pasos `task-dev`/`bug-fix` de `/orquestar` |
 | **Hades** | QA — Juez de calidad objetivo e imparcial | Opus | review-spec, review-design, review-test, review-code | **Delegado (aislado)** |
 | **Cronos** | Gestor de tareas — Controla el ciclo de vida del backlog | Sonnet | task-add, bug-add, task-list | Manual (init/cierre van inline) |
 | **Clío** | Documentalista — Registra cambios, documentación y commits | Sonnet | manage-docs, commit | Manual (docs/commit van inline) |
@@ -48,14 +50,14 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de desarrollo, Hades, Clío y Cronos) se configuran en `orchestration.json`. Por Telegram, el bucle avisa de fin de versión, falta de cuota y paradas que necesitan respuesta, y el gateway ([`skills/telegram_gateway`](skills/telegram_gateway/SKILL.md)) responde a `/estado` y registra tareas y bugs sin versión.
+Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de Atenea, Artemisa, Hades, Clío y Cronos) se configuran en `orchestration.json`. Por Telegram, el bucle avisa de fin de versión, falta de cuota y paradas que necesitan respuesta, y el gateway ([`skills/telegram_gateway`](skills/telegram_gateway/SKILL.md)) responde a `/estado` y registra tareas y bugs sin versión.
 
 ---
 
 ## 📁 Estructura del Repositorio
 
 ```
-├── agents/                # Agentes (Hades, Cronos, Clio)
+├── agents/                # Agentes (Atenea, Artemisa, Hades, Cronos, Clio)
 ├── skills/                # Skills (conocimiento puro — qué hacer)
 │   ├── task-dev/          # Flujo de desarrollo de tareas
 │   ├── bug-fix/           # Flujo de resolución de bugs
