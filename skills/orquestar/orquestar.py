@@ -487,6 +487,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
         print(d.get('response', ''), flush=True)
         u = d.get('usage') or {}
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
+        if d.get('status') != 'SUCCESS':
+            print(f"[orquestar] agy status: {d.get('status')} (returncode: {r.returncode})", flush=True)
         m.update(turnos=d.get('num_turns'), error=d.get('status') != 'SUCCESS',
                  modelos={modelo: {'entrada': u.get('input_tokens'), 'salida': u.get('output_tokens'),
                                    'cache_leida': u.get('cache_read_tokens'),
@@ -1030,6 +1032,10 @@ def bucle(a, root):
                 return 2
             continue
         if codigo:
+            if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
+                sin_progreso = 0
+                continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             return parar(root, 'cuota' if cuota is not None else 'error',
