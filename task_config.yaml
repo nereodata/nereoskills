@@ -22,3 +22,6 @@ release:
     - path: task_config.yaml
       type: yaml
       key: project.version
+    - path: pyproject.toml
+      type: toml
+      key: project.version
