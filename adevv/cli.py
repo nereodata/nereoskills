@@ -393,6 +393,10 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
 
 
 def main() -> None:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
     sys.exit(main_cli(sys.argv[1:]))
 
 
