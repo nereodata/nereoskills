@@ -391,6 +391,97 @@ class RolesTests(unittest.TestCase):
         with patch.object(motor.subprocess, 'run', return_value=subprocess.CompletedProcess(cmd, 0, fallo, '')):
             self.assertEqual(motor.lanzar(cmd, Path('.'), 'agy')[0], 1)
 
+    def test_step_settings_override_the_role_effort(self):
+        cfg = {'atenea': {'harness': 'claude', 'model': 'opus', 'effort': 'medium',
+                          'pasos': {'platform-plan': {'effort': 'high'}}}}
+        with patch.object(motor, 'config', return_value=cfg):
+            self.assertEqual(motor.rol_de(Path('.'), 'platform-plan')[1],
+                             {'harness': 'claude', 'model': 'opus', 'effort': 'high'})
+            self.assertEqual(motor.rol_de(Path('.'), 'start-version')[1]['effort'], 'medium')
+
+
+ESCALADA = {'artemisa': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium',
+                         'escalada': {'rechazos': 2, 'model': 'claude-opus-5-5-medium'}},
+            'hades': {'harness': 'claude', 'model': 'opus', 'effort': 'medium',
+                      'pasos': {'revisar-version': {'effort': 'high'}}}}
+
+
+class EscaladaTests(unittest.TestCase):
+    """Hades deja su veredicto en las métricas; tras dos rechazos seguidos, Artemisa para y sube de modelo."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.cfg = patch.object(motor, 'config', return_value=ESCALADA)
+        self.cfg.start()
+
+    def tearDown(self):
+        self.cfg.stop()
+        self.tmp.cleanup()
+
+    def hades(self, veredicto, paso='revisar-tarea', iid='T-ADV-0001', escalada=False):
+        """Lanza a Hades con una salida que trae el veredicto; devuelve (comando lanzado, lo impreso)."""
+        lanzados = []
+
+        def lanzar(cmd, root, harness, entrada=None):
+            lanzados.append(cmd)
+            return 0, {}, f'## Informe\n- **Veredicto**: {veredicto} (media 6)'
+
+        env = {'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': iid, **({'ORQUESTAR_ESCALADA': '1'} if escalada else {})}
+        with (patch.dict(motor.os.environ, env, clear=True), patch.object(motor, 'lanzar', side_effect=lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x), patch.object(motor, 'excluir'),
+              patch('builtins.print') as impreso):
+            motor.agente(self.root, 'hades', 'revisa')
+        return lanzados[0], ' '.join(str(c.args[0]) for c in impreso.call_args_list if c.args)
+
+    def test_verdicts_are_recorded_and_an_approval_resets_the_count(self):
+        self.hades('RECHAZADO')
+        self.assertEqual(motor.rechazos(self.root, 'T-ADV-0001'), 1)
+        self.hades('APROBADO')
+        self.assertEqual(motor.rechazos(self.root, 'T-ADV-0001'), 0)
+        self.hades('RECHAZADO', iid='T-ADV-0002')
+        self.assertEqual(motor.rechazos(self.root, 'T-ADV-0001'), 0)
+
+    def test_hades_uses_the_effort_of_the_step(self):
+        cmd, _ = self.hades('APROBADO', paso='revisar-version')
+        self.assertEqual(cmd[-4:], ['--model', 'opus', '--effort', 'high'])
+        cmd, _ = self.hades('APROBADO', paso='revisar-tarea')
+        self.assertEqual(cmd[-1], 'medium')
+
+    def test_second_rejection_tells_artemisa_to_stop_and_the_next_launch_escalates(self):
+        _, impreso = self.hades('RECHAZADO')
+        self.assertNotIn('no sigas corrigiendo', impreso)
+        cfg = motor.rol_de(self.root, 'task-dev')[1]
+        self.assertEqual(motor.escalada(self.root, 'artemisa', cfg, 'T-ADV-0001'), (cfg, False))
+        _, impreso = self.hades('RECHAZADO')
+        self.assertIn('no sigas corrigiendo', impreso)
+        self.assertIn('modelo superior', impreso)
+        escalado, si = motor.escalada(self.root, 'artemisa', cfg, 'T-ADV-0001')
+        self.assertTrue(si)
+        self.assertEqual(escalado, {'harness': 'agy', 'model': 'claude-opus-5-5-medium'})
+        self.assertEqual(motor.escalada(self.root, 'atenea', cfg, 'T-ADV-0001'), (cfg, False))
+
+    def test_after_escalation_two_more_rejections_block_the_task(self):
+        for _ in range(3):
+            self.hades('RECHAZADO', escalada=True)
+        _, impreso = self.hades('RECHAZADO', escalada=True)
+        self.assertIn('regla 5', impreso)
+        self.assertIn('pendiente_de: especificador', impreso)
+
+    def test_loop_launches_the_escalated_model_with_its_flag(self):
+        for _ in range(2):
+            self.hades('RECHAZADO')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False, max_pasos=1,
+                                        reintentos=2, espera_max=0, cmd=None)
+        with (patch.object(motor, 'estado', return_value=('PASO', 'revisar-tarea', 'T-ADV-0001', '')),
+              patch.object(motor, 'ejecutar', return_value=(0, {}, '')) as ejecutar,
+              patch.object(motor, 'firma', side_effect=['a', 'b']), patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'ingerir', return_value=[]), patch.object(motor, 'avisar'),
+              patch.object(motor, 'excluir')):
+            motor.bucle(args, self.root)
+        self.assertEqual(ejecutar.call_args.kwargs['rol']['model'], 'claude-opus-5-5-medium')
+        self.assertEqual(ejecutar.call_args.kwargs['env']['ORQUESTAR_ESCALADA'], '1')
+
 
 if __name__ == '__main__':
     unittest.main()

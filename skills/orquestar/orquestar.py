@@ -407,7 +407,32 @@ def rol_de(root, paso):
     cfg = config(root)
     dev = cfg.get('artemisa') or cfg.get('development', {})
     rol = 'artemisa' if paso in DESARROLLO else 'atenea'
-    return rol, (dev if rol == 'artemisa' else cfg.get('atenea') or dev)
+    return rol, ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso)
+
+
+def ajustes(cfg, paso):
+    """Configuración del rol para un paso: la base más lo que fije `pasos.<paso>` (p. ej. otro `effort`)."""
+    return {**{k: v for k, v in cfg.items() if k != 'pasos'}, **(cfg.get('pasos') or {}).get(paso, {})}
+
+
+def rechazos(root, iid):
+    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO."""
+    n = 0
+    if iid and (root / METRICAS).exists():
+        for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
+            f = json.loads(linea) if linea.strip() else {}
+            if f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
+                n = n + 1 if f['veredicto'] == 'RECHAZADO' else 0
+    return n
+
+
+def escalada(root, rol, cfg, iid):
+    """(configuración, escalado): Artemisa sube a `escalada` tras `escalada.rechazos` rechazos seguidos de Hades."""
+    esc = cfg.get('escalada') or {}
+    if rol != 'artemisa' or not esc or rechazos(root, iid) < esc.get('rechazos', 2):
+        return cfg, False
+    return {**{k: v for k, v in cfg.items() if k != 'escalada'},
+            **{k: v for k, v in esc.items() if k != 'rechazos'}}, True
 
 
 def con_modelo(cmd, harness, rol):
@@ -528,7 +553,8 @@ def ejecutar(a, root, prompt, env=None, rol=None):
 
 def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
-    cfg = config(root).get(rol, {})
+    paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
+    cfg = ajustes(config(root).get(rol, {}), paso)
     harness = cfg.get('harness', 'claude')
     instrucciones = cfg.get('instructions') or os.path.relpath(AGENTES / f'{rol}.md', root).replace('\\', '/')
     prompt = (f'Lee {instrucciones} y actúa como ese agente; ignora el modelo de su frontmatter. '
@@ -546,9 +572,27 @@ def agente(root, rol, prompt):
         sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = con_modelo([exe] + base[1:], harness, cfg)
     codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt)
-    registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': os.environ.get('ORQUESTAR_PASO', ''),
-                     'id': os.environ.get('ORQUESTAR_ID', ''), 'arnes': harness, 'codigo': codigo, **m})
+    veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+    registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
+                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}), **m})
+    if veredicto and veredicto[-1] == 'RECHAZADO':
+        print(tope_de_rechazos(root, iid), flush=True)
     return codigo
+
+
+def tope_de_rechazos(root, iid):
+    """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
+    esc = rol_de(root, 'task-dev')[1].get('escalada') or {}
+    tope, n = esc.get('rechazos', 2), rechazos(root, iid)
+    if not esc or n < tope or n % tope:
+        return ''
+    if os.environ.get('ORQUESTAR_ESCALADA'):
+        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas, también tras la escalada: '
+                'no sigas corrigiendo; aplica la regla 5 del modo orquestado (bloquea la tarea con '
+                '`pendiente_de: especificador`, o `humano` si falta un recurso externo) y termina el paso.')
+    return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que '
+            'tengas en la rama, explica en tu salida qué falla y termina el paso sin cambiar estados: el bucle '
+            'relanzará la tarea con un modelo superior.')
 
 
 # ---------------------------------------------------------------- cuota
@@ -928,15 +972,23 @@ def bucle(a, root):
 
         antes = firma(root, a.docs)
         rol, cfg_rol = rol_de(root, paso)
+        cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
+        if escalado:
+            print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '
+                  f'escalo a {cfg_rol.get("model") or cfg_rol.get("harness")}', flush=True)
         persona = AGENTES / f'{rol}.md'
         prompt = (f'Lee {os.path.relpath(persona, root).replace(chr(92), "/")} y actúa como ese agente; '
                   'ignora el modelo de su frontmatter. ' if persona.exists() else '') + PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
                                paso=paso, args=f' con "{arg}"' if arg else '') + extra
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
+        env.pop('ORQUESTAR_ESCALADA', None)
+        if escalado:
+            env['ORQUESTAR_ESCALADA'] = '1'
         codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
         cuota = espera_cuota(salida) if codigo else None
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                          'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
+                         **({'escalado': True} if escalado else {}),
                          **({'sin_cuota': True} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
