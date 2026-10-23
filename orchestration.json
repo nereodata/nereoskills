@@ -2,29 +2,143 @@
   "atenea": {
     "harness": "agy",
     "model": "gemini-4-argon-medium",
-    "effort": "medium"
+    "effort": "medium",
+    "reserva": [
+      {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "medium"
+      }
+    ]
   },
   "artemisa": {
-    "harness": "agy",
-    "model": "gemini-3.8-flash-medium",
+    "harness": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "medium",
+    "reserva": [
+      {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "medium"
+      }
+    ],
+    "dificultad": {
+      "sencilla": {
+        "harness": "agy",
+        "model": "gemini-3.8-flash-medium",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "codex",
+            "model": "gpt-6-luna",
+            "effort": "high"
+          }
+        ]
+      },
+      "media": {
+        "harness": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "medium"
+          }
+        ]
+      },
+      "dificil": {
+        "harness": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "medium"
+          }
+        ]
+      }
+    },
     "escalada": {
       "rechazos": 2,
-      "model": "gemini-4-argon-medium"
+      "harness": "claude",
+      "model": "claude-opus-5-5",
+      "effort": "high"
     }
   },
   "hades": {
     "harness": "agy",
     "model": "gemini-4-argon-medium",
-    "effort": "medium"
+    "effort": "medium",
+    "reserva": [
+      {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "medium"
+      }
+    ],
+    "dificultad": {
+      "sencilla": {
+        "harness": "codex",
+        "model": "gpt-6.1-sol",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "medium"
+          }
+        ]
+      },
+      "media": {
+        "harness": "agy",
+        "model": "gemini-4-argon-medium",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "medium"
+          }
+        ]
+      },
+      "dificil": {
+        "harness": "agy",
+        "model": "gemini-4-argon-medium",
+        "effort": "medium",
+        "reserva": [
+          {
+            "harness": "claude",
+            "model": "claude-opus-5-5",
+            "effort": "medium"
+          }
+        ]
+      }
+    }
   },
   "clio": {
     "harness": "agy",
     "model": "gemini-3.8-flash-low",
-    "effort": "low"
+    "effort": "low",
+    "reserva": [
+      {
+        "harness": "codex",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      }
+    ]
   },
   "cronos": {
     "harness": "agy",
     "model": "gemini-3.8-flash-low",
-    "effort": "low"
+    "effort": "low",
+    "reserva": [
+      {
+        "harness": "codex",
+        "model": "gpt-6-luna",
+        "effort": "high"
+      }
+    ]
   }
 }
