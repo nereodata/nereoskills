@@ -2,6 +2,15 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.3.0] - 2026-10-23
+
+### Añadido
+
+#### General
+- **T-ADV-0010** — Modelos de reserva ante agotamiento de cuota en pasos y subagentes
+- **T-ADV-0011** — Subida automática de dificultad de la tarea tras más de 2 reintentos
+- **T-ADV-0012** — Conversación libre con continuidad de hilo en el gateway de Telegram
+
 ## [0.2.0] - 2026-10-23
 
 ### Añadido
