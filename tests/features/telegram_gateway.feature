@@ -58,3 +58,40 @@ Característica: Gateway de Telegram de Adevv
     Cuando llegan ese mensaje y otro válido
     Entonces el primero recibe que no se pudo procesar
     Y el segundo recibe su respuesta
+
+  @CA-M-1
+  Escenario: Conversación libre con el modelo del proyecto
+    Dado que el usuario "12345" envía un mensaje sin comando "Hola, ¿de qué trata este proyecto?"
+    Cuando el gateway procesa el mensaje
+    Entonces invoca al modelo configurado para el gateway
+    Y guarda el identificador de sesión asociado a "12345"
+    Y el usuario recibe la respuesta textual del asistente
+
+  @CA-M-1
+  Escenario: Continuidad de hilo entre mensajes del mismo usuario
+    Dado que el usuario "12345" tiene una sesión previa "sess-prev-001"
+    Cuando el usuario envía "Y qué tareas están abiertas?"
+    Entonces el gateway reanuda la sesión "sess-prev-001"
+    Y actualiza el ID de sesión si cambia
+
+  @CA-M-1
+  Escenario: Fallback a sesión nueva si la reanudación falla
+    Dado que el usuario "12345" tiene una sesión previa inválida "sess-invalida"
+    Cuando el usuario envía "Explícame el flujo"
+    Y la reanudación con "sess-invalida" devuelve error
+    Entonces el gateway reintenta automáticamente iniciando una sesión nueva
+    Y guarda el nuevo identificador de sesión
+
+  @CA-M-2
+  Escenario: Reiniciar el hilo de conversación con /nuevo o /reset
+    Dado que el usuario "12345" tiene una sesión guardada
+    Cuando el usuario "12345" envía "/nuevo"
+    Entonces se elimina la sesión guardada de "12345"
+    Y recibe confirmación de que el hilo de conversación se ha reiniciado
+
+  @CA-M-3
+  Escenario: Contexto seguro cuando el bucle está en marcha
+    Dado que el bucle está en marcha con "orquestar.pid"
+    Cuando el usuario "12345" envía una consulta libre
+    Entonces el prompt enviado al modelo advierte de no modificar ni commitear ficheros rastreados
+    Y sugiere usar apuntar tareas o bugs si se desea registrar trabajo

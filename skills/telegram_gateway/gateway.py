@@ -2,7 +2,9 @@
 """Gateway de Telegram de Adevv: atiende a los usuarios autorizados mientras el bucle trabaja.
 
 Comandos: /estado (/status) resume el bucle y el backlog; /tarea (/task) y /bug registran una entrada
-sin versión. Nunca escribe en el backlog con el bucle en marcha: deja la petición en el buzón y el bucle
+sin versión. /nuevo (/reset) reinicia el hilo de conversación. Cualquier otro mensaje sin comando mantiene
+una conversación interactiva con el asistente del proyecto conservando el hilo entre mensajes.
+Nunca escribe en el backlog con el bucle en marcha: deja la petición en el buzón y el bucle
 la registra entre pasos, con su propio commit. La configuración, el envío y el estado son los de
 orquestar.py: TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS.
 """
@@ -10,6 +12,7 @@ import argparse
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import time
 import urllib.parse
@@ -23,11 +26,173 @@ _spec.loader.exec_module(motor)
 
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
-         '/tarea <título> — nueva tarea en el backlog, sin versión\n/bug <título> — nuevo bug, sin versión')
+         '/tarea <título> — nueva tarea en el backlog, sin versión\n'
+         '/bug <título> — nuevo bug, sin versión\n'
+         '/nuevo (o /reset) — reinicia tu hilo de conversación\n'
+         'Cualquier otro mensaje sin comando conversa con el asistente del proyecto.')
+
+
+def cargar_sesiones(root):
+    """Carga el diccionario de sesiones guardadas por usuario."""
+    f = root / getattr(motor, 'TELEGRAM_SESIONES', 'orquestar_telegram.json')
+    if not f.exists():
+        return {}
+    try:
+        return json.loads(f.read_text(encoding='utf-8'))
+    except Exception:
+        return {}
+
+
+def guardar_sesion(root, usuario, harness, sesion_id):
+    """Guarda la sesión activa de un usuario para un arnés específico."""
+    motor.excluir(root)
+    sesiones = cargar_sesiones(root)
+    usuario_str = str(usuario).strip()
+    if usuario_str not in sesiones or not isinstance(sesiones[usuario_str], dict):
+        sesiones[usuario_str] = {}
+    sesiones[usuario_str][harness] = sesion_id
+    f = root / getattr(motor, 'TELEGRAM_SESIONES', 'orquestar_telegram.json')
+    f.write_text(json.dumps(sesiones, indent=2, ensure_ascii=False), encoding='utf-8')
+
+
+def obtener_sesion(root, usuario, harness):
+    """Obtiene el identificador de sesión para un usuario y arnés."""
+    sesiones = cargar_sesiones(root)
+    usuario_str = str(usuario).strip()
+    if isinstance(sesiones.get(usuario_str), dict):
+        return sesiones[usuario_str].get(harness)
+    return sesiones.get(f'{usuario_str}:{harness}')
+
+
+def borrar_sesion(root, usuario):
+    """Elimina las sesiones registradas del usuario especificado."""
+    sesiones = cargar_sesiones(root)
+    usuario_str = str(usuario).strip()
+    cambiado = False
+    if usuario_str in sesiones:
+        del sesiones[usuario_str]
+        cambiado = True
+    prefix = f'{usuario_str}:'
+    for k in list(sesiones.keys()):
+        if k.startswith(prefix):
+            del sesiones[k]
+            cambiado = True
+    if cambiado:
+        f = root / getattr(motor, 'TELEGRAM_SESIONES', 'orquestar_telegram.json')
+        f.write_text(json.dumps(sesiones, indent=2, ensure_ascii=False), encoding='utf-8')
+
+
+def construir_prompt(root, texto):
+    """Construye el prompt con contexto de seguridad según el estado del bucle."""
+    pid_file = root / getattr(motor, 'PID', 'orquestar.pid')
+    bucle_en_marcha = pid_file.exists()
+    aviso_bucle = (
+        'AVISO: El bucle de /orquestar está en marcha (existe orquestar.pid). '
+        'No debes modificar ni commitear ficheros rastreados del repositorio; '
+        'limítate a consultar o analizar el código, o a indicar cómo apuntar tareas/bugs si el usuario lo pide.'
+        if bucle_en_marcha else
+        'El bucle de /orquestar no está en marcha actualmente.'
+    )
+    return (
+        f'Estás respondiendo a través del gateway de Telegram de Adevv para el proyecto en {root}.\n'
+        f'{aviso_bucle}\n\n'
+        f'Mensaje del usuario:\n{texto}'
+    )
+
+
+def extraer_respuesta(salida, harness):
+    """Extrae el contenido textual de la respuesta según el arnés."""
+    if not salida:
+        return ''
+    for linea in reversed(salida.splitlines()):
+        linea = linea.strip()
+        if linea.startswith('{') and linea.endswith('}'):
+            try:
+                d = json.loads(linea)
+                if harness == 'claude' and 'result' in d:
+                    return d['result']
+                if harness == 'agy' and 'response' in d:
+                    return d['response']
+                if 'response' in d:
+                    return d['response']
+                if 'result' in d:
+                    return d['result']
+            except Exception:
+                pass
+    if harness == 'codex':
+        textos = []
+        for linea in salida.splitlines():
+            linea = linea.strip()
+            if linea.startswith('{') and linea.endswith('}'):
+                try:
+                    ev = json.loads(linea)
+                    if ev.get('type') == 'item.completed' and ev.get('item', {}).get('type') == 'agent_message':
+                        textos.append(ev['item'].get('text', ''))
+                except Exception:
+                    pass
+        if textos:
+            return '\n'.join(textos)
+    return salida.strip()
+
+
+def invocar(root, prompt, cfg, sesion=None):
+    """Invoca al modelo configurado mediante el motor de orquestación."""
+    harness = cfg.get('harness', 'claude')
+    base = motor.base_comando_agente(harness, prompt, sesion=sesion)
+    if not base:
+        raise RuntimeError(f'Arnés no soportado: {harness}')
+    exe = shutil.which(base[0])
+    if not exe:
+        raise RuntimeError(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+    cmd = motor.con_modelo([exe] + base[1:], harness, cfg)
+    codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
+    sesion_id = m.get('sesion')
+    if not sesion_id:
+        for linea in reversed(salida.splitlines()):
+            linea = linea.strip()
+            if linea.startswith('{') and linea.endswith('}'):
+                try:
+                    d = json.loads(linea)
+                    sesion_id = d.get('conversation_id') or d.get('session_id') or d.get('sessionId') or d.get('thread_id')
+                    if sesion_id:
+                        break
+                except Exception:
+                    pass
+    texto_respuesta = extraer_respuesta(salida, harness)
+    return codigo, sesion_id, texto_respuesta
+
+
+def conversar(root, usuario, texto):
+    """Mantiene la conversación con el modelo del proyecto conservando la sesión."""
+    cfg_todo = motor.config(root) if hasattr(motor, 'config') else {}
+    if 'telegram' in cfg_todo:
+        cfg = cfg_todo['telegram']
+    else:
+        cfg = cfg_todo.get('atenea', {})
+    harness = cfg.get('harness', 'claude')
+    sesion = obtener_sesion(root, usuario, harness)
+    prompt = construir_prompt(root, texto)
+
+    if sesion:
+        codigo, s_id, resp = invocar(root, prompt, cfg, sesion=sesion)
+        if codigo != 0:
+            codigo, s_id, resp = invocar(root, prompt, cfg, sesion=None)
+            if codigo != 0:
+                raise RuntimeError(f'Fallo al invocar al modelo (código {codigo}): {resp}')
+        nueva_sesion, respuesta = s_id, resp
+    else:
+        codigo, s_id, resp = invocar(root, prompt, cfg, sesion=None)
+        if codigo != 0:
+            raise RuntimeError(f'Fallo al invocar al modelo (código {codigo}): {resp}')
+        nueva_sesion, respuesta = s_id, resp
+
+    if nueva_sesion:
+        guardar_sesion(root, usuario, harness, nueva_sesion)
+    return respuesta
 
 
 def responder(root, usuario, texto, autorizados):
-    """Respuesta a un mensaje, o None si el usuario no está autorizado o no es un comando."""
+    """Respuesta a un mensaje, o None si el usuario no está autorizado."""
     if str(usuario).strip() not in autorizados:
         return None
     comando, _, argumento = texto.strip().partition(' ')
@@ -40,12 +205,15 @@ def responder(root, usuario, texto, autorizados):
         motor.apuntar(root, ALTAS[comando], argumento, str(usuario))
         if (root / motor.PID).exists():
             return f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.'
-        hechos = motor.ingerir(root)  # sin bucle en marcha, se registra ya
+        hechos = motor.ingerir(root)
         return '\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \
             or 'Apuntado; se registrará en el próximo intento.'
+    if comando in ('/nuevo', '/reset'):
+        borrar_sesion(root, usuario)
+        return 'Hilo de conversación reiniciado.'
     if comando in ('/start', '/ayuda', '/help'):
         return AYUDA
-    return None
+    return conversar(root, usuario, texto)
 
 
 def actualizaciones(token, desde=None, espera=25):
@@ -80,13 +248,14 @@ def escuchar(root, token, autorizados, vueltas=None):
 
 
 def main():
+    """Punto de entrada principal para la ejecución en línea de comandos."""
     ap = argparse.ArgumentParser(description='Gateway de Telegram de Adevv.')
     ap.add_argument('--root', type=Path, default=Path.cwd(), help='raíz del proyecto')
     ap.add_argument('--estado', action='store_true', help='imprime el resumen que devuelve /estado y sale')
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
     root = a.root.resolve()
-    os.chdir(root)  # el motor consulta git en el directorio actual
+    os.chdir(root)
     if a.estado:
         print(motor.parte(root))
         return 0
