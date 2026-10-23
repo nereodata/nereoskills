@@ -180,3 +180,46 @@ Característica: Gateway de Telegram de Adevv
   Escenario: Proteger el control y las métricas
     Cuando un usuario no autorizado envía /lanzar, /parar o /metricas
     Entonces no obtiene respuesta, no se ejecuta ningún comando ni se lee o escribe el proyecto
+
+  @T-ADV-0016 @CA-M-1 @CA-M-3
+  Escenario: Gateway desacoplado identificable y sin duplicados
+    Dado un proyecto con credenciales de Telegram y sin gateway vivo
+    Cuando ejecuto adevv telegram --fondo
+    Entonces vuelve la terminal y el gateway escucha en un proceso identificable como gateway.py
+    Y su PID queda en telegram.pid y su salida en telegram.log excluidos de git
+    Y otro --fondo con ese PID vivo no crea otro gateway
+    Y un PID obsoleto o inválido permite un nuevo arranque
+
+  @T-ADV-0016 @CA-M-1
+  Escenario: Parada cooperativa del gateway independiente del bucle
+    Dado un gateway escuchando y un bucle de orquestación activo
+    Cuando ejecuto adevv telegram --parar
+    Entonces se crea telegram.parar excluido de git y el gateway para al terminar la operación actual
+    Y al salir limpia telegram.pid y telegram.parar conservando el estado del bucle
+    Y repetir --parar con el gateway parado limpia marcas obsoletas sin requerir credenciales
+
+  @T-ADV-0016 @CA-M-1
+  Escenario: Error de arranque y salida del gateway
+    Cuando el lanzamiento del proceso desacoplado falla
+    Entonces se informa del error y no queda una marca de gateway en marcha
+    Y un gateway que termina por error de escucha limpia sus marcas
+    Y sin credenciales no se inicia la escucha
+
+  @T-ADV-0016 @CA-M-2
+  Escenario: Autoarranque opcional al ejecutar el bucle
+    Dado un proyecto con Telegram habilitado y credenciales completas
+    Cuando arranco el bucle en primer o segundo plano
+    Entonces se solicita el arranque del gateway sin bloquear la escucha del bucle
+    Y si ya hay un gateway vivo se conserva sin duplicarlo
+    Y un fallo del gateway solo deja un aviso y no aborta el bucle
+
+  @T-ADV-0016 @CA-M-2
+  Escenario: Consultas y Telegram desactivado no arrancan el gateway
+    Cuando consulto --estado o ejecuto una verificación o revisión
+    Entonces no se arranca el gateway
+    Y al ejecutar el bucle sin credenciales o con telegram false tampoco se arranca
+
+  @T-ADV-0016 @CA-M-4
+  Escenario: Descubrir la operación del gateway
+    Cuando leo las skills de gateway y orquestar
+    Entonces encuentro --fondo, --parar, el autoarranque y sus archivos de operación

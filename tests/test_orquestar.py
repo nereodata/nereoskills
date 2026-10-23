@@ -218,6 +218,7 @@ class AvisosTelegramTests(unittest.TestCase):
     """Avisos del bucle: fin de versión, cuota, respuesta del humano y fallos; solo los eventos activos."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness='claude', estado=False,

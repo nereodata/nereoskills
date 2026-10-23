@@ -27,8 +27,14 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 **Nunca escribe en el backlog con el bucle en marcha.** Deja la petición en el buzón (`orquestar_buzon.jsonl`, excluido de git) y el bucle la registra entre pasos, con un commit que solo lleva esos ficheros, y te avisa del ID. Sin bucle, la registra y la commitea en el momento, en la rama actual.
 
 ## 🛠️ Uso
-Desde la raíz del proyecto, en una terminal aparte del bucle:
+Desde la raíz del proyecto:
 ```bash
 adevv telegram            # escucha (long polling) hasta Ctrl+C
+adevv telegram --fondo    # escucha en segundo plano, sin ventana adicional
+adevv telegram --parar    # pide parar el gateway al acabar la operación actual
 adevv telegram --estado   # imprime lo que respondería /estado
 ```
+
+`--fondo` reserva `telegram.pid`, evita duplicar un proceso vivo y recupera marcas obsoletas. La salida se añade a `telegram.log`. `--parar` funciona sin credenciales y crea `telegram.parar`; el gateway limpia PID y señal al salir, incluso si falla. Estos tres archivos quedan excluidos de git. La parada espera al polling actual (hasta unos 35 segundos) o a la conversación en curso. El comando Telegram `/parar` controla el bucle; la CLI `adevv telegram --parar` controla el gateway.
+
+Al ejecutar `adevv orquestar` en primer o segundo plano se solicita automáticamente `--fondo` si `telegram(root)` tiene credenciales y Telegram está habilitado. Un gateway vivo se conserva; un fallo de arranque deja un aviso sin abortar el bucle. `"telegram": false` en `orchestration.json` desactiva este autoarranque y los avisos. Las consultas de estado, métricas, verificaciones y revisiones no lo activan. El gateway permanece escuchando cuando acaba o se para el bucle; usa `adevv telegram --parar` para detenerlo.

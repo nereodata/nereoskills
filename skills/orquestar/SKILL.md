@@ -85,6 +85,8 @@ El bucle también para si un paso no avanza tras 2 intentos, si la suite está e
 
 **Avisos por Telegram** (opcional): con `TELEGRAM_BOT_TOKEN` y `TELEGRAM_ALLOWED_USER_IDS` (IDs separados por comas) en el `.env` local o en el entorno, el bucle avisa a esos usuarios de lo que pasa mientras nadie mira. Son las mismas variables del gateway (`/telegram-gateway`), que además atiende `/estado`, `/tarea` y `/bug`. El token nunca va en un fichero. En `orchestration.json`, la clave `telegram` solo elige los eventos (`eventos`; por defecto, todos) o los apaga (`"telegram": false`):
 
+Al arrancar el bucle en primer o segundo plano, esas credenciales también activan el gateway automáticamente en segundo plano. Se conserva un `telegram.pid` vivo y se recuperan marcas obsoletas; si falla el arranque se informa y el bucle continúa. `"telegram": false` desactiva avisos y autoarranque. Las consultas (`--estado`, métricas, verificaciones y revisiones) no lo arrancan. `adevv telegram --fondo` permite iniciarlo manualmente y `adevv telegram --parar` solicita su parada al acabar la operación actual. PID, salida y señal quedan en `telegram.pid`, `telegram.log` y `telegram.parar`, excluidos de git. El gateway sigue escuchando después de parar o terminar el bucle.
+
 | Evento | Cuándo |
 |---|---|
 | `version` | La versión no tiene más tareas elegibles (terminada, con bloqueos o con la suite en rojo) y FIN del producto |

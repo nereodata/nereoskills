@@ -48,7 +48,8 @@ ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
 TELEGRAM_SESIONES = 'orquestar_telegram.json'  # sesiones de conversación de usuarios en Telegram
 PROMPT_FILE_DEFAULT = 'orquestar_prompt.txt'
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES, PROMPT_FILE_DEFAULT)
+PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
+           PROMPT_FILE_DEFAULT, 'telegram.pid', 'telegram.log', 'telegram.parar')
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -1553,12 +1554,29 @@ def parte(root, docs='docs/requirements'):
     return '\n'.join(lineas)
 
 
+def iniciar_gateway(root):
+    """Solicita el gateway opcional sin abortar el bucle si falla su lanzador."""
+    try:
+        if not telegram(root):
+            return
+        resultado = subprocess.run(
+            [sys.executable, str(SKILL.parent.parent / 'telegram_gateway' / 'gateway.py'),
+             '--root', str(root), '--fondo'], cwd=root, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10,
+            **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+        if resultado.returncode:
+            print('[orquestar] gateway no iniciado (ya activo o fallo; consulta telegram.log)', flush=True)
+    except Exception as error:
+        print(f'[orquestar] gateway no iniciado ({type(error).__name__}); el bucle continúa', flush=True)
+
+
 def en_fondo(root, argumentos=None):
     """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
     if (root / PID).exists():
         sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
                  f'Si no es así, borra {PID}.')
     excluir(root)
+    iniciar_gateway(root)
     args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
     opciones = {'start_new_session': True}
     if os.name == 'nt':
@@ -1686,6 +1704,8 @@ def cierre_de_version(e):
 
 
 def bucle(a, root):
+    if not a.estado:
+        iniciar_gateway(root)
     if a.idea and not (root / a.docs / 'requirements.md').exists():
         (root / a.docs).mkdir(parents=True, exist_ok=True)
         (root / a.docs / 'requirements.md').write_text(a.idea + '\n', encoding='utf-8')
