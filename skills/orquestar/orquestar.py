@@ -7,6 +7,7 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -1471,6 +1472,11 @@ def main():
     ap.add_argument('--espera-max', type=float, default=12,
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
+    ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
+                    help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
+    ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
+    ap.add_argument('--csv', nargs='?', const='-', metavar='RUTA',
+                    help='exporta métricas CSV a stdout (-) o a un fichero UTF-8')
     ap.add_argument('--fondo', action='store_true', help=f'lanza el bucle desacoplado, con la salida en {LOG}')
     ap.add_argument('--parar', action='store_true', help='pide al bucle en marcha que pare tras el paso en curso')
     ap.add_argument('--agente', metavar='ROL', help=f'lanza un rol (hades, clio, cronos) según {CONFIG}')
@@ -1482,6 +1488,17 @@ def main():
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+
+    if a.metricas is not None:
+        spec = importlib.util.spec_from_file_location('adevv_metricas', SKILL.with_name('metricas.py'))
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        try:
+            return modulo.mostrar(root, backlog(root), a.version_filtro or a.metricas, a.csv, sys.stdout)
+        except (ValueError, OSError) as error:
+            ap.error(str(error))
+    if a.csv is not None or a.version_filtro is not None:
+        ap.error('--csv y --version-filtro requieren --metricas / --metrics.')
 
     if a.agente:
         prompt = a.prompt_file.read_text(encoding='utf-8') if a.prompt_file else sys.stdin.read()

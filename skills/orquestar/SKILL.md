@@ -33,6 +33,18 @@ Opciones del script: `--harness claude|codex|agy|gemini|cursor` (fuerza ese arn�
 
 **Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
+### Consulta y exportación de métricas
+
+`adevv orquestar --metricas [FILTRO]` (alias `--metrics`) consulta el registro y el backlog sin arrancar ni detener el bucle. Sin filtro muestra todas las versiones; acepta `todas` / `all`, `ultima` / `last`, `ultimas:N` / `last:N` (N positivo), o una lista como `v0.2,v0.3.0`. `--version-filtro FILTRO` sustituye al filtro posicional. El orden es numérico; `v0.3` y `v0.3.0` representan el mismo bloque.
+
+- Tabla con desglose y totales: `adevv orquestar --metricas ultima`.
+- CSV por stdout: `adevv orquestar --metrics last:2 --csv` (también `--csv -`).
+- Archivo UTF-8 con cabecera: `adevv orquestar --metricas v0.2,v0.3 --csv consumo.csv`.
+
+Cada fila muestra ID, versión, tipo, dificultad actual, estimación por dificultad (7/12/25 minutos), duración real, modelos y tokens de desarrollo y Hades, llamadas/rechazos, verificaciones/reutilizaciones y coste USD. Los contadores de tokens reproducen `entrada`, `cache_leida`, `salida` y `razonamiento` tal como los registra cada arnés. La duración real suma solo los pasos principales: ya incluyen sus revisiones. El catálogo incluye el backlog aunque todavía no tenga consumo; los pasos de versión tienen estimación cero. La asociación usa el ID del backlog, después versión explícita, rama o ID de versión del registro. Lo que no puede atribuirse se conserva bajo `sin-version`, visible con `todas`.
+
+Un `coste_usd` positivo prevalece sobre la estimación; sin él se estima por modelo, respetando también un coste positivo propio del modelo. Las tarifas son referencias ilustrativas fijas en USD por millón de tokens de entrada/caché/salida, no precios vigentes: Opus 5/0.5/25; Sonnet 3/0.3/15; Haiku 1/0.1/5; Gemini Argon/Pro 2/0.2/12; Flash 0.5/0.05/3; GPT/Codex y desconocidos 2.5/0.25/10. Razonamiento no se factura de nuevo. Se trata de una comparación aproximada, sin reconstruir cambios históricos de dificultad ni reinterpretar los contadores de los arneses. Un JSONL corrupto produce un error con número de línea y no exporta resultados parciales.
+
 ## 🧭 Estado
 
 Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefactos, nunca de lo que el modelo diga que ha hecho (`<docs>` = `docs/requirements` por defecto):
