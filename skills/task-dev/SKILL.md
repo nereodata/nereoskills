@@ -33,7 +33,7 @@ Playbook para el desarrollo de tareas.
 
 ## 1. Inicialización (inline)
 - **Validar Rama**: Debe ser `release/vX.Y` o `hotfix/vX.Y.Z`. Abortar si es `main`.
-- **Cargar Metadatos**: Cargar la tarea y sus hijas, si las tiene.
+- **Cargar Metadatos**: Cargar la tarea y sus hijas, si las tiene. Si no declara `dificultad`, asume `media` por defecto.
 - **Coherencia**: Validar que la versión en la tarea coincide con la de la rama activa.
 - **Estado**: Cambiar `status` a `in_progress` en la tarea y sus hijas.
 

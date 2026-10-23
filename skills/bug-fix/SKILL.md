@@ -42,7 +42,7 @@ Preguntar al usuario si el bug es urgente (hotfix) o no (release):
 - Actualizar el campo `version` del bug con la versión de la rama.
 
 ## 1. Inicialización (inline)
-- Cargar metadatos del bug y sus hijos, si los tiene.
+- Cargar metadatos del bug y sus hijos, si los tiene. Si no declara `dificultad`, asume `media` por defecto.
 - Cambiar `status` a `in_progress` en el bug y sus hijos.
 - Si es deuda registrada (`origen`), lee el reporte de origen para entender el hallazgo.
 

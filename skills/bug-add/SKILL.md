@@ -24,6 +24,11 @@ Registra un nuevo bug en el backlog siguiendo el estándar Issue-as-Code v3.0.
 - `version`: Auto-detectado de rama o vacío.
 - `weight`: 0-10 crítico, 10-100 prioritario, 100-1000 normal, > 1000 mejora (deuda registrada).
 - Fechas: `created_at`, `updated_at`.
+- `dificultad`: `sencilla | media | dificil` (por defecto `media`). Criterio conciso de asignación:
+  - `sencilla`: contenido declarativo, documentación, configuración o cambio mecánico localizado.
+  - `media`: funcionalidad o corrección estándar en uno o pocos módulos.
+  - `dificil`: algoritmos complejos, concurrencia, seguridad crítica o cambio transversal multi-componente.
+  Si un bug preexistente no declara `dificultad`, se trata por defecto como `media`.
 
 **Deuda registrada** (hallazgo de Hades con destino `registrar`): es un bug, porque es algo que la tarea de origen debía resolver y no resolvió. Va **sin versión** aunque se registre en una rama `release/`, con `status: backlog`, `weight` > 1000 y `origen` con el ID y el reporte. Queda fuera de la versión en curso hasta que una revisión de deuda la incluya.
 
@@ -34,6 +39,7 @@ id: B-[PRJ]-XXXX
 title: "Título"
 type: bug
 weight: [int]
+dificultad: sencilla | media | dificil
 version: ""
 status: backlog
 created_at: YYYY-MM-DD

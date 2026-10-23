@@ -2,6 +2,14 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.2.0] - 2026-10-23
+
+### Añadido
+
+#### General
+- **T-ADV-0008** — Continuidad de hilo en revisiones de Hades por tarea y reanudación tras espera de cuota
+- **T-ADV-0009** — Clasificación de dificultad al crear tareas/bugs y selección de agente/modelo por dificultad
+
 ## [0.1.0] - 2026-10-23
 
 ### Añadido

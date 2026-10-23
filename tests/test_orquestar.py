@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import subprocess
 import tempfile
 import unittest
@@ -526,6 +527,268 @@ class EscaladaTests(unittest.TestCase):
             motor.bucle(args, self.root)
         self.assertEqual(ejecutar.call_args.kwargs['rol']['model'], 'claude-opus-5-5-medium')
         self.assertEqual(ejecutar.call_args.kwargs['env']['ORQUESTAR_ESCALADA'], '1')
+
+    def test_lanzar_captures_session_id_for_each_harness(self):
+        # 1. Claude
+        claude_out = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"result":"ok","session_id":"sess-claude-123","num_turns":1}\n', stderr=''
+        )
+        with patch.object(subprocess, 'run', return_value=claude_out):
+            code, m, _ = motor.lanzar(['claude', '--output-format', 'json'], self.root, 'claude')
+            self.assertEqual(code, 0)
+            self.assertEqual(m.get('sesion'), 'sess-claude-123')
+
+        # 2. Antigravity (agy)
+        agy_out = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout='{"status":"SUCCESS","conversation_id":"conv-agy-789","response":"ok"}\n', stderr=''
+        )
+        with patch.object(subprocess, 'run', return_value=agy_out):
+            code, m, _ = motor.lanzar(['agy', '--output-format', 'json'], self.root, 'agy')
+            self.assertEqual(code, 0)
+            self.assertEqual(m.get('sesion'), 'conv-agy-789')
+
+        # 3. Codex (streaming JSON lines)
+        codex_lines = [
+            '{"type":"thread.started","thread_id":"th-codex-456"}\n',
+            '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}\n'
+        ]
+        mock_popen = MagicMock()
+        mock_popen.__enter__.return_value = mock_popen
+        mock_popen.stdout = codex_lines
+        mock_popen.returncode = 0
+        with patch.object(subprocess, 'Popen', return_value=mock_popen):
+            code, m, _ = motor.lanzar(['codex', 'exec', '--json'], self.root, 'codex')
+            self.assertEqual(code, 0)
+            self.assertEqual(m.get('sesion'), 'th-codex-456')
+
+        # 4. Codex in agente does not have --ephemeral
+        with patch.object(motor, 'lanzar', return_value=(0, {}, 'Veredicto: APROBADO')) as mock_lanzar, \
+             patch.object(motor.shutil, 'which', side_effect=lambda x: x), \
+             patch.object(motor, 'excluir'), \
+             patch.object(motor, 'git', return_value=''), \
+             patch.object(motor, 'config', return_value={'hades': {'harness': 'codex'}}), \
+             patch.dict(motor.os.environ, {'ORQUESTAR_ID': 'T-ADV-0001'}, clear=True):
+            motor.agente(self.root, 'hades', 'revisa')
+            cmd_passed = mock_lanzar.call_args[0][0]
+            self.assertNotIn('--ephemeral', cmd_passed)
+
+    def test_hades_single_thread_resumes_session_and_strips_initial_header(self):
+        lineas_lanzadas = []
+        entradas_lanzadas = []
+
+        def mock_lanzar(cmd, root, harness, entrada=None):
+            lineas_lanzadas.append(cmd)
+            entradas_lanzadas.append(entrada)
+            return 0, {'sesion': 'sess-hades-prev'}, 'Veredicto: APROBADO'
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with patch.dict(motor.os.environ, env, clear=True), \
+             patch.object(motor.shutil, 'which', side_effect=lambda x: x), \
+             patch.object(motor, 'excluir'), \
+             patch.object(motor, 'git', return_value=''), \
+             patch.object(motor, 'lanzar', side_effect=mock_lanzar):
+
+            # 1. First call creates session
+            motor.agente(self.root, 'hades', 'revisa spec')
+            self.assertNotIn('--resume', lineas_lanzadas[0])
+            self.assertIn('actúa como ese agente', entradas_lanzadas[0])
+
+            # 2. Second call resumes session and strips initial header
+            motor.agente(self.root, 'hades', 'revisa test')
+            self.assertIn('--resume', lineas_lanzadas[1])
+            self.assertEqual(lineas_lanzadas[1][lineas_lanzadas[1].index('--resume') + 1], 'sess-hades-prev')
+            self.assertNotIn('actúa como ese agente', entradas_lanzadas[1])
+            self.assertIn('revisa test', entradas_lanzadas[1])
+
+    def test_hades_resume_failure_falls_back_transparently_to_fresh_session(self):
+        llamadas = []
+
+        def mock_lanzar(cmd, root, harness, entrada=None):
+            llamadas.append((cmd, entrada))
+            if '--resume' in cmd:
+                return 1, {}, 'Error: session sess-hades-prev not found'
+            return 0, {'sesion': 'sess-hades-new'}, 'Veredicto: APROBADO'
+
+        (self.root / motor.METRICAS).write_text(
+            json.dumps({'tipo': 'agente', 'rol': 'hades', 'id': 'T-ADV-0001', 'arnes': 'claude',
+                        'sesion': 'sess-hades-prev', 'codigo': 0}) + '\n',
+            encoding='utf-8'
+        )
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with patch.dict(motor.os.environ, env, clear=True), \
+             patch.object(motor.shutil, 'which', side_effect=lambda x: x), \
+             patch.object(motor, 'excluir'), \
+             patch.object(motor, 'git', return_value=''), \
+             patch.object(motor, 'lanzar', side_effect=mock_lanzar):
+            code = motor.agente(self.root, 'hades', 'revisa code')
+            self.assertEqual(code, 0)
+            self.assertEqual(len(llamadas), 2)
+            self.assertIn('--resume', llamadas[0][0])
+            self.assertNotIn('--resume', llamadas[1][0])
+            self.assertIn('actúa como ese agente', llamadas[1][1])
+
+    def test_loop_resumes_developer_session_after_quota_wait(self):
+        ejecuciones = []
+
+        def mock_ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
+            ejecuciones.append(sesion)
+            if len(ejecuciones) == 1:
+                return 1, {'sesion': 'dev-sess-100'}, 'out of credits'
+            return 0, {'sesion': 'dev-sess-100'}, 'ok'
+
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False, max_pasos=3,
+                                        reintentos=2, espera_max=2, cmd=None)
+        with patch.object(motor, 'estado', side_effect=[('PASO', 'task-dev', 'T-ADV-0001', ''),
+                                                        ('PASO', 'task-dev', 'T-ADV-0001', ''),
+                                                        ('FIN', 'Cerrado.')]), \
+             patch.object(motor, 'ejecutar', side_effect=mock_ejecutar), \
+             patch.object(motor, 'esperar', return_value=True), \
+             patch.object(motor, 'firma', side_effect=['a', 'a', 'b']), \
+             patch.object(motor, 'git', return_value=''), \
+             patch.object(motor, 'ingerir', return_value=[]), \
+             patch.object(motor, 'avisar'), \
+             patch.object(motor, 'excluir'):
+            self.assertEqual(motor.bucle(args, self.root), 0)
+
+        self.assertEqual(len(ejecuciones), 2)
+        self.assertIsNone(ejecuciones[0])
+        self.assertEqual(ejecuciones[1], 'dev-sess-100')
+
+    def test_session_isolation_across_ids_blocks_and_escalation(self):
+        (self.root / motor.METRICAS).write_text(
+            json.dumps({'tipo': 'agente', 'rol': 'hades', 'id': 'T-ADV-0001', 'arnes': 'claude',
+                        'sesion': 'sess-1', 'codigo': 0}) + '\n',
+            encoding='utf-8'
+        )
+        self.assertIsNone(motor.buscar_sesion_agente(self.root, 'hades', 'T-ADV-0002', 'claude'))
+
+        with (self.root / motor.METRICAS).open('a', encoding='utf-8') as f:
+            f.write(json.dumps({'tipo': 'paso', 'paso': 'especificar', 'id': 'T-ADV-0001', 'codigo': 0}) + '\n')
+        self.assertIsNone(motor.buscar_sesion_agente(self.root, 'hades', 'T-ADV-0001', 'claude'))
+
+        (self.root / motor.METRICAS).write_text(
+            json.dumps({'tipo': 'agente', 'rol': 'hades', 'id': 'T-ADV-0001', 'arnes': 'claude',
+                        'sesion': 'sess-pre-esc', 'codigo': 0}) + '\n' +
+            json.dumps({'tipo': 'paso', 'paso': 'task-dev', 'id': 'T-ADV-0001', 'arnes': 'claude',
+                        'escalado': True, 'codigo': 0}) + '\n',
+            encoding='utf-8'
+        )
+        with patch.dict(motor.os.environ, {'ORQUESTAR_ESCALADA': '1'}):
+            self.assertIsNone(motor.buscar_sesion_agente(self.root, 'hades', 'T-ADV-0001', 'claude'))
+
+
+class DificultadTests(unittest.TestCase):
+    """Clasificación de dificultad (sencilla, media, dificil) y selección de modelo/esfuerzo."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_backlog_reads_dificultad_normalizada_and_defaults_to_media(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\nweight: 10\n---\n', encoding='utf-8')
+        (tareas / 'T2.md').write_text('---\nid: T2\ndificultad: sencilla\n---\n', encoding='utf-8')
+        (tareas / 'T3.md').write_text('---\nid: T3\ndificultad: Difícil \n---\n', encoding='utf-8')
+        (tareas / 'T4.md').write_text('---\nid: T4\ndificultad: desconocida\n---\n', encoding='utf-8')
+
+        items = {it['id']: it['dificultad'] for it in motor.backlog(self.root)}
+        self.assertEqual(items['T1'], 'media')
+        self.assertEqual(items['T2'], 'sencilla')
+        self.assertEqual(items['T3'], 'dificil')
+        self.assertEqual(items['T4'], 'media')
+
+    def test_ajustes_applies_dificultad_overrides(self):
+        cfg = {
+            'harness': 'agy',
+            'model': 'flash-medium',
+            'effort': 'medium',
+            'dificultad': {
+                'sencilla': {'model': 'flash-low', 'effort': 'low'},
+                'dificil': {'model': 'pro-high', 'effort': 'high'},
+            }
+        }
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'sencilla'),
+                         {'harness': 'agy', 'model': 'flash-low', 'effort': 'low'})
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'media'),
+                         {'harness': 'agy', 'model': 'flash-medium', 'effort': 'medium'})
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'dificil'),
+                         {'harness': 'agy', 'model': 'pro-high', 'effort': 'high'})
+
+    def test_ajustes_paso_overrides_dificultad(self):
+        cfg = {
+            'harness': 'agy',
+            'model': 'base-model',
+            'effort': 'medium',
+            'dificultad': {
+                'sencilla': {'model': 'cheap-model', 'effort': 'low'},
+            },
+            'pasos': {
+                'task-dev': {'effort': 'high'}
+            }
+        }
+        res = motor.ajustes(cfg, 'task-dev', 'sencilla')
+        self.assertEqual(res['model'], 'cheap-model')
+        self.assertEqual(res['effort'], 'high')
+
+    def test_escalada_takes_precedence_over_dificultad(self):
+        cfg_artemisa = {
+            'harness': 'agy',
+            'model': 'default-model',
+            'dificultad': {
+                'sencilla': {'model': 'cheap-model', 'effort': 'low'},
+            },
+            'escalada': {
+                'rechazos': 2,
+                'model': 'opus-superior'
+            }
+        }
+        cfg_res = motor.ajustes(cfg_artemisa, 'task-dev', 'sencilla')
+        self.assertEqual(cfg_res['model'], 'cheap-model')
+
+        with patch.object(motor, 'rechazos', return_value=2):
+            cfg_esc, escalado = motor.escalada(self.root, 'artemisa', cfg_res, 'T-ADV-0001')
+            self.assertTrue(escalado)
+            self.assertEqual(cfg_esc['model'], 'opus-superior')
+
+    def test_agente_applies_dificultad_from_active_orquestar_id(self):
+        cfg = {
+            'hades': {
+                'harness': 'agy',
+                'model': 'gemini-medium',
+                'dificultad': {
+                    'sencilla': {'model': 'gemini-low', 'effort': 'low'},
+                    'dificil': {'model': 'gemini-pro', 'effort': 'high'},
+                }
+            }
+        }
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T-ADV-0001.md').write_text('---\nid: T-ADV-0001\ndificultad: sencilla\n---\n', encoding='utf-8')
+
+        lanzados = []
+        def fake_lanzar(cmd, root, harness, entrada=None):
+            lanzados.append(cmd)
+            return 0, {}, '## Informe\n- **Veredicto**: APROBADO (media 9)'
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.dict(motor.os.environ, env, clear=True),
+              patch.object(motor, 'lanzar', side_effect=fake_lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            motor.agente(self.root, 'hades', 'revisa')
+
+        self.assertIn('--model', lanzados[0])
+        idx = lanzados[0].index('--model')
+        self.assertEqual(lanzados[0][idx + 1], 'gemini-low')
 
 
 if __name__ == '__main__':

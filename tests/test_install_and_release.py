@@ -258,7 +258,12 @@ class TestInstallAndRelease(unittest.TestCase):
 
         out = io.StringIO()
         err = io.StringIO()
-        with mock.patch.dict(os.environ, env), mock.patch("adevv.processes.detectar_procesos_adevv", return_value=[]):
+        with (
+            mock.patch.dict(os.environ, env),
+            mock.patch("adevv.processes.detectar_procesos_adevv", return_value=[]),
+            mock.patch("adevv.updater.__version__", "0.1.0"),
+            mock.patch("adevv.cli.__version__", "0.1.0"),
+        ):
             ret = main_cli(["instalar"], out=out, err=err)
             self.assertEqual(ret, 0)
 
