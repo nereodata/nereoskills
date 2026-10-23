@@ -1527,13 +1527,13 @@ def parte(root, docs='docs/requirements'):
     return '\n'.join(lineas)
 
 
-def en_fondo(root):
-    """Relanza el bucle desacoplado, con la salida en LOG, y vuelve enseguida."""
+def en_fondo(root, argumentos=None):
+    """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
     if (root / PID).exists():
         sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
                  f'Si no es así, borra {PID}.')
     excluir(root)
-    args = [x for x in sys.argv[1:] if x != '--fondo']
+    args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
     opciones = {'start_new_session': True}
     if os.name == 'nt':
         opciones = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}

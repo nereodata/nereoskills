@@ -2,7 +2,8 @@
 """Gateway de Telegram de Adevv: atiende a los usuarios autorizados mientras el bucle trabaja.
 
 Comandos: /estado (/status) resume el bucle y el backlog; /tarea (/task) y /bug registran una entrada
-sin versión. /nuevo (/reset) reinicia el hilo de conversación. Cualquier otro mensaje sin comando mantiene
+sin versión. /lanzar (/run) y /parar (/stop) controlan el bucle; /metricas (/metrics) consulta consumo.
+/nuevo (/reset) reinicia el hilo de conversación. Cualquier otro mensaje sin comando mantiene
 una conversación interactiva con el asistente del proyecto conservando el hilo entre mensajes.
 Nunca escribe en el backlog con el bucle en marcha: deja la petición en el buzón y el bucle
 la registra entre pasos, con su propio commit. La configuración, el envío y el estado son los de
@@ -24,8 +25,16 @@ _spec = importlib.util.spec_from_file_location(
 motor = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(motor)
 
+_spec_metricas = importlib.util.spec_from_file_location(
+    'metricas_gateway', Path(__file__).resolve().parents[1] / 'orquestar' / 'metricas.py')
+metricas = importlib.util.module_from_spec(_spec_metricas)
+_spec_metricas.loader.exec_module(metricas)
+
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
+         '/lanzar (o /run) — lanza el bucle en segundo plano\n'
+         '/parar (o /stop) — para al terminar el paso en curso\n'
+         '/metricas [filtro] (o /metrics) — consumo por tarea; por defecto ultima\n'
          '/tarea <título> — nueva tarea en el backlog, sin versión\n'
          '/bug <título> — nuevo bug, sin versión\n'
          '/nuevo (o /reset) — reinicia tu hilo de conversación\n'
@@ -190,6 +199,24 @@ def conversar(root, usuario, texto):
     return respuesta
 
 
+def resumen_metricas(root, filtro):
+    """Presenta tiempo, tokens E/C/S y coste por tarea con el cálculo de la CLI."""
+    try:
+        filas = metricas.consultar(root, motor.backlog(root), filtro)
+    except (ValueError, OSError) as error:
+        return f'No se pudieron consultar las métricas: {error}'
+    if not filas:
+        return 'Sin métricas para el filtro seleccionado.'
+    lineas = ['Métricas · tokens E/C/S: entrada/caché leída/salida · coste estimado USD']
+    for fila in filas:
+        lineas.append(
+            f"{fila['id']} ({fila['version']}): {fila['tiempo_real_min']:.2f} min · "
+            f"Dev E/C/S={fila['dev_tokens_originales']}/{fila['dev_tokens_cache']}/{fila['dev_tokens_salida']} · "
+            f"Hades E/C/S={fila['hades_tokens_originales']}/{fila['hades_tokens_cache']}/{fila['hades_tokens_salida']} · "
+            f"USD≈{fila['coste_estimado_usd']:.6f}")
+    return '\n'.join(lineas)
+
+
 def responder(root, usuario, texto, autorizados):
     """Respuesta a un mensaje, o None si el usuario no está autorizado."""
     if str(usuario).strip() not in autorizados:
@@ -198,6 +225,24 @@ def responder(root, usuario, texto, autorizados):
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
         return motor.parte(root)
+    if comando in ('/parar', '/stop'):
+        if not (root / motor.PID).exists():
+            return 'El bucle ya está parado.'
+        motor.excluir(root)
+        (root / motor.PARADA).touch()
+        return 'El bucle se detendrá al terminar el paso en curso.'
+    if comando in ('/lanzar', '/run'):
+        if (root / motor.PID).exists():
+            return 'El bucle ya está en marcha.'
+        estado = motor.estado(root, 'docs/requirements')
+        try:
+            motor.en_fondo(root, argumentos=[])
+        except SystemExit as error:
+            return str(error)
+        paso = ' '.join(str(x) for x in estado[1:3] if x)
+        return f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}'
+    if comando in ('/metricas', '/metrics'):
+        return resumen_metricas(root, argumento or 'ultima')
     if comando in ALTAS:
         if not argumento:
             return f'Uso: {comando} <título>'

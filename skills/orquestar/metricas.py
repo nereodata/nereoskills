@@ -167,8 +167,8 @@ def escribir_tabla(filas, out):
         print('  Tokens: ' + ' '.join(f'{k}={v}' for k, v in total.items() if '_tokens_' in k), file=out)
 
 
-def mostrar(root, items, filtro, csv_destino, out):
-    """Lee el JSONL y genera salida sin tocar el estado del bucle."""
+def consultar(root, items, filtro):
+    """Lee y agrega el JSONL sin modificar el estado ni producir salida parcial."""
     registros = []
     ruta = root / 'orquestar_metricas.jsonl'
     if ruta.exists():
@@ -183,7 +183,12 @@ def mostrar(root, items, filtro, csv_destino, out):
                 if not isinstance(registro, dict):
                     raise ValueError(f'{ruta.name}: se esperaba un objeto en línea {numero}')
                 registros.append(registro)
-    filas = agregar(registros, items, filtro)
+    return agregar(registros, items, filtro)
+
+
+def mostrar(root, items, filtro, csv_destino, out):
+    """Lee el JSONL y genera salida sin tocar el estado del bucle."""
+    filas = consultar(root, items, filtro)
     if csv_destino is None:
         escribir_tabla(filas, out)
     elif csv_destino == '-':

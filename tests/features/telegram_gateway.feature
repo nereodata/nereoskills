@@ -121,3 +121,62 @@ Característica: Gateway de Telegram de Adevv
     Entonces veo la espera global y 15 min restantes sin atribuirla a un modelo desconocido
     Y los modelos sin evidencia indican sin agotamiento registrado y cero tokens
     Y un estado sin paso ni métricas sigue siendo consultable
+
+  @T-ADV-0015 @CA-M-1
+  Esquema del escenario: Solicitar la parada del bucle
+    Dado que existe la marca de bucle en marcha
+    Cuando el usuario autorizado envía "<comando>"
+    Entonces se solicita la parada y se confirma que terminará al acabar el paso en curso
+    Y el bucle conserva su marca de ejecución y sus datos
+    Ejemplos:
+      | comando |
+      | /parar  |
+      | /stop   |
+
+  @T-ADV-0015 @CA-M-1
+  Escenario: Parar un bucle ya parado
+    Dado que no hay marca de ejecución
+    Cuando el usuario autorizado envía "/parar"
+    Entonces recibe que el bucle ya está parado sin crear una solicitud de parada
+
+  @T-ADV-0015 @CA-M-2
+  Esquema del escenario: Lanzar el bucle desde Telegram
+    Dado que no hay marca de ejecución y el siguiente paso previsto es task-dev para T-ADV-0015
+    Cuando el usuario autorizado envía "<comando>"
+    Entonces se lanza el bucle en segundo plano para este proyecto
+    Y recibe confirmación del lanzamiento y el siguiente paso previsto
+    Ejemplos:
+      | comando        |
+      | /lanzar        |
+      | /run@AdevvBot   |
+
+  @T-ADV-0015 @CA-M-2
+  Escenario: Evitar otro lanzamiento si el bucle está en marcha
+    Dado que existe la marca de bucle en marcha
+    Cuando el usuario autorizado envía "/run"
+    Entonces recibe que ya está en marcha y no se lanza otro proceso
+
+  @T-ADV-0015 @CA-M-3
+  Escenario: Consultar métricas de la última versión por defecto
+    Dado que hay tareas y métricas en v0.3 y v0.4
+    Cuando el usuario autorizado envía "/metricas"
+    Entonces recibe solo v0.4 con tiempo real, tokens de desarrollo y Hades y coste estimado USD por tarea
+    Y no cambia el estado del bucle ni las métricas
+
+  @T-ADV-0015 @CA-M-3
+  Escenario: Seleccionar versiones y tratar errores de consulta
+    Cuando el usuario autorizado envía "/metrics v0.3,v0.4"
+    Entonces recibe las dos versiones con el mismo cálculo de la consulta CLI
+    Pero si el filtro es inválido recibe una explicación del filtro
+    Y si el registro está corrupto recibe el error con número de línea sin resultados parciales
+    Y si no hay tareas ni registros recibe que no hay métricas
+
+  @T-ADV-0015 @CA-M-4
+  Escenario: Ayuda del control remoto
+    Cuando el usuario autorizado envía "/ayuda"
+    Entonces ve /lanzar y /run, /parar y /stop, /metricas y /metrics con filtro opcional por defecto ultima
+
+  @T-ADV-0015
+  Escenario: Proteger el control y las métricas
+    Cuando un usuario no autorizado envía /lanzar, /parar o /metricas
+    Entonces no obtiene respuesta, no se ejecuta ningún comando ni se lee o escribe el proyecto
