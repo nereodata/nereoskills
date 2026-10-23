@@ -186,8 +186,10 @@ def comando_instalar(forzar: bool, out: TextIO, err: TextIO) -> int:
     origen = act.get("origen", "publicada") if act else "publicada"
     versions_dir = get_adevv_home() / "versions" / version
 
-    if origen != "desarrollo" and (not act or not versions_dir.exists()):
+    if origen != "desarrollo" and (not act or not versions_dir.exists() or (forzar and not act.get("commit"))):
+        version = __version__
         updater.materializar_version_local(version)
+        updater.limpiar_versiones_antiguas()
 
     origen_dir = get_active_version_dir()
     resultados = sincronizar_destinos(origen_dir=origen_dir, version=version, forzar=forzar)
