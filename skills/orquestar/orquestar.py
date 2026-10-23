@@ -29,7 +29,7 @@ except ImportError:
 
 HARNESS = {
     'claude': ['claude', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
-    'codex': ['codex', 'exec', '--full-auto', '--json', '{prompt}'],
+    'codex': ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '--json', '{prompt}'],
     'gemini': ['gemini', '--yolo', '-p', '{prompt}'],
     'cursor': ['cursor-agent', '-p', '--force', '{prompt}'],
     'agy': ['agy', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
