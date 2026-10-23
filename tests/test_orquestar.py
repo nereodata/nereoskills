@@ -790,6 +790,160 @@ class DificultadTests(unittest.TestCase):
         idx = lanzados[0].index('--model')
         self.assertEqual(lanzados[0][idx + 1], 'gemini-low')
 
+    def test_promover_dificultad_updates_frontmatter_and_metrics(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T-ADV-0001.md').write_text('---\nid: T-ADV-0001\ndificultad: sencilla\n---\n# Tarea\n', encoding='utf-8')
+
+        with patch('builtins.print'):
+            nueva = motor.promover_dificultad(self.root, 'T-ADV-0001', motivo='test')
+        self.assertEqual(nueva, 'media')
+        self.assertEqual(motor.dificultad_de(self.root, 'T-ADV-0001'), 'media')
+        texto = (tareas / 'T-ADV-0001.md').read_text(encoding='utf-8')
+        self.assertIn('dificultad: media', texto)
+
+        f_met = self.root / motor.METRICAS
+        self.assertTrue(f_met.exists())
+        lineas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines() if l.strip()]
+        self.assertEqual(lineas[-1]['tipo'], 'promocion')
+        self.assertEqual(lineas[-1]['id'], 'T-ADV-0001')
+        self.assertEqual(lineas[-1]['de'], 'sencilla')
+        self.assertEqual(lineas[-1]['dificultad'], 'media')
+
+        with patch('builtins.print'):
+            nueva2 = motor.promover_dificultad(self.root, 'T-ADV-0001')
+        self.assertEqual(nueva2, 'dificil')
+        self.assertEqual(motor.dificultad_de(self.root, 'T-ADV-0001'), 'dificil')
+
+        with patch('builtins.print'):
+            nueva3 = motor.promover_dificultad(self.root, 'T-ADV-0001')
+        self.assertIsNone(nueva3)
+        self.assertEqual(motor.dificultad_de(self.root, 'T-ADV-0001'), 'dificil')
+
+    def test_reintentos_acumulados_and_rechazos_reset_on_promocion(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\ndificultad: sencilla\n---\n', encoding='utf-8')
+
+        motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1'})
+        motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1'})
+        motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'RECHAZADO'})
+        motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'RECHAZADO'})
+
+        self.assertEqual(motor.rechazos(self.root, 'T1'), 2)
+        self.assertEqual(motor.reintentos_acumulados(self.root, 'T1'), (2, 2))
+
+        with patch('builtins.print'):
+            motor.promover_dificultad(self.root, 'T1')
+
+        self.assertEqual(motor.rechazos(self.root, 'T1'), 0)
+        self.assertEqual(motor.reintentos_acumulados(self.root, 'T1'), (0, 0))
+
+    def test_tope_de_rechazos_with_dificultad_levels(self):
+        cfg = {
+            'artemisa': {
+                'harness': 'agy',
+                'model': 'base-model',
+                'dificultad': {
+                    'sencilla': {'model': 'model-s'},
+                    'media': {'model': 'model-m'},
+                    'dificil': {'model': 'model-d'},
+                },
+                'escalada': {
+                    'rechazos': 2,
+                    'model': 'model-esc'
+                }
+            }
+        }
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T-S.md').write_text('---\nid: T-S\ndificultad: sencilla\n---\n', encoding='utf-8')
+        (tareas / 'T-D.md').write_text('---\nid: T-D\ndificultad: dificil\n---\n', encoding='utf-8')
+
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'rechazos', return_value=2)):
+            # T-S can promote
+            msg_s = motor.tope_de_rechazos(self.root, 'T-S')
+            self.assertIn('subirá la dificultad de la tarea y la relanzará con el perfil del nuevo nivel', msg_s)
+
+            # T-D cannot promote; should escalate
+            msg_d = motor.tope_de_rechazos(self.root, 'T-D')
+            self.assertIn('el bucle relanzará la tarea con un modelo superior', msg_d)
+
+            # T-D already escalated; should apply rule 5
+            with patch.dict(motor.os.environ, {'ORQUESTAR_ESCALADA': '1'}):
+                msg_d_esc = motor.tope_de_rechazos(self.root, 'T-D')
+                self.assertIn('aplica la regla 5 del modo orquestado', msg_d_esc)
+
+    def test_comprobar_promocion_detects_rechazos_and_step_executions(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\ndificultad: sencilla\n---\n', encoding='utf-8')
+        (tareas / 'T2.md').write_text('---\nid: T2\ndificultad: dificil\n---\n', encoding='utf-8')
+
+        # 3 ejecuciones de paso (> 2)
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1'})
+        debe, motivo = motor.comprobar_promocion(self.root, 'T1')
+        self.assertTrue(debe)
+        self.assertIn('ejecuciones', motivo)
+
+        # Si ya es difícil, no promueve
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T2'})
+        debe_d, _ = motor.comprobar_promocion(self.root, 'T2')
+        self.assertFalse(debe_d)
+
+    def test_bucle_promotes_difficulty_on_sin_progreso_and_retries(self):
+        self.root.joinpath('task_config.yaml').write_text('validation:\n  command: true\n', encoding='utf-8')
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\nstatus: planned\ndificultad: sencilla\nversion: "v0.1.0"\n---\n', encoding='utf-8')
+        (self.root / 'docs/requirements').mkdir(parents=True)
+        (self.root / 'docs/requirements/requirements.md').write_text('Idea\n', encoding='utf-8')
+
+        llamadas = []
+        def fake_ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
+            llamadas.append(rol.get('model'))
+            return 0, {}, 'output'
+
+        cfg = {
+            'artemisa': {
+                'harness': 'agy',
+                'model': 'model-base',
+                'dificultad': {
+                    'sencilla': {'model': 'model-sencillo'},
+                    'media': {'model': 'model-medio'},
+                    'dificil': {'model': 'model-dificil'}
+                }
+            }
+        }
+        class Args:
+            docs = Path('docs/requirements')
+            idea = ''
+            test = None
+            max_pasos = 5
+            reintentos = 1
+            cmd = None
+            harness = 'agy'
+            espera_max = 1
+            estado = False
+
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'ejecutar', side_effect=fake_ejecutar),
+              patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'firma', side_effect=[1, 1, 1, 2, 2]),
+              patch.object(motor, 'estado', side_effect=[
+                  ('PASO', 'task-dev', 'T1', 'release/v0.1'),
+                  ('PASO', 'task-dev', 'T1', 'release/v0.1'),
+                  ('FIN', 'v0.1'),
+              ]),
+              patch('builtins.print')):
+            codigo = motor.bucle(Args(), self.root)
+            self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'media')
+            self.assertEqual(llamadas[0], 'model-sencillo')
+            self.assertEqual(llamadas[1], 'model-medio')
+
 
 class ReservaCuotaTests(unittest.TestCase):
     """Modelos de reserva ante agotamiento de cuota en pasos y subagentes."""

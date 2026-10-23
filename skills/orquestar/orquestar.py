@@ -384,6 +384,61 @@ def dificultad_de(root, iid):
     return 'media'
 
 
+def siguiente_dificultad(dif):
+    """Siguiente nivel de dificultad: sencilla -> media -> dificil -> None."""
+    dif = (dif or 'media').strip().lower().replace('í', 'i')
+    if dif == 'sencilla':
+        return 'media'
+    if dif == 'media':
+        return 'dificil'
+    return None
+
+
+def fichero_de(root, iid):
+    """Ruta al fichero .md de una tarea o bug."""
+    if not iid:
+        return None
+    for d in backlog_dirs(root):
+        if d.is_dir():
+            for f in d.glob('*.md'):
+                if frontmatter(f).get('id') == iid:
+                    return f
+    return None
+
+
+def actualizar_dificultad(root, iid, nueva_dif):
+    """Actualiza o inserta el campo dificultad en el frontmatter de una tarea o bug."""
+    f = fichero_de(root, iid)
+    if not f or not f.exists():
+        return False
+    texto = f.read_text(encoding='utf-8')
+    m = re.match(r'^(---[^\n]*\n)(.*?)\n(---[^\n]*\n.*)$', texto, re.S)
+    if not m:
+        return False
+    cab, fm, resto = m.group(1), m.group(2), m.group(3)
+    if re.search(r'^dificultad\s*:', fm, re.M):
+        nuevo_fm = re.sub(r'^(dificultad\s*:\s*).*$', rf'\g<1>{nueva_dif}', fm, flags=re.M)
+    else:
+        nuevo_fm = fm + f'\ndificultad: {nueva_dif}'
+    f.write_text(cab + nuevo_fm + '\n' + resto, encoding='utf-8')
+    return True
+
+
+def promover_dificultad(root, iid, motivo=''):
+    """Sube la dificultad de la tarea/bug un escalón (sencilla -> media -> dificil).
+    Actualiza el frontmatter, registra métrica e informa por consola."""
+    actual = dificultad_de(root, iid)
+    nueva = siguiente_dificultad(actual)
+    if not nueva:
+        return None
+    if actualizar_dificultad(root, iid, nueva):
+        msg_motivo = f' ({motivo})' if motivo else ''
+        print(f'[orquestar] {iid}: subo dificultad de {actual} a {nueva}{msg_motivo}', flush=True)
+        registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': iid, 'de': actual, 'dificultad': nueva})
+        return nueva
+    return None
+
+
 def errores_dependencias(items):
     """IDs inexistentes, ciclos y dependencias a versiones posteriores."""
     ids = {i['id'] for i in items}
@@ -717,14 +772,60 @@ def lista_reservas(cfg_rol):
 
 
 def rechazos(root, iid):
-    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO."""
+    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
     if iid and (root / METRICAS).exists():
         for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
             f = json.loads(linea) if linea.strip() else {}
-            if f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
+            if f.get('id') == iid and f.get('tipo') == 'promocion':
+                n = 0
+            elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
                 n = n + 1 if f['veredicto'] == 'RECHAZADO' else 0
     return n
+
+
+def reintentos_acumulados(root, iid):
+    """(ejecuciones_paso, rechazos_hades) desde la última subida o inicio."""
+    pasos = 0
+    rech = 0
+    if not iid or not (root / METRICAS).exists():
+        return 0, 0
+    for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
+        if not linea.strip():
+            continue
+        try:
+            f = json.loads(linea)
+        except Exception:
+            continue
+        if f.get('id') != iid:
+            continue
+        if f.get('tipo') == 'promocion':
+            pasos = 0
+            rech = 0
+            continue
+        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota'):
+            pasos += 1
+        elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('veredicto'):
+            rech = rech + 1 if f['veredicto'] == 'RECHAZADO' else 0
+    return pasos, rech
+
+
+def comprobar_promocion(root, iid):
+    """Comprueba si un ID debe promocionar de dificultad tras reintentos o rechazos seguidos.
+    Retorna (debe_promover, motivo)."""
+    dif = dificultad_de(root, iid)
+    if dif not in ('sencilla', 'media'):
+        return False, ''
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    tiene_dificultades = bool(cfg_dev.get('dificultad'))
+    esc = cfg_dev.get('escalada') or {}
+    tope = esc.get('rechazos', 2) if esc else (2 if tiene_dificultades else 3)
+    pasos, rech = reintentos_acumulados(root, iid)
+    if pasos > 2:
+        return True, f'{pasos} ejecuciones de paso'
+    if rech >= tope:
+        return True, f'{rech} rechazos seguidos de Hades'
+    return False, ''
 
 
 def escalada(root, rol, cfg, iid):
@@ -1034,10 +1135,20 @@ def agente(root, rol, prompt):
 
 def tope_de_rechazos(root, iid):
     """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
-    esc = rol_de(root, 'task-dev')[1].get('escalada') or {}
-    tope, n = (esc.get('rechazos', 2) if esc else 3), rechazos(root, iid)
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    esc = cfg_dev.get('escalada') or {}
+    tiene_dificultades = bool(cfg_dev.get('dificultad'))
+    dif = dificultad_de(root, iid) if iid else 'media'
+    puede_subir = tiene_dificultades and dif in ('sencilla', 'media')
+
+    tope = esc.get('rechazos', 2) if esc else (2 if tiene_dificultades else 3)
+    n = rechazos(root, iid)
     if n < tope or n % tope:
         return ''
+    if puede_subir:
+        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que '
+                'tengas en la rama, explica en tu salida qué falla y termina el paso sin cambiar estados: el bucle '
+                'subirá la dificultad de la tarea y la relanzará con el perfil del nuevo nivel.')
     if not esc or os.environ.get('ORQUESTAR_ESCALADA'):
         tras = ', también tras la escalada' if esc else ''
         return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas{tras}: '
@@ -1453,8 +1564,14 @@ def bucle(a, root):
                 return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama}.')
             git('checkout', '-q', rama)
 
-        antes = firma(root, a.docs)
         dif = dificultad_de(root, arg) if arg else None
+        if paso in ('task-dev', 'bug-fix') and arg:
+            debe, motivo = comprobar_promocion(root, arg)
+            if debe:
+                nueva_dif = promover_dificultad(root, arg, motivo=motivo)
+                if nueva_dif:
+                    dif = nueva_dif
+        antes = firma(root, a.docs)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif)
         cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
@@ -1550,6 +1667,13 @@ def bucle(a, root):
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')
             if sin_progreso >= a.reintentos:
+                if paso in ('task-dev', 'bug-fix') and arg:
+                    dif_actual = dificultad_de(root, arg)
+                    if dif_actual in ('sencilla', 'media'):
+                        nueva_dif = promover_dificultad(root, arg, motivo=f'tras {sin_progreso} intentos sin progreso')
+                        if nueva_dif:
+                            sin_progreso = 0
+                            continue
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
