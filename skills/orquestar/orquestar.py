@@ -776,8 +776,7 @@ def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
     if iid and (root / METRICAS).exists():
-        for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
-            f = json.loads(linea) if linea.strip() else {}
+        for f in leer_metricas(root):
             if f.get('id') == iid and f.get('tipo') == 'promocion':
                 n = 0
             elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
@@ -1102,6 +1101,7 @@ def agente(root, rol, prompt):
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
+            m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota)
             cuotas_acumuladas.append(cuota)
             if hay_mas_reservas:
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
@@ -1379,17 +1379,104 @@ def registrar(root, fila):
         f.write(json.dumps(fila, ensure_ascii=False) + '\n')
 
 
+
+def leer_metricas(root):
+    """Lee registros completos; tolera una última línea aún en escritura."""
+    ruta = root / METRICAS
+    filas = []
+    if ruta.exists():
+        for linea in ruta.read_text(encoding='utf-8').splitlines():
+            try:
+                fila = json.loads(linea)
+            except ValueError:
+                continue
+            if isinstance(fila, dict):
+                filas.append(fila)
+    return filas
+
+
+def fecha_estado(valor):
+    """Convierte ISO local o con offset en un instante comparable con zona."""
+    try:
+        return datetime.fromisoformat(str(valor)).astimezone()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def perfil_estado(cfg):
+    """Describe un perfil efectivo sin resolver de nuevo sus ajustes."""
+    return (f'{cfg.get("harness") or "claude"}/{cfg.get("model") or "predeterminado"}'
+            + (f' ({cfg["effort"]})' if cfg.get('effort') else ''))
+
+
+def detalle_estado(root, e):
+    """Presentación común de agentes efectivos y evidencia reciente de uso/cuota."""
+    instante = fecha_estado(ahora())
+    lineas, perfiles = [], []
+    if e[0] == 'PASO':
+        paso, iid = e[1:3]
+        dificultad = dificultad_de(root, iid) if iid else None
+        rol, cfg = rol_de(root, paso, dificultad=dificultad)
+        cfg, escalado = escalada(root, rol, cfg, iid)
+        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
+        lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
+        for nombre, perfil in ((rol, cfg), ('hades', hades)):
+            reservas = lista_reservas(perfil)
+            perfiles.extend([perfil] + reservas)
+            lineas.append(f'{nombre}: {perfil_estado(perfil)}'
+                          + (' [escalada]' if nombre == rol and escalado else '')
+                          + ('; reservas: ' + ', '.join(perfil_estado(r) for r in reservas) if reservas else ''))
+    uso, cuotas = {}, {}
+    for perfil in perfiles:
+        uso.setdefault((perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado'), 0)
+    for fila in leer_metricas(root):
+        fecha = fecha_estado(fila.get('fecha'))
+        if fecha is None or not instante - timedelta(hours=5) <= fecha <= instante:
+            continue
+        arnes = fila.get('arnes') or 'desconocido'
+        modelos = fila.get('modelos') or {}
+        for modelo, tokens in modelos.items():
+            clave = (arnes, modelo)
+            uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
+                                                 ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
+        segundos = fila.get('cuota_espera_s')
+        modelo = fila.get('modelo_cuota')
+        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
+            segundos = fila['espera_s']
+            modelo = next(iter(modelos)) if len(modelos) == 1 else None
+        if modelo and isinstance(segundos, (int, float)):
+            clave = (arnes, modelo)
+            hasta = fecha + timedelta(seconds=segundos)
+            uso.setdefault(clave, 0)
+            if hasta > instante:
+                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
+    espera = root / ESPERA
+    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
+    if hasta and hasta > instante:
+        minutos = int((hasta - instante).total_seconds() + 59) // 60
+        lineas.append(f'Espera global: hasta {hasta:%Y-%m-%d %H:%M %z} ({minutos} min restantes)')
+    if not uso:
+        lineas.append('Sin uso registrado en las últimas 5 h')
+    for clave, tokens in sorted(uso.items()):
+        hasta = cuotas.get(clave)
+        cuota = (f'agotado hasta {hasta:%Y-%m-%d %H:%M %z} '
+                 f'({int((hasta - instante).total_seconds() + 59) // 60} min restantes)' if hasta else
+                 'sin agotamiento registrado')
+        lineas.append(f'{clave[0]}/{clave[1]}: {tokens} tokens (5 h); {cuota}')
+    return lineas
+
+
 def resumen(root):
     """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
     if (root / PID).exists():
         print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
-        if (root / ESPERA).exists():
-            print(f'[orquestar] esperando cuota hasta {(root / ESPERA).read_text().strip()}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
+    for linea in detalle_estado(root, estado(root, 'docs/requirements')):
+        print(f'[orquestar] {linea}')
     if not (root / METRICAS).exists():
         return
-    filas = [json.loads(l) for l in (root / METRICAS).read_text(encoding='utf-8').splitlines() if l.strip()]
+    filas = leer_metricas(root)
     tipo = lambda t: [f for f in filas if f.get('tipo', 'paso') == t]
     coste = sum(f.get('coste_usd') or 0 for f in filas)
     horas = sum(f.get('duracion_s') or 0 for f in tipo('paso') + tipo('espera')) / 3600
@@ -1412,12 +1499,14 @@ def resumen(root):
 
 def parte(root, docs='docs/requirements'):
     """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
-    if (root / ESPERA).exists():
-        marcha = f'esperando cuota hasta {(root / ESPERA).read_text().strip()[-5:]}'
+    hasta = fecha_estado((root / ESPERA).read_text(encoding='utf-8').strip()) if (root / ESPERA).exists() else None
+    if hasta and hasta > fecha_estado(ahora()):
+        marcha = f'esperando cuota hasta {hasta:%H:%M}'
     else:
         marcha = 'en marcha' if (root / PID).exists() else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
+    lineas.extend(detalle_estado(root, e))
     items = backlog(root)
     abiertas = sorted({i['version'] for i in items if vkey(i['version']) and i['status'] not in CERRADO}, key=vkey)
     for v in abiertas[:1]:
@@ -1432,8 +1521,7 @@ def parte(root, docs='docs/requirements'):
         pendientes = sum(1 for l in (root / BUZON).read_text(encoding='utf-8').splitlines() if l.strip())
         lineas.append(f'*Por registrar:* {pendientes} (entre pasos del bucle)')
     if (root / METRICAS).exists():
-        pasos = [json.loads(l) for l in (root / METRICAS).read_text(encoding='utf-8').splitlines()
-                 if l.strip() and json.loads(l).get('tipo', 'paso') == 'paso']
+        pasos = [f for f in leer_metricas(root) if f.get('tipo', 'paso') == 'paso']
         if pasos:
             lineas.append(f'*Último paso:* {pasos[-1].get("paso", "")} {pasos[-1].get("id") or ""} ({pasos[-1].get("fecha", "")[:16]})')
     return '\n'.join(lineas)
@@ -1632,6 +1720,7 @@ def bucle(a, root):
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
             if codigo and cuota_propia is not None:
+                m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota_propia)
                 cuotas_paso.append(cuota_propia)
                 if hay_mas_reservas:
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,

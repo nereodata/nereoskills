@@ -95,3 +95,29 @@ Característica: Gateway de Telegram de Adevv
     Cuando el usuario "12345" envía una consulta libre
     Entonces el prompt enviado al modelo advierte de no modificar ni commitear ficheros rastreados
     Y sugiere usar apuntar tareas o bugs si se desea registrar trabajo
+
+  @T-ADV-0014 @CA-M-1
+  Escenario: Agentes efectivos compartidos entre CLI y Telegram
+    Dado un paso task-dev de dificultad dificil con ajustes por paso y reservas heredadas
+    Y dos rechazos que activan la escalada de Artemisa
+    Cuando consulto --estado o /estado
+    Entonces veo la dificultad, Artemisa en escalada y Hades con su arnés, modelo, esfuerzo y reservas efectivos
+    Y para un paso de planificación veo Atenea en lugar de Artemisa
+
+  @T-ADV-0014 @CA-M-2
+  Escenario: Consumo reciente y cuota con vencimiento conocido
+    Dado que son las 12:00 y el modelo codex/m1 consumió 100 tokens de entrada, 20 de caché y 30 de salida a las 08:00
+    Y consumió 900 tokens a las 06:59 que quedan fuera de las últimas 5 horas
+    Y a las 11:50 agotó cuota durante 1800 segundos antes de conmutar a reserva
+    Cuando consulto --estado o /estado
+    Entonces veo codex/m1 con 150 tokens en 5 h y agotado hasta las 12:20 con 20 min restantes
+    Y no sumo de nuevo los tokens de razonamiento incluidos en salida
+
+  @T-ADV-0014 @CA-M-2
+  Escenario: Ausencia de evidencia y esperas globales
+    Dado que una cuota ya venció y hay modelos configurados sin métricas
+    Y existe una espera global hasta las 12:15 cuando son las 12:00
+    Cuando consulto --estado o /estado
+    Entonces veo la espera global y 15 min restantes sin atribuirla a un modelo desconocido
+    Y los modelos sin evidencia indican sin agotamiento registrado y cero tokens
+    Y un estado sin paso ni métricas sigue siendo consultable

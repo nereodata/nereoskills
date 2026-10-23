@@ -14,7 +14,7 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 - Modelo conversacional: configurable en `orchestration.json` bajo la clave `"telegram"` (`harness`, `model`, `effort`). Si no se define, hereda por defecto la configuración de `"atenea"`.
 
 ## 📋 Comandos y Conversación Libre
-- `/estado` o `/status`: si el bucle está en marcha, parado o esperando cuota; la fase según el disco; la versión abierta (cerradas, en curso, bloqueadas); el backlog sin versión; las altas por registrar y el último paso.
+- `/estado` o `/status`: si el bucle está en marcha, parado o esperando cuota; la fase según el disco; la versión abierta (cerradas, en curso, bloqueadas); el backlog sin versión; las altas por registrar y el último paso. Añade el ejecutor Artemisa/Atenea y Hades efectivos para el paso/dificultad, con arnés, modelo, esfuerzo, reservas y escalada. Muestra tokens registrados en las últimas 5 h por arnés/modelo y cuotas agotadas conocidas con hora local de vencimiento y minutos restantes; separa la espera global. «Sin agotamiento registrado» no garantiza cuota disponible; registros antiguos sin plazo/modelo no permiten reconstruirla.
 - `/tarea <título>` (o `/task`) y `/bug <título>`: nueva tarea o bug maestro **sin versión** (`status: backlog`, como la deuda registrada). El bucle no lo trabaja hasta que le pones versión (o, si es un bug, hasta que `revisar-deuda` lo incluya). Las tareas van sin `depende_de`: se calculan cuando entran en una versión.
 - `/nuevo` o `/reset`: elimina la sesión guardada del usuario emisor y reinicia el hilo de conversación.
 - `/ayuda` (o `/help`, `/start`): lista de comandos disponibles.
