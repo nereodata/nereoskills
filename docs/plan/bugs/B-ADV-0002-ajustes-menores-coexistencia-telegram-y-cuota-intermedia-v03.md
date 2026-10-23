@@ -2,10 +2,10 @@
 id: B-ADV-0002
 title: "Ajustes menores transversales v0.3: coexistencia de clave telegram en orchestration.json y marca sin_cuota en intento intermedio de paso"
 type: bug
-weight: 1100
+weight: 100
 dificultad: sencilla
-version: ""
-status: backlog
+version: "v0.4.0"
+status: planned
 created_at: 2026-10-23
 updated_at: 2026-10-23
 origen: "revisar-version v0.3 (docs/review/versions/v0.3-arquitectura.md)"
