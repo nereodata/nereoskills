@@ -154,6 +154,19 @@ def construir_prompt_agente(root, rol, prompt):
     )
     if es_repositorio_fuente_adevv(root):
         cabecera += 'Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.\n\n'
+    f_ev = Path(root) / EVIDENCIAS
+    if f_ev.exists():
+        try:
+            clave = arbol(root)
+            cmds = list(dict.fromkeys(
+                e['comando'] for l in f_ev.read_text(encoding='utf-8').splitlines() if l.strip()
+                for e in (json.loads(l),) if e.get('arbol') == clave and e.get('codigo') == 0
+            ))
+            if cmds:
+                cabecera += (f'Verificado en verde sobre este árbol ({clave[:10]}): '
+                             f'{", ".join(f"`{c}`" for c in cmds)}. No los relances.\n\n')
+        except Exception:
+            pass
     return cabecera + prompt
 
 
@@ -823,10 +836,15 @@ def agente(root, rol, prompt):
         sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = con_modelo([exe] + base[1:], harness, cfg)
     codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt)
+    cuota = espera_cuota(salida) if codigo else None
     veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
     registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
-                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}), **m})
-    if veredicto and veredicto[-1] == 'RECHAZADO':
+                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}),
+                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}), **m})
+    if cuota is not None:
+        print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
+              'el bucle esperará la cuota y reintentará.', flush=True)
+    elif veredicto and veredicto[-1] == 'RECHAZADO':
         print(tope_de_rechazos(root, iid), flush=True)
     return codigo
 
@@ -834,11 +852,12 @@ def agente(root, rol, prompt):
 def tope_de_rechazos(root, iid):
     """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
     esc = rol_de(root, 'task-dev')[1].get('escalada') or {}
-    tope, n = esc.get('rechazos', 2), rechazos(root, iid)
-    if not esc or n < tope or n % tope:
+    tope, n = (esc.get('rechazos', 2) if esc else 3), rechazos(root, iid)
+    if n < tope or n % tope:
         return ''
-    if os.environ.get('ORQUESTAR_ESCALADA'):
-        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas, también tras la escalada: '
+    if not esc or os.environ.get('ORQUESTAR_ESCALADA'):
+        tras = ', también tras la escalada' if esc else ''
+        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas{tras}: '
                 'no sigas corrigiendo; aplica la regla 5 del modo orquestado (bloquea la tarea con '
                 '`pendiente_de: especificador`, o `humano` si falta un recurso externo) y termina el paso.')
     return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que '
@@ -849,7 +868,7 @@ def tope_de_rechazos(root, iid):
 # ---------------------------------------------------------------- cuota
 
 CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
-                   r'|\b429\b|overloaded', re.I)
+                   r'|\b429\b|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
 
 
 def espera_cuota(salida, ahora=None):
@@ -1262,8 +1281,14 @@ def bucle(a, root):
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
+        f_met = root / METRICAS
+        n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
         codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
         cuota = espera_cuota(salida) if codigo else None
+        if cuota is None and f_met.exists():
+            nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+            cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                          if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                          'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
                          **({'escalado': True} if escalado else {}),
@@ -1280,7 +1305,7 @@ def bucle(a, root):
                 print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
                 return 2
             continue
-        if codigo:
+        if codigo or cuota is not None:
             if firma(root, a.docs) != antes and not git('status', '--porcelain'):
                 print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
                 sin_progreso = 0
@@ -1288,7 +1313,7 @@ def bucle(a, root):
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             return parar(root, 'cuota' if cuota is not None else 'error',
-                         f'el arnés terminó con código {codigo} ({motivo}). Relanza cuando se resuelva.')
+                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.')
         esperado = 0
 
         if firma(root, a.docs) == antes:
