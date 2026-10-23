@@ -104,7 +104,8 @@ def es_raiz_de_unidad(path):
 def construir_prompt_paso(root, paso, arg):
     """Construye el prompt de un paso para el arnés con rutas absolutas instaladas."""
     version_dir = get_active_version_dir()
-    rol, cfg_rol = rol_de(root, paso)
+    dif = dificultad_de(root, arg) if arg else None
+    rol, cfg_rol = rol_de(root, paso, dificultad=dif)
     persona = version_dir / "agents" / f"{rol}.md"
     skill_file = version_dir / "skills" / "orquestar" / "SKILL.md"
     skills_dir = version_dir / "skills"
@@ -136,8 +137,9 @@ def construir_prompt_paso(root, paso, arg):
 def construir_prompt_agente(root, rol, prompt, reanudacion=False):
     """Construye el mandato para un rol con --agente citando la versión activa instalada."""
     version_dir = get_active_version_dir()
-    paso = os.environ.get("ORQUESTAR_PASO", "")
-    cfg = ajustes(config(root).get(rol, {}), paso)
+    paso, iid = os.environ.get("ORQUESTAR_PASO", ""), os.environ.get("ORQUESTAR_ID", "")
+    dif = dificultad_de(root, iid) if iid else None
+    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
     instrucciones = cfg.get("instructions")
     if instrucciones:
         p_inst = Path(instrucciones)
@@ -353,11 +355,32 @@ def backlog(root):
             if not fm.get('id') or fm.get('parent_id'):
                 continue
             peso = str(fm.get('weight', ''))
+            dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
+            if dif not in ('sencilla', 'media', 'dificil'):
+                dif = 'media'
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
                         'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
-                        'weight': int(peso) if peso.lstrip('-').isdigit() else 0})
+                        'weight': int(peso) if peso.lstrip('-').isdigit() else 0,
+                        'dificultad': dif})
     return out
+
+
+def dificultad_de(root, iid):
+    """Dificultad de una tarea o bug (normalizada a sencilla, media o dificil, por defecto media)."""
+    if not iid:
+        return 'media'
+    for it in backlog(root):
+        if it['id'] == iid:
+            return it.get('dificultad', 'media')
+    for d in backlog_dirs(root):
+        if d.is_dir():
+            for f in d.glob('*.md'):
+                fm = frontmatter(f)
+                if fm.get('id') == iid:
+                    dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
+                    return dif if dif in ('sencilla', 'media', 'dificil') else 'media'
+    return 'media'
 
 
 def errores_dependencias(items):
@@ -657,7 +680,7 @@ def config(root):
     return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
 
 
-def rol_de(root, paso):
+def rol_de(root, paso, dificultad=None):
     """(rol, configuración) que ejecuta un paso del bucle: Artemisa desarrolla, Atenea analiza y decide.
 
     Sin la clave del rol en orchestration.json se usa `development` (y Atenea, sin ella, la de Artemisa).
@@ -665,12 +688,15 @@ def rol_de(root, paso):
     cfg = config(root)
     dev = cfg.get('artemisa') or cfg.get('development', {})
     rol = 'artemisa' if paso in DESARROLLO else 'atenea'
-    return rol, ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso)
+    return rol, ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso, dificultad=dificultad)
 
 
-def ajustes(cfg, paso):
+def ajustes(cfg, paso='', dificultad=None):
     """Configuración del rol para un paso: la base más lo que fije `pasos.<paso>` (p. ej. otro `effort`)."""
-    return {**{k: v for k, v in cfg.items() if k != 'pasos'}, **(cfg.get('pasos') or {}).get(paso, {})}
+    base = {k: v for k, v in cfg.items() if k not in ('pasos', 'dificultad')}
+    dif_cfg = (cfg.get('dificultad') or {}).get(dificultad, {}) if dificultad else {}
+    paso_cfg = (cfg.get('pasos') or {}).get(paso, {}) if paso else {}
+    return {**base, **dif_cfg, **paso_cfg}
 
 
 def rechazos(root, iid):
@@ -884,7 +910,11 @@ def buscar_sesion_paso(root, paso, iid, arnes):
 
 def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
     """Lanza el paso con el arnés y el modelo de su rol y devuelve (código, métricas, salida)."""
-    rol = rol if rol is not None else rol_de(root, 'task-dev')[1]
+    if rol is None:
+        iid = (env or {}).get('ORQUESTAR_ID') or os.environ.get('ORQUESTAR_ID', '')
+        paso = (env or {}).get('ORQUESTAR_PASO') or os.environ.get('ORQUESTAR_PASO', 'task-dev')
+        dif = dificultad_de(root, iid) if iid else None
+        rol = rol_de(root, paso, dificultad=dif)[1]
     harness = arnes(a, rol)
     if sesion:
         cmd = comando(a, prompt, root, rol, sesion=sesion)
@@ -917,7 +947,8 @@ def base_comando_agente(harness, prompt, sesion=None):
 def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
-    cfg = ajustes(config(root).get(rol, {}), paso)
+    dif = dificultad_de(root, iid) if iid else None
+    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
     if 'instructions' in cfg:
         p_inst = Path(cfg['instructions'])
         if not p_inst.is_absolute():
@@ -1379,7 +1410,8 @@ def bucle(a, root):
             git('checkout', '-q', rama)
 
         antes = firma(root, a.docs)
-        rol, cfg_rol = rol_de(root, paso)
+        dif = dificultad_de(root, arg) if arg else None
+        rol, cfg_rol = rol_de(root, paso, dificultad=dif)
         cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
             print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '

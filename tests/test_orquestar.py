@@ -680,5 +680,116 @@ class EscaladaTests(unittest.TestCase):
             self.assertIsNone(motor.buscar_sesion_agente(self.root, 'hades', 'T-ADV-0001', 'claude'))
 
 
+class DificultadTests(unittest.TestCase):
+    """Clasificación de dificultad (sencilla, media, dificil) y selección de modelo/esfuerzo."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_backlog_reads_dificultad_normalizada_and_defaults_to_media(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\nweight: 10\n---\n', encoding='utf-8')
+        (tareas / 'T2.md').write_text('---\nid: T2\ndificultad: sencilla\n---\n', encoding='utf-8')
+        (tareas / 'T3.md').write_text('---\nid: T3\ndificultad: Difícil \n---\n', encoding='utf-8')
+        (tareas / 'T4.md').write_text('---\nid: T4\ndificultad: desconocida\n---\n', encoding='utf-8')
+
+        items = {it['id']: it['dificultad'] for it in motor.backlog(self.root)}
+        self.assertEqual(items['T1'], 'media')
+        self.assertEqual(items['T2'], 'sencilla')
+        self.assertEqual(items['T3'], 'dificil')
+        self.assertEqual(items['T4'], 'media')
+
+    def test_ajustes_applies_dificultad_overrides(self):
+        cfg = {
+            'harness': 'agy',
+            'model': 'flash-medium',
+            'effort': 'medium',
+            'dificultad': {
+                'sencilla': {'model': 'flash-low', 'effort': 'low'},
+                'dificil': {'model': 'pro-high', 'effort': 'high'},
+            }
+        }
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'sencilla'),
+                         {'harness': 'agy', 'model': 'flash-low', 'effort': 'low'})
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'media'),
+                         {'harness': 'agy', 'model': 'flash-medium', 'effort': 'medium'})
+        self.assertEqual(motor.ajustes(cfg, 'task-dev', 'dificil'),
+                         {'harness': 'agy', 'model': 'pro-high', 'effort': 'high'})
+
+    def test_ajustes_paso_overrides_dificultad(self):
+        cfg = {
+            'harness': 'agy',
+            'model': 'base-model',
+            'effort': 'medium',
+            'dificultad': {
+                'sencilla': {'model': 'cheap-model', 'effort': 'low'},
+            },
+            'pasos': {
+                'task-dev': {'effort': 'high'}
+            }
+        }
+        res = motor.ajustes(cfg, 'task-dev', 'sencilla')
+        self.assertEqual(res['model'], 'cheap-model')
+        self.assertEqual(res['effort'], 'high')
+
+    def test_escalada_takes_precedence_over_dificultad(self):
+        cfg_artemisa = {
+            'harness': 'agy',
+            'model': 'default-model',
+            'dificultad': {
+                'sencilla': {'model': 'cheap-model', 'effort': 'low'},
+            },
+            'escalada': {
+                'rechazos': 2,
+                'model': 'opus-superior'
+            }
+        }
+        cfg_res = motor.ajustes(cfg_artemisa, 'task-dev', 'sencilla')
+        self.assertEqual(cfg_res['model'], 'cheap-model')
+
+        with patch.object(motor, 'rechazos', return_value=2):
+            cfg_esc, escalado = motor.escalada(self.root, 'artemisa', cfg_res, 'T-ADV-0001')
+            self.assertTrue(escalado)
+            self.assertEqual(cfg_esc['model'], 'opus-superior')
+
+    def test_agente_applies_dificultad_from_active_orquestar_id(self):
+        cfg = {
+            'hades': {
+                'harness': 'agy',
+                'model': 'gemini-medium',
+                'dificultad': {
+                    'sencilla': {'model': 'gemini-low', 'effort': 'low'},
+                    'dificil': {'model': 'gemini-pro', 'effort': 'high'},
+                }
+            }
+        }
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T-ADV-0001.md').write_text('---\nid: T-ADV-0001\ndificultad: sencilla\n---\n', encoding='utf-8')
+
+        lanzados = []
+        def fake_lanzar(cmd, root, harness, entrada=None):
+            lanzados.append(cmd)
+            return 0, {}, '## Informe\n- **Veredicto**: APROBADO (media 9)'
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.dict(motor.os.environ, env, clear=True),
+              patch.object(motor, 'lanzar', side_effect=fake_lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            motor.agente(self.root, 'hades', 'revisa')
+
+        self.assertIn('--model', lanzados[0])
+        idx = lanzados[0].index('--model')
+        self.assertEqual(lanzados[0][idx + 1], 'gemini-low')
+
+
 if __name__ == '__main__':
     unittest.main()
