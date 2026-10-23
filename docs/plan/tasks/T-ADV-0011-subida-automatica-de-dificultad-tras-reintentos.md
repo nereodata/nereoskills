@@ -5,7 +5,7 @@ type: funcional
 weight: 110
 dificultad: media
 version: "v0.3.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Mejora operativa de adaptación dinámica de dificultad en /orquestar"
 created_at: 2026-10-23
@@ -18,7 +18,17 @@ updated_at: 2026-10-23
 Promover automáticamente la dificultad de una tarea o bug (`sencilla` $\to$ `media` $\to$ `dificil`) cuando supera 2 reintentos o rechazos seguidos de Hades, de modo que el orquestador aplique el perfil de modelo/esfuerzo del nivel superior sin quedar atrapado con un modelo insuficiente.
 
 ## 📋 Criterios de Aceptación (Nivel Máster)
-- [ ] **CA-M-1 (Detección de reintentos y promoción de nivel):** En `skills/orquestar/orquestar.py`, cuando una tarea o bug (`ID`) acumula más de 2 reintentos (ejecuciones de paso sobre ese `ID` o rechazos seguidos de Hades desde la última subida), su dificultad sube automáticamente un escalón (`sencilla` $\to$ `media`, `media` $\to$ `dificil`), actualizando el campo `dificultad:` en el frontmatter del fichero de la tarea/bug e informándolo por consola.
-- [ ] **CA-M-2 (Integración con `tope_de_rechazos` y `escalada`):** Si el rol tiene configurados niveles en `dificultad` y la tarea aún puede subir de dificultad (`sencilla` o `media`), al alcanzar el tope de rechazos `tope_de_rechazos` indica a Artemisa que commitee y termine el paso para que el bucle suba la dificultad de la tarea y la relance con el perfil del nuevo nivel (iniciando sesión limpia). Si ya está en `dificil`, aplica `escalada` si existe o la regla 5 de bloqueo.
-- [ ] **CA-M-3 (Reintentos de paso sin avance):** En `bucle()`, si un paso `task-dev` o `bug-fix` sobre un `ID` con dificultad `sencilla` o `media` llega al límite de reintentos sin progreso, antes de parar el bucle promueve la dificultad del `ID` al nivel inmediato superior, reinicia el contador `sin_progreso` para ese nuevo nivel y reintenta con la configuración superior.
-- [ ] **CA-M-4 (Documentación en `/orquestar`):** `skills/orquestar/SKILL.md` documenta la subida automática de `dificultad` tras más de 2 reintentos/rechazos.
+- [x] **CA-M-1 (Detección de reintentos y promoción de nivel):** En `skills/orquestar/orquestar.py`, cuando una tarea o bug (`ID`) acumula más de 2 reintentos (ejecuciones de paso sobre ese `ID` o rechazos seguidos de Hades desde la última subida), su dificultad sube automáticamente un escalón (`sencilla` $\to$ `media`, `media` $\to$ `dificil`), actualizando el campo `dificultad:` en el frontmatter del fichero de la tarea/bug e informándolo por consola.
+- [x] **CA-M-2 (Integración con `tope_de_rechazos` y `escalada`):** Si el rol tiene configurados niveles en `dificultad` y la tarea aún puede subir de dificultad (`sencilla` o `media`), al alcanzar el tope de rechazos `tope_de_rechazos` indica a Artemisa que commitee y termine el paso para que el bucle suba la dificultad de la tarea y la relance con el perfil del nuevo nivel (iniciando sesión limpia). Si ya está en `dificil`, aplica `escalada` si existe o la regla 5 de bloqueo.
+- [x] **CA-M-3 (Reintentos de paso sin avance):** En `bucle()`, si un paso `task-dev` o `bug-fix` sobre un `ID` con dificultad `sencilla` o `media` llega al límite de reintentos sin progreso, antes de parar el bucle promueve la dificultad del `ID` al nivel inmediato superior, reinicia el contador `sin_progreso` para ese nuevo nivel y reintenta con la configuración superior.
+- [x] **CA-M-4 (Documentación en `/orquestar`):** `skills/orquestar/SKILL.md` documenta la subida automática de `dificultad` tras más de 2 reintentos/rechazos.
+
+## 🔬 Triaje de Alcance
+- **Subfase A: Definición** → `[SKIP]` Lógica interna del motor de orquestación en Python; validación con tests unitarios en `tests/test_orquestar.py`.
+- **Subfase B: Diseño** → `[EXEC]` Documento `docs/design/T-ADV-0011-design.md` con las decisiones técnicas de promoción de dificultad, actualización de frontmatter, integración con `tope_de_rechazos`, y reintentos sin progreso en `bucle()`.
+- **Subfase C1: Pruebas (Red Phase)** → `[EXEC]` Pruebas unitarias en `tests/test_orquestar.py` para la promoción de nivel, actualización de frontmatter, tope de rechazos con dificultad, y reintentos sin progreso.
+- **Subfase C2: Implementación (Green Phase)** → `[EXEC]` Implementación en `skills/orquestar/orquestar.py`.
+- **Subfase D: QA** → `[EXEC]` Revisión de Hades (`review-code`) sobre el delta con `adevv orquestar --agente hades`.
+- **Subfase E: Documentación** → `[EXEC]` Actualización de `skills/orquestar/SKILL.md`.
+- **Subfase F: Cierre** → `[EXEC]` Cierre de tarea y commit semántico.
+- **Verificación al cierre:** `python -m unittest tests/test_orquestar.py` (garantiza que el motor de orquestación, gestión de dificultad dinámica y regresiones pasan limpias).

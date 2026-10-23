@@ -85,9 +85,76 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('v0.1.0:* 0/1 cerradas · en curso T-ADV-0002', texto)
         self.assertIn('Por registrar:* 1', texto)
 
-    def test_other_messages_are_ignored(self):
-        self.assertIsNone(self.responder('hola'))
-        self.assertIn('/tarea', self.responder('/start'))
+    def test_unauthorized_other_messages_are_ignored(self):
+        self.assertIsNone(self.responder('hola', usuario='99999'))
+
+    def test_free_conversation_invokes_model_and_saves_session(self):
+        with patch.object(gateway, 'invocar', return_value=(0, 'sess-101', 'Hola, soy el asistente.')) as inv:
+            resp = self.responder('Hola, ¿qué hace este proyecto?')
+        self.assertEqual(resp, 'Hola, soy el asistente.')
+        self.assertEqual(inv.call_count, 1)
+        self.assertIsNone(inv.call_args.kwargs['sesion'])
+        sesiones_file = self.root / getattr(motor, 'TELEGRAM_SESIONES', 'orquestar_telegram.json')
+        self.assertTrue(sesiones_file.exists())
+        self.assertEqual(gateway.obtener_sesion(self.root, '12345', 'claude'), 'sess-101')
+
+    def test_conversation_reuses_existing_session(self):
+        gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-existente')
+        with patch.object(gateway, 'invocar', return_value=(0, 'sess-renovada', 'Respuesta continua.')) as inv:
+            resp = self.responder('Siguiente duda')
+        self.assertEqual(resp, 'Respuesta continua.')
+        inv.assert_called_once()
+        self.assertEqual(inv.call_args.kwargs['sesion'], 'sess-existente')
+        self.assertEqual(gateway.obtener_sesion(self.root, '12345', 'claude'), 'sess-renovada')
+
+    def test_conversation_fallback_to_new_session_on_resume_failure(self):
+        gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-invalida')
+        with patch.object(gateway, 'invocar', side_effect=[
+            (1, None, 'error al reanudar'),
+            (0, 'sess-nueva', 'Respuesta en sesion nueva.')
+        ]) as inv:
+            resp = self.responder('Pregunta tras fallo')
+        self.assertEqual(resp, 'Respuesta en sesion nueva.')
+        self.assertEqual(inv.call_count, 2)
+        self.assertEqual(inv.call_args_list[0].kwargs['sesion'], 'sess-invalida')
+        self.assertIsNone(inv.call_args_list[1].kwargs['sesion'])
+        self.assertEqual(gateway.obtener_sesion(self.root, '12345', 'claude'), 'sess-nueva')
+
+    def test_nuevo_and_reset_clears_session_and_confirms(self):
+        gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-a-borrar')
+        gateway.guardar_sesion(self.root, '67890', 'claude', 'sess-otra')
+        resp_nuevo = self.responder('/nuevo')
+        self.assertIn('reiniciado', resp_nuevo.lower())
+        self.assertIsNone(gateway.obtener_sesion(self.root, '12345', 'claude'))
+        self.assertEqual(gateway.obtener_sesion(self.root, '67890', 'claude'), 'sess-otra')
+
+        gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-2')
+        resp_reset = self.responder('/reset')
+        self.assertIn('reiniciado', resp_reset.lower())
+        self.assertIsNone(gateway.obtener_sesion(self.root, '12345', 'claude'))
+
+    def test_prompt_includes_safety_notice_when_loop_is_running(self):
+        prompt_sin_bucle = gateway.construir_prompt(self.root, 'Hola')
+        self.assertNotIn('no debes modificar ni commitear', prompt_sin_bucle.lower())
+
+        (self.root / motor.PID).write_text('1234', encoding='utf-8')
+        prompt_con_bucle = gateway.construir_prompt(self.root, 'Hola')
+        self.assertIn('orquestar.pid', prompt_con_bucle)
+        self.assertIn('no debes modificar ni commitear', prompt_con_bucle.lower())
+        self.assertIn('apuntar', prompt_con_bucle.lower())
+
+        with patch.object(gateway, 'invocar', return_value=(0, 'sess-pid', 'Respuesta segura')) as inv:
+            self.responder('¿Qué puedes hacer?')
+        inv.assert_called_once()
+        prompt_enviado = inv.call_args.args[1] if len(inv.call_args.args) > 1 else inv.call_args.kwargs.get('prompt')
+        self.assertIn('orquestar.pid', prompt_enviado)
+
+    def test_help_documents_nuevo_and_free_conversation(self):
+        ayuda = self.responder('/ayuda')
+        self.assertIn('/nuevo', ayuda)
+        self.assertIn('asistente', ayuda.lower())
+        start = self.responder('/start')
+        self.assertEqual(start, ayuda)
 
     def test_polling_answers_in_the_chat_and_survives_a_failing_message(self):
         updates = [{'update_id': 1, 'message': {'from': {'id': 12345}, 'chat': {'id': 555}, 'text': '/estado'}},

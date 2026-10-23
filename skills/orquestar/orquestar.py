@@ -45,7 +45,8 @@ PID = 'orquestar.pid'
 PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env')  # ficheros del bucle, excluidos de git
+TELEGRAM_SESIONES = 'orquestar_telegram.json'  # sesiones de conversación de usuarios en Telegram
+PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES)  # ficheros del bucle, excluidos de git
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -383,6 +384,61 @@ def dificultad_de(root, iid):
     return 'media'
 
 
+def siguiente_dificultad(dif):
+    """Siguiente nivel de dificultad: sencilla -> media -> dificil -> None."""
+    dif = (dif or 'media').strip().lower().replace('í', 'i')
+    if dif == 'sencilla':
+        return 'media'
+    if dif == 'media':
+        return 'dificil'
+    return None
+
+
+def fichero_de(root, iid):
+    """Ruta al fichero .md de una tarea o bug."""
+    if not iid:
+        return None
+    for d in backlog_dirs(root):
+        if d.is_dir():
+            for f in d.glob('*.md'):
+                if frontmatter(f).get('id') == iid:
+                    return f
+    return None
+
+
+def actualizar_dificultad(root, iid, nueva_dif):
+    """Actualiza o inserta el campo dificultad en el frontmatter de una tarea o bug."""
+    f = fichero_de(root, iid)
+    if not f or not f.exists():
+        return False
+    texto = f.read_text(encoding='utf-8')
+    m = re.match(r'^(---[^\n]*\n)(.*?)\n(---[^\n]*\n.*)$', texto, re.S)
+    if not m:
+        return False
+    cab, fm, resto = m.group(1), m.group(2), m.group(3)
+    if re.search(r'^dificultad\s*:', fm, re.M):
+        nuevo_fm = re.sub(r'^(dificultad\s*:\s*).*$', rf'\g<1>{nueva_dif}', fm, flags=re.M)
+    else:
+        nuevo_fm = fm + f'\ndificultad: {nueva_dif}'
+    f.write_text(cab + nuevo_fm + '\n' + resto, encoding='utf-8')
+    return True
+
+
+def promover_dificultad(root, iid, motivo=''):
+    """Sube la dificultad de la tarea/bug un escalón (sencilla -> media -> dificil).
+    Actualiza el frontmatter, registra métrica e informa por consola."""
+    actual = dificultad_de(root, iid)
+    nueva = siguiente_dificultad(actual)
+    if not nueva:
+        return None
+    if actualizar_dificultad(root, iid, nueva):
+        msg_motivo = f' ({motivo})' if motivo else ''
+        print(f'[orquestar] {iid}: subo dificultad de {actual} a {nueva}{msg_motivo}', flush=True)
+        registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': iid, 'de': actual, 'dificultad': nueva})
+        return nueva
+    return None
+
+
 def errores_dependencias(items):
     """IDs inexistentes, ciclos y dependencias a versiones posteriores."""
     ids = {i['id'] for i in items}
@@ -699,15 +755,77 @@ def ajustes(cfg, paso='', dificultad=None):
     return {**base, **dif_cfg, **paso_cfg}
 
 
+def lista_reservas(cfg_rol):
+    """Devuelve la lista ordenada de configuraciones de reserva, heredando del rol los campos no redefinidos."""
+    raw = cfg_rol.get('reserva')
+    if not raw:
+        return []
+    items = [raw] if isinstance(raw, dict) else list(raw)
+    base = {k: cfg_rol[k] for k in ('harness', 'model', 'effort') if k in cfg_rol}
+    if 'instructions' in cfg_rol:
+        base['instructions'] = cfg_rol['instructions']
+    resultado = []
+    for it in items:
+        if isinstance(it, dict):
+            resultado.append({**base, **it})
+    return resultado
+
+
 def rechazos(root, iid):
-    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO."""
+    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
     if iid and (root / METRICAS).exists():
         for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
             f = json.loads(linea) if linea.strip() else {}
-            if f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
+            if f.get('id') == iid and f.get('tipo') == 'promocion':
+                n = 0
+            elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
                 n = n + 1 if f['veredicto'] == 'RECHAZADO' else 0
     return n
+
+
+def reintentos_acumulados(root, iid):
+    """(ejecuciones_paso, rechazos_hades) desde la última subida o inicio."""
+    pasos = 0
+    rech = 0
+    if not iid or not (root / METRICAS).exists():
+        return 0, 0
+    for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
+        if not linea.strip():
+            continue
+        try:
+            f = json.loads(linea)
+        except Exception:
+            continue
+        if f.get('id') != iid:
+            continue
+        if f.get('tipo') == 'promocion':
+            pasos = 0
+            rech = 0
+            continue
+        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota'):
+            pasos += 1
+        elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('veredicto'):
+            rech = rech + 1 if f['veredicto'] == 'RECHAZADO' else 0
+    return pasos, rech
+
+
+def comprobar_promocion(root, iid):
+    """Comprueba si un ID debe promocionar de dificultad tras reintentos o rechazos seguidos.
+    Retorna (debe_promover, motivo)."""
+    dif = dificultad_de(root, iid)
+    if dif not in ('sencilla', 'media'):
+        return False, ''
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    tiene_dificultades = bool(cfg_dev.get('dificultad'))
+    esc = cfg_dev.get('escalada') or {}
+    tope = esc.get('rechazos', 2) if esc else (2 if tiene_dificultades else 3)
+    pasos, rech = reintentos_acumulados(root, iid)
+    if pasos > 2:
+        return True, f'{pasos} ejecuciones de paso'
+    if rech >= tope:
+        return True, f'{rech} rechazos seguidos de Hades'
+    return False, ''
 
 
 def escalada(root, rol, cfg, iid):
@@ -955,45 +1073,82 @@ def agente(root, rol, prompt):
             p_inst = root / p_inst
         if not p_inst.exists():
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
-    harness = cfg.get('harness', 'claude')
-    sesion = buscar_sesion_agente(root, rol, iid, harness)
-    es_reanudacion = bool(sesion)
-    prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
-    base = base_comando_agente(harness, prompt_texto, sesion=sesion)
-    if not base:
-        sys.exit(f'Arnés no soportado para roles: {harness}')
-    exe = shutil.which(base[0])
-    if not exe:
-        sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
-    cmd = con_modelo([exe] + base[1:], harness, cfg)
-    codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
-    if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
-        prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
-        base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
-        cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg)
-        codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
 
-    cuota = espera_cuota(salida) if codigo else None
-    veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+    reservas = lista_reservas(cfg)
+    configs_a_probar = [cfg] + reservas
+    cuotas_acumuladas = []
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
-    registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
-                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}),
-                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}),
-                     **({'escalado': True} if escalado else {}), **m})
-    if cuota is not None:
-        print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
-              'el bucle esperará la cuota y reintentará.', flush=True)
-    elif veredicto and veredicto[-1] == 'RECHAZADO':
-        print(tope_de_rechazos(root, iid), flush=True)
+
+    for idx_cfg, cfg_actual in enumerate(configs_a_probar):
+        harness = cfg_actual.get('harness', 'claude')
+        hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
+        sesion = buscar_sesion_agente(root, rol, iid, harness)
+        es_reanudacion = bool(sesion)
+        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
+        base = base_comando_agente(harness, prompt_texto, sesion=sesion)
+        if not base:
+            sys.exit(f'Arnés no soportado para roles: {harness}')
+        exe = shutil.which(base[0])
+        if not exe:
+            sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+        cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
+        codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+        if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
+            prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
+            base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
+            cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
+            codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
+
+        cuota = espera_cuota(salida) if codigo else None
+        if cuota is not None:
+            cuotas_acumuladas.append(cuota)
+            if hay_mas_reservas:
+                registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                                 'arnes': harness, 'codigo': codigo,
+                                 **({'escalado': True} if escalado else {}), **m})
+                print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
+                      f'conmutando a reserva...', flush=True)
+                continue
+            else:
+                menor_cuota = min(cuotas_acumuladas)
+                veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+                registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                                 'arnes': harness, 'codigo': codigo,
+                                 **({'veredicto': veredicto[-1]} if veredicto else {}),
+                                 'sin_cuota': True, 'espera_s': menor_cuota,
+                                 **({'escalado': True} if escalado else {}), **m})
+                print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
+                      'el bucle esperará la cuota y reintentará.', flush=True)
+                return codigo
+
+        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+        registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                         'arnes': harness, 'codigo': codigo,
+                         **({'veredicto': veredicto[-1]} if veredicto else {}),
+                         **({'escalado': True} if escalado else {}), **m})
+        if veredicto and veredicto[-1] == 'RECHAZADO':
+            print(tope_de_rechazos(root, iid), flush=True)
+        return codigo
+
     return codigo
 
 
 def tope_de_rechazos(root, iid):
     """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
-    esc = rol_de(root, 'task-dev')[1].get('escalada') or {}
-    tope, n = (esc.get('rechazos', 2) if esc else 3), rechazos(root, iid)
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    esc = cfg_dev.get('escalada') or {}
+    tiene_dificultades = bool(cfg_dev.get('dificultad'))
+    dif = dificultad_de(root, iid) if iid else 'media'
+    puede_subir = tiene_dificultades and dif in ('sencilla', 'media')
+
+    tope = esc.get('rechazos', 2) if esc else (2 if tiene_dificultades else 3)
+    n = rechazos(root, iid)
     if n < tope or n % tope:
         return ''
+    if puede_subir:
+        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que '
+                'tengas en la rama, explica en tu salida qué falla y termina el paso sin cambiar estados: el bucle '
+                'subirá la dificultad de la tarea y la relanzará con el perfil del nuevo nivel.')
     if not esc or os.environ.get('ORQUESTAR_ESCALADA'):
         tras = ', también tras la escalada' if esc else ''
         return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas{tras}: '
@@ -1409,8 +1564,14 @@ def bucle(a, root):
                 return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama}.')
             git('checkout', '-q', rama)
 
-        antes = firma(root, a.docs)
         dif = dificultad_de(root, arg) if arg else None
+        if paso in ('task-dev', 'bug-fix') and arg:
+            debe, motivo = comprobar_promocion(root, arg)
+            if debe:
+                nueva_dif = promover_dificultad(root, arg, motivo=motivo)
+                if nueva_dif:
+                    dif = nueva_dif
+        antes = firma(root, a.docs)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif)
         cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
@@ -1421,21 +1582,62 @@ def bucle(a, root):
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
-        f_met = root / METRICAS
-        n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
-        arnes_paso = a.cmd or arnes(a, cfg_rol)
-        sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
-        if sesion_paso:
-            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol, sesion=sesion_paso)
-        else:
-            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
-        cuota = espera_cuota(salida) if codigo else None
-        if cuota is None and f_met.exists():
-            nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
-            cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
-                          if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+        reservas = lista_reservas(cfg_rol)
+        configs_a_probar = [cfg_rol] + reservas
+        cuotas_paso = []
+        sesion_anterior = None
+        arnes_anterior = None
+        codigo = 1
+        m = {}
+        salida = ''
+        cuota = None
+        cfg_usada = cfg_rol
+
+        for idx_cfg, cfg_actual in enumerate(configs_a_probar):
+            cfg_usada = cfg_actual
+            f_met = root / METRICAS
+            n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+            arnes_paso = a.cmd or arnes(a, cfg_actual)
+
+            if idx_cfg == 0:
+                sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
+            elif arnes_paso == arnes_anterior:
+                sesion_paso = sesion_anterior
+            else:
+                sesion_paso = None
+
+            if sesion_paso:
+                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+            else:
+                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+
+            cuota_propia = espera_cuota(salida) if codigo else None
+            hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
+
+            if codigo and cuota_propia is not None:
+                cuotas_paso.append(cuota_propia)
+                if hay_mas_reservas:
+                    registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                     'rama': git('branch', '--show-current'),
+                                     'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
+                                     **({'escalado': True} if escalado else {})})
+                    print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
+                          f'conmutando a reserva...', flush=True)
+                    arnes_anterior = arnes_paso
+                    sesion_anterior = m.get('sesion')
+                    continue
+                else:
+                    cuota = min(cuotas_paso)
+                    break
+            else:
+                if cuota_propia is None and f_met.exists():
+                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+                break
+
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
+                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada), 'codigo': codigo, **m,
                          **({'escalado': True} if escalado else {}),
                          **({'sin_cuota': True} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
@@ -1465,6 +1667,13 @@ def bucle(a, root):
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')
             if sin_progreso >= a.reintentos:
+                if paso in ('task-dev', 'bug-fix') and arg:
+                    dif_actual = dificultad_de(root, arg)
+                    if dif_actual in ('sencilla', 'media'):
+                        nueva_dif = promover_dificultad(root, arg, motivo=f'tras {sin_progreso} intentos sin progreso')
+                        if nueva_dif:
+                            sin_progreso = 0
+                            continue
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
