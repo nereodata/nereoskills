@@ -1113,6 +1113,11 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertIsNone(ejecuciones[1][1])
         # No debió entrar en esperar()
         mock_esperar.assert_not_called()
+        metricas = [json.loads(l) for l in (self.root / motor.METRICAS).read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(metricas), 2)
+        self.assertTrue(metricas[0].get('sin_cuota'))
+        pasos, _ = motor.reintentos_acumulados(self.root, 'T-ADV-0001')
+        self.assertEqual(pasos, 1)
 
     def test_loop_exhausts_all_reservas_enters_wait(self):
         cfg = {

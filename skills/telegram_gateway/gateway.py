@@ -165,10 +165,9 @@ def invocar(root, prompt, cfg, sesion=None):
 def conversar(root, usuario, texto):
     """Mantiene la conversación con el modelo del proyecto conservando la sesión."""
     cfg_todo = motor.config(root) if hasattr(motor, 'config') else {}
-    if 'telegram' in cfg_todo:
-        cfg = cfg_todo['telegram']
-    else:
-        cfg = cfg_todo.get('atenea', {})
+    cfg_atenea = cfg_todo.get('atenea', {}) if isinstance(cfg_todo.get('atenea'), dict) else {}
+    cfg_tg = cfg_todo.get('telegram', {}) if isinstance(cfg_todo.get('telegram'), dict) else {}
+    cfg = {**cfg_atenea, **cfg_tg}
     harness = cfg.get('harness', 'claude')
     sesion = obtener_sesion(root, usuario, harness)
     prompt = construir_prompt(root, texto)

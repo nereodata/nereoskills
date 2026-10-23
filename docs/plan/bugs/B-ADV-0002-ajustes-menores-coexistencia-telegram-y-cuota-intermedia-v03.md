@@ -5,7 +5,7 @@ type: bug
 weight: 100
 dificultad: sencilla
 version: "v0.4.0"
-status: planned
+status: completed
 created_at: 2026-10-23
 updated_at: 2026-10-23
 origen: "revisar-version v0.3 (docs/review/versions/v0.3-arquitectura.md)"
@@ -24,6 +24,18 @@ La revisión transversal de código y arquitectura de `v0.3` ([`docs/review/vers
 2. **[🔵 BAJA] Intento de paso intermedio agotado por cuota y conmutado a reserva suma en `reintentos_acumulados`**:
    - **Causa raíz**: En `skills/orquestar/orquestar.py` (`bucle()`, líneas 1620–1623), cuando el intento de paso falla por cuota propia (`cuota_propia is not None`) y existe una `reserva` disponible (`hay_mas_reservas`), la métrica intermedia del paso se registra sin `'sin_cuota': True`.
    - **Comportamiento observado vs esperado**: `reintentos_acumulados()` (línea 806) cuenta cada entrada `tipo == 'paso'` con `not f.get('sin_cuota')`, por lo que ese intento fallido por cuota computa hacia la subida de dificultad. Añadir `'sin_cuota': True` al registro intermedio de paso evita contabilizar fallos de cuota como reintentos de dificultad.
+
+## 📋 Triaje de Alcance
+
+- [x] **Subfase A: Definición** [SKIP]: Ajustes técnicos internos derivados de revisión de arquitectura v0.3; no alteran requisitos ni especificaciones funcionales externas.
+- [x] **Subfase B: Diseño** [SKIP]: Solución directa y localizada sin alternativas complejas ni impacto en la arquitectura de capas.
+- [x] **Subfase C1: Pruebas** [EXEC]: Tests unitarios en `tests/test_telegram_gateway.py` y `tests/test_orquestar.py` para capturar ambos escenarios antes del fix (revisión de Hades APROBADO 10.0/10 en `docs/review/test_reviews/B-ADV-0002-test-review.md`).
+- [x] **Subfase C2: Corrección** [EXEC]: Fusión segura `{**cfg_atenea, **cfg_tg}` comprobando `isinstance(..., dict)` en `gateway.py` y marcado de `sin_cuota: True` en intento intermedio de `orquestar.py`.
+- [x] **Subfase D: QA** [EXEC]: Revisión de código por Hades APROBADO 10.0/10 en `docs/review/code_reviews/B-ADV-0002-code-review.md`.
+- [x] **Subfase E: Documentación** [SKIP]: No afecta guías de usuario ni manuales externos.
+- [x] **Subfase F: Cierre** [EXEC]: Cierre del bug y commit semántico `fix(B-ADV-0002)`.
+
+**Verificación al cierre**: `python -m unittest tests/test_telegram_gateway.py tests/test_orquestar.py` (ejercita la coexistencia de configuración en gateway y la gestión de métricas de cuota/reintentos en orquestar).
 
 ## 📋 Reproducir
 

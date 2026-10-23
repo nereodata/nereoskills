@@ -1620,7 +1620,8 @@ def bucle(a, root):
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
                                      'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
-                                     **({'escalado': True} if escalado else {})})
+                                     **({'escalado': True} if escalado else {}),
+                                     'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
                           f'conmutando a reserva...', flush=True)
                     arnes_anterior = arnes_paso
