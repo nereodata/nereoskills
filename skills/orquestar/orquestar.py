@@ -699,6 +699,22 @@ def ajustes(cfg, paso='', dificultad=None):
     return {**base, **dif_cfg, **paso_cfg}
 
 
+def lista_reservas(cfg_rol):
+    """Devuelve la lista ordenada de configuraciones de reserva, heredando del rol los campos no redefinidos."""
+    raw = cfg_rol.get('reserva')
+    if not raw:
+        return []
+    items = [raw] if isinstance(raw, dict) else list(raw)
+    base = {k: cfg_rol[k] for k in ('harness', 'model', 'effort') if k in cfg_rol}
+    if 'instructions' in cfg_rol:
+        base['instructions'] = cfg_rol['instructions']
+    resultado = []
+    for it in items:
+        if isinstance(it, dict):
+            resultado.append({**base, **it})
+    return resultado
+
+
 def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO."""
     n = 0
@@ -955,36 +971,63 @@ def agente(root, rol, prompt):
             p_inst = root / p_inst
         if not p_inst.exists():
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
-    harness = cfg.get('harness', 'claude')
-    sesion = buscar_sesion_agente(root, rol, iid, harness)
-    es_reanudacion = bool(sesion)
-    prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
-    base = base_comando_agente(harness, prompt_texto, sesion=sesion)
-    if not base:
-        sys.exit(f'Arnés no soportado para roles: {harness}')
-    exe = shutil.which(base[0])
-    if not exe:
-        sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
-    cmd = con_modelo([exe] + base[1:], harness, cfg)
-    codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
-    if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
-        prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
-        base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
-        cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg)
-        codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
 
-    cuota = espera_cuota(salida) if codigo else None
-    veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+    reservas = lista_reservas(cfg)
+    configs_a_probar = [cfg] + reservas
+    cuotas_acumuladas = []
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
-    registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
-                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}),
-                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}),
-                     **({'escalado': True} if escalado else {}), **m})
-    if cuota is not None:
-        print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
-              'el bucle esperará la cuota y reintentará.', flush=True)
-    elif veredicto and veredicto[-1] == 'RECHAZADO':
-        print(tope_de_rechazos(root, iid), flush=True)
+
+    for idx_cfg, cfg_actual in enumerate(configs_a_probar):
+        harness = cfg_actual.get('harness', 'claude')
+        hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
+        sesion = buscar_sesion_agente(root, rol, iid, harness)
+        es_reanudacion = bool(sesion)
+        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
+        base = base_comando_agente(harness, prompt_texto, sesion=sesion)
+        if not base:
+            sys.exit(f'Arnés no soportado para roles: {harness}')
+        exe = shutil.which(base[0])
+        if not exe:
+            sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+        cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
+        codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+        if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
+            prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
+            base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
+            cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
+            codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
+
+        cuota = espera_cuota(salida) if codigo else None
+        if cuota is not None:
+            cuotas_acumuladas.append(cuota)
+            if hay_mas_reservas:
+                registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                                 'arnes': harness, 'codigo': codigo,
+                                 **({'escalado': True} if escalado else {}), **m})
+                print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
+                      f'conmutando a reserva...', flush=True)
+                continue
+            else:
+                menor_cuota = min(cuotas_acumuladas)
+                veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+                registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                                 'arnes': harness, 'codigo': codigo,
+                                 **({'veredicto': veredicto[-1]} if veredicto else {}),
+                                 'sin_cuota': True, 'espera_s': menor_cuota,
+                                 **({'escalado': True} if escalado else {}), **m})
+                print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
+                      'el bucle esperará la cuota y reintentará.', flush=True)
+                return codigo
+
+        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+        registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                         'arnes': harness, 'codigo': codigo,
+                         **({'veredicto': veredicto[-1]} if veredicto else {}),
+                         **({'escalado': True} if escalado else {}), **m})
+        if veredicto and veredicto[-1] == 'RECHAZADO':
+            print(tope_de_rechazos(root, iid), flush=True)
+        return codigo
+
     return codigo
 
 
@@ -1421,21 +1464,62 @@ def bucle(a, root):
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
-        f_met = root / METRICAS
-        n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
-        arnes_paso = a.cmd or arnes(a, cfg_rol)
-        sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
-        if sesion_paso:
-            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol, sesion=sesion_paso)
-        else:
-            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
-        cuota = espera_cuota(salida) if codigo else None
-        if cuota is None and f_met.exists():
-            nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
-            cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
-                          if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+        reservas = lista_reservas(cfg_rol)
+        configs_a_probar = [cfg_rol] + reservas
+        cuotas_paso = []
+        sesion_anterior = None
+        arnes_anterior = None
+        codigo = 1
+        m = {}
+        salida = ''
+        cuota = None
+        cfg_usada = cfg_rol
+
+        for idx_cfg, cfg_actual in enumerate(configs_a_probar):
+            cfg_usada = cfg_actual
+            f_met = root / METRICAS
+            n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+            arnes_paso = a.cmd or arnes(a, cfg_actual)
+
+            if idx_cfg == 0:
+                sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
+            elif arnes_paso == arnes_anterior:
+                sesion_paso = sesion_anterior
+            else:
+                sesion_paso = None
+
+            if sesion_paso:
+                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+            else:
+                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+
+            cuota_propia = espera_cuota(salida) if codigo else None
+            hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
+
+            if codigo and cuota_propia is not None:
+                cuotas_paso.append(cuota_propia)
+                if hay_mas_reservas:
+                    registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                     'rama': git('branch', '--show-current'),
+                                     'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
+                                     **({'escalado': True} if escalado else {})})
+                    print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
+                          f'conmutando a reserva...', flush=True)
+                    arnes_anterior = arnes_paso
+                    sesion_anterior = m.get('sesion')
+                    continue
+                else:
+                    cuota = min(cuotas_paso)
+                    break
+            else:
+                if cuota_propia is None and f_met.exists():
+                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+                break
+
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
+                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada), 'codigo': codigo, **m,
                          **({'escalado': True} if escalado else {}),
                          **({'sin_cuota': True} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:

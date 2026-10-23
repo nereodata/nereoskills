@@ -791,5 +791,207 @@ class DificultadTests(unittest.TestCase):
         self.assertEqual(lanzados[0][idx + 1], 'gemini-low')
 
 
+class ReservaCuotaTests(unittest.TestCase):
+    """Modelos de reserva ante agotamiento de cuota en pasos y subagentes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lista_reservas_normalizes_object_and_list_with_field_inheritance(self):
+        # 1. Sin reserva
+        cfg_vacio = {'harness': 'claude', 'model': 'opus'}
+        self.assertEqual(motor.lista_reservas(cfg_vacio), [])
+
+        # 2. Objeto único con herencia de harness y effort
+        cfg_obj = {
+            'harness': 'claude',
+            'model': 'claude-opus-5-5',
+            'effort': 'high',
+            'reserva': {'model': 'claude-sonnet-4-6'}
+        }
+        res_obj = motor.lista_reservas(cfg_obj)
+        self.assertEqual(len(res_obj), 1)
+        self.assertEqual(res_obj[0], {
+            'harness': 'claude',
+            'model': 'claude-sonnet-4-6',
+            'effort': 'high'
+        })
+
+        # 3. Lista ordenada con sobreescritura y herencia parcial
+        cfg_lista = {
+            'harness': 'claude',
+            'model': 'opus',
+            'effort': 'medium',
+            'reserva': [
+                {'model': 'sonnet'},
+                {'harness': 'agy', 'model': 'gemini-3.8-flash-medium'}
+            ]
+        }
+        res_lista = motor.lista_reservas(cfg_lista)
+        self.assertEqual(len(res_lista), 2)
+        self.assertEqual(res_lista[0], {'harness': 'claude', 'model': 'sonnet', 'effort': 'medium'})
+        self.assertEqual(res_lista[1], {'harness': 'agy', 'model': 'gemini-3.8-flash-medium', 'effort': 'medium'})
+
+    def test_agente_switches_to_reserva_on_quota_and_succeeds(self):
+        cfg = {
+            'hades': {
+                'harness': 'claude',
+                'model': 'claude-opus-5-5',
+                'reserva': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium'}
+            }
+        }
+        llamadas = []
+
+        def fake_lanzar(cmd, root, harness, entrada=None):
+            llamadas.append((cmd, harness))
+            if harness == 'claude':
+                return 1, {'sesion': 'sess-cl'}, 'Error: 429 out of credits'
+            return 0, {'sesion': 'sess-agy'}, '## Informe\n- **Veredicto**: APROBADO (media 9)'
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.dict(motor.os.environ, env, clear=True),
+              patch.object(motor, 'lanzar', side_effect=fake_lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            codigo = motor.agente(self.root, 'hades', 'revisa')
+
+        self.assertEqual(codigo, 0)
+        self.assertEqual(len(llamadas), 2)
+        self.assertEqual(llamadas[0][1], 'claude')
+        self.assertEqual(llamadas[1][1], 'agy')
+
+        metricas = [json.loads(l) for l in (self.root / motor.METRICAS).read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(metricas), 2)
+        # Primer intento: agotó cuota pero no debe tener sin_cuota: True porque conmutó a reserva
+        self.assertEqual(metricas[0]['arnes'], 'claude')
+        self.assertEqual(metricas[0]['codigo'], 1)
+        self.assertNotIn('sin_cuota', metricas[0])
+        # Segundo intento: éxito de la reserva
+        self.assertEqual(metricas[1]['arnes'], 'agy')
+        self.assertEqual(metricas[1]['codigo'], 0)
+        self.assertEqual(metricas[1]['veredicto'], 'APROBADO')
+
+    def test_agente_exhausts_all_reservas_records_min_quota_and_fails(self):
+        cfg = {
+            'hades': {
+                'harness': 'claude',
+                'model': 'opus',
+                'reserva': [
+                    {'model': 'sonnet'},
+                    {'harness': 'agy', 'model': 'flash'}
+                ]
+            }
+        }
+        llamadas = []
+
+        def fake_lanzar(cmd, root, harness, entrada=None):
+            llamadas.append(cmd)
+            if len(llamadas) == 1:
+                return 1, {}, 'usage limit reached | try again in 1 hour'
+            if len(llamadas) == 2:
+                return 1, {}, '429 too many requests'
+            return 1, {}, 'out of credits | try again in 2 hours'
+
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.dict(motor.os.environ, env, clear=True),
+              patch.object(motor, 'lanzar', side_effect=fake_lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            codigo = motor.agente(self.root, 'hades', 'revisa')
+
+        self.assertEqual(codigo, 1)
+        self.assertEqual(len(llamadas), 3)
+
+        metricas = [json.loads(l) for l in (self.root / motor.METRICAS).read_text(encoding='utf-8').splitlines()]
+        self.assertEqual(len(metricas), 3)
+        self.assertNotIn('sin_cuota', metricas[0])
+        self.assertNotIn('sin_cuota', metricas[1])
+        self.assertTrue(metricas[2]['sin_cuota'])
+        # Menor cuota de las tres (3720s, 1800s, 7320s) -> 1800s
+        self.assertEqual(metricas[2]['espera_s'], 1800)
+
+    def test_loop_retries_immediately_with_reserva_on_quota_without_waiting(self):
+        cfg = {
+            'artemisa': {
+                'harness': 'claude',
+                'model': 'opus',
+                'reserva': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium'}
+            }
+        }
+        ejecuciones = []
+
+        def fake_ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
+            ejecuciones.append((rol, sesion))
+            if len(ejecuciones) == 1:
+                return 1, {'sesion': 'sess-dev-1'}, 'out of credits'
+            return 0, {'sesion': 'sess-dev-2'}, 'ok'
+
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False,
+                                        max_pasos=2, reintentos=2, espera_max=2, cmd=None)
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'estado', side_effect=[('PASO', 'task-dev', 'T-ADV-0001', ''),
+                                                         ('FIN', 'Cerrado.')]),
+              patch.object(motor, 'ejecutar', side_effect=fake_ejecutar),
+              patch.object(motor, 'esperar') as mock_esperar,
+              patch.object(motor, 'firma', side_effect=['a', 'b', 'b']),
+              patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'ingerir', return_value=[]),
+              patch.object(motor, 'avisar'),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            codigo = motor.bucle(args, self.root)
+
+        self.assertEqual(codigo, 0)
+        self.assertEqual(len(ejecuciones), 2)
+        # Primer intento con claude
+        self.assertEqual(ejecuciones[0][0]['harness'], 'claude')
+        # Segundo intento con agy (reserva)
+        self.assertEqual(ejecuciones[1][0]['harness'], 'agy')
+        # Al cambiar de arnés, la sesión debe ser None (sesión nueva)
+        self.assertIsNone(ejecuciones[1][1])
+        # No debió entrar en esperar()
+        mock_esperar.assert_not_called()
+
+    def test_loop_exhausts_all_reservas_enters_wait(self):
+        cfg = {
+            'artemisa': {
+                'harness': 'claude',
+                'model': 'opus',
+                'reserva': {'harness': 'claude', 'model': 'sonnet'}
+            }
+        }
+        ejecuciones = []
+
+        def fake_ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
+            ejecuciones.append((rol, sesion))
+            return 1, {'sesion': 'sess-cl'}, 'out of credits'
+
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False,
+                                        max_pasos=2, reintentos=2, espera_max=2, cmd=None)
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'estado', side_effect=[('PASO', 'task-dev', 'T-ADV-0001', ''),
+                                                         ('FIN', 'Cerrado.')]),
+              patch.object(motor, 'ejecutar', side_effect=fake_ejecutar),
+              patch.object(motor, 'esperar', return_value=True) as mock_esperar,
+              patch.object(motor, 'firma', return_value='a'),
+              patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'ingerir', return_value=[]),
+              patch.object(motor, 'avisar'),
+              patch.object(motor, 'excluir'),
+              patch('builtins.print')):
+            codigo = motor.bucle(args, self.root)
+
+        self.assertEqual(len(ejecuciones), 2)
+        mock_esperar.assert_called_once()
+
+
 if __name__ == '__main__':
     unittest.main()
