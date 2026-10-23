@@ -133,7 +133,7 @@ def construir_prompt_paso(root, paso, arg):
     return instruccion_agente + prompt_cuerpo + extra + nota_fuente
 
 
-def construir_prompt_agente(root, rol, prompt):
+def construir_prompt_agente(root, rol, prompt, reanudacion=False):
     """Construye el mandato para un rol con --agente citando la versión activa instalada."""
     version_dir = get_active_version_dir()
     paso = os.environ.get("ORQUESTAR_PASO", "")
@@ -148,12 +148,14 @@ def construir_prompt_agente(root, rol, prompt):
         instrucciones_str = str((version_dir / "agents" / f"{rol}.md").resolve())
 
     skills_dir = (version_dir / "skills").resolve()
-    cabecera = (
-        f'Lee "{instrucciones_str}" y actúa como ese agente; ignora el modelo de su frontmatter. '
-        f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
-    )
-    if es_repositorio_fuente_adevv(root):
-        cabecera += 'Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.\n\n'
+    cabecera = ""
+    if not reanudacion:
+        cabecera += (
+            f'Lee "{instrucciones_str}" y actúa como ese agente; ignora el modelo de su frontmatter. '
+            f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
+        )
+        if es_repositorio_fuente_adevv(root):
+            cabecera += 'Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.\n\n'
     f_ev = Path(root) / EVIDENCIAS
     if f_ev.exists():
         try:
@@ -701,7 +703,10 @@ def con_modelo(cmd, harness, rol):
         cmd += (['--model', rol['model']] if rol.get('model') else []) + \
                (['--effort', rol['effort']] if harness == 'agy' and rol.get('effort') else [])
     elif harness == 'codex' and '--model' not in cmd and '-m' not in cmd:
-        i = cmd.index('exec') + 1
+        if 'resume' in cmd:
+            i = cmd.index('resume') + 2
+        else:
+            i = cmd.index('exec') + 1
         cmd[i:i] = (['-m', rol['model']] if rol.get('model') else []) + \
                    (['-c', f'model_reasoning_effort="{rol["effort"]}"'] if rol.get('effort') else [])
     return cmd
@@ -712,7 +717,7 @@ def arnes(a, rol):
     return None if a.cmd else a.harness or rol.get('harness', 'claude')
 
 
-def comando(a, prompt, root=None, rol=None):
+def comando(a, prompt, root=None, rol=None, sesion=None):
     rol = rol if rol is not None else rol_de(root or Path.cwd(), 'task-dev')[1]
     harness = arnes(a, rol)
     plantilla = (shlex.split(a.cmd, posix=os.name != 'nt') if a.cmd else HARNESS[harness])
@@ -720,7 +725,17 @@ def comando(a, prompt, root=None, rol=None):
     exe = shutil.which(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
-    cmd = [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+    if sesion and not a.cmd:
+        if harness == 'claude':
+            cmd = [exe, '--resume', sesion] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+        elif harness == 'codex':
+            cmd = [exe, 'exec', 'resume', sesion] + [p.replace('{prompt}', prompt) for p in plantilla[2:]]
+        elif harness == 'agy':
+            cmd = [exe, '--conversation', sesion] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+        else:
+            cmd = [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
+    else:
+        cmd = [exe] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
     if harness and rol.get('harness', harness) == harness:
         cmd = con_modelo(cmd, harness, rol)
     if a.presupuesto and harness == 'claude':
@@ -746,10 +761,13 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
         if d.get('status') != 'SUCCESS':
             print(f"[orquestar] agy status: {d.get('status')} (returncode: {r.returncode})", flush=True)
+        sesion_id = d.get('conversation_id') or d.get('session_id')
         m.update(turnos=d.get('num_turns'), error=d.get('status') != 'SUCCESS',
                  modelos={modelo: {'entrada': u.get('input_tokens'), 'salida': u.get('output_tokens'),
                                    'cache_leida': u.get('cache_read_tokens'),
                                    'razonamiento': u.get('thinking_tokens')}})
+        if sesion_id:
+            m['sesion'] = sesion_id
         return (1 if m['error'] and not r.returncode else r.returncode), m, salida
     if harness == 'claude' and '--output-format' in cmd:
         r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
@@ -762,14 +780,18 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
             print(salida, flush=True)
             return r.returncode, m, salida
         print(d.get('result', ''), flush=True)
+        sesion_id = d.get('session_id') or d.get('sessionId')
         m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
                  subagentes=(d.get('subagent_stats') or {}).get('spawned'), error=d.get('is_error'),
                  modelos={k: {'entrada': u.get('inputTokens'), 'salida': u.get('outputTokens'),
                               'cache_leida': u.get('cacheReadInputTokens'),
                               'cache_escrita': u.get('cacheCreationInputTokens'), 'coste_usd': u.get('costUSD')}
                           for k, u in (d.get('modelUsage') or {}).items()})
+        if sesion_id:
+            m['sesion'] = sesion_id
         return (1 if d.get('is_error') and not r.returncode else r.returncode), m, salida
     lineas, uso, turnos = [], {}, 0
+    sesion_id = None
     with subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           encoding='utf-8', errors='replace', env=env) as p:
@@ -786,6 +808,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
                     pass
             if evento is None:
                 print(linea, end='', flush=True)
+            elif evento.get('type') == 'thread.started':
+                sesion_id = evento.get('thread_id') or (evento.get('thread', {}).get('id') if isinstance(evento.get('thread'), dict) else None)
             elif evento.get('type') == 'item.completed' and evento.get('item', {}).get('type') == 'agent_message':
                 print(evento['item'].get('text', ''), flush=True)
             elif evento.get('type') == 'turn.completed':
@@ -795,6 +819,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
             elif evento.get('type') in ('error', 'turn.failed'):
                 print(json.dumps(evento, ensure_ascii=False), flush=True)
     m = {'duracion_s': round(time.monotonic() - inicio)}
+    if sesion_id:
+        m['sesion'] = sesion_id
     if uso:
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x in ('-m', '--model')), 'codex')
         m.update(turnos=turnos, modelos={modelo: {
@@ -804,10 +830,88 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
     return p.returncode, m, ''.join(lineas[-200:])
 
 
-def ejecutar(a, root, prompt, env=None, rol=None):
+def buscar_sesion_agente(root, rol, iid, arnes):
+    """Busca la sesión previa de un rol dentro del intento en curso de la tarea."""
+    if not iid:
+        return None
+    f = root / METRICAS
+    if not f.exists():
+        return None
+    try:
+        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
+    except Exception:
+        return None
+
+    es_escalada = bool(os.environ.get('ORQUESTAR_ESCALADA'))
+    for e in reversed(lineas):
+        if e.get('id') and e.get('id') != iid:
+            break
+        if e.get('tipo') == 'paso' and e.get('paso') == 'especificar':
+            break
+        if e.get('tipo') == 'paso' and e.get('escalado') and not es_escalada:
+            break
+        if bool(e.get('escalado')) != es_escalada and e.get('tipo') in ('paso', 'agente'):
+            break
+        if e.get('tipo') == 'paso' and not e.get('sin_cuota'):
+            break
+        if (e.get('tipo') == 'agente' and e.get('rol') == rol and e.get('id') == iid
+                and e.get('arnes') == arnes and e.get('sesion')):
+            return e['sesion']
+    return None
+
+
+def buscar_sesion_paso(root, paso, iid, arnes):
+    """Busca la sesión para reanudar un paso interrumpido inmediatamente antes por cuota."""
+    f = root / METRICAS
+    if not f.exists():
+        return None
+    try:
+        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
+    except Exception:
+        return None
+    for e in reversed(lineas):
+        if e.get('tipo') in ('espera', 'verificacion'):
+            continue
+        if e.get('tipo') == 'paso':
+            if (e.get('paso') == paso and e.get('id') == iid
+                    and e.get('arnes') == arnes and e.get('sin_cuota') and e.get('sesion')):
+                return e['sesion']
+            break
+        if e.get('id') and e.get('id') != iid:
+            break
+    return None
+
+
+def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
     """Lanza el paso con el arnés y el modelo de su rol y devuelve (código, métricas, salida)."""
     rol = rol if rol is not None else rol_de(root, 'task-dev')[1]
-    return lanzar(comando(a, prompt, root, rol), root, arnes(a, rol), env=env)
+    harness = arnes(a, rol)
+    if sesion:
+        cmd = comando(a, prompt, root, rol, sesion=sesion)
+        codigo, m, salida = lanzar(cmd, root, harness, env=env)
+        if codigo != 0 and espera_cuota(salida) is None:
+            cmd_fresh = comando(a, prompt, root, rol, sesion=None)
+            return lanzar(cmd_fresh, root, harness, env=env)
+        return codigo, m, salida
+    return lanzar(comando(a, prompt, root, rol), root, harness, env=env)
+
+
+def base_comando_agente(harness, prompt, sesion=None):
+    if harness == 'claude':
+        if sesion:
+            return ['claude', '--resume', sesion, '-p', '--dangerously-skip-permissions', '--output-format', 'json']
+        return ['claude', '-p', '--dangerously-skip-permissions', '--output-format', 'json']
+    elif harness == 'codex':
+        if sesion:
+            return ['codex', 'exec', 'resume', sesion, '--json', '-c', 'approval_policy="never"',
+                    '--sandbox', 'workspace-write', '-']
+        return ['codex', 'exec', '--json', '-c', 'approval_policy="never"',
+                '--sandbox', 'workspace-write', '-']
+    elif harness == 'agy':
+        if sesion:
+            return ['agy', '--conversation', sesion, '--dangerously-skip-permissions', '--output-format', 'json', '-p', prompt]
+        return ['agy', '--dangerously-skip-permissions', '--output-format', 'json', '-p', prompt]
+    return None
 
 
 def agente(root, rol, prompt):
@@ -821,26 +925,30 @@ def agente(root, rol, prompt):
         if not p_inst.exists():
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
     harness = cfg.get('harness', 'claude')
-    prompt = construir_prompt_agente(root, rol, prompt)
-    if harness == 'claude':
-        base = ['claude', '-p', '--dangerously-skip-permissions', '--output-format', 'json']
-    elif harness == 'codex':
-        base = ['codex', 'exec', '--ephemeral', '--json', '-c', 'approval_policy="never"',
-                '--sandbox', 'workspace-write', '-']
-    elif harness == 'agy':
-        base = ['agy', '--dangerously-skip-permissions', '--output-format', 'json', '-p', prompt]
-    else:
+    sesion = buscar_sesion_agente(root, rol, iid, harness)
+    es_reanudacion = bool(sesion)
+    prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
+    base = base_comando_agente(harness, prompt_texto, sesion=sesion)
+    if not base:
         sys.exit(f'Arnés no soportado para roles: {harness}')
     exe = shutil.which(base[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = con_modelo([exe] + base[1:], harness, cfg)
-    codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt)
+    codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+    if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
+        prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
+        base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
+        cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg)
+        codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
+
     cuota = espera_cuota(salida) if codigo else None
     veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+    escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
     registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
                      'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}),
-                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}), **m})
+                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}),
+                     **({'escalado': True} if escalado else {}), **m})
     if cuota is not None:
         print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
               'el bucle esperará la cuota y reintentará.', flush=True)
@@ -1283,7 +1391,12 @@ def bucle(a, root):
             env['ORQUESTAR_ESCALADA'] = '1'
         f_met = root / METRICAS
         n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
-        codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
+        arnes_paso = a.cmd or arnes(a, cfg_rol)
+        sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
+        if sesion_paso:
+            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol, sesion=sesion_paso)
+        else:
+            codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
         cuota = espera_cuota(salida) if codigo else None
         if cuota is None and f_met.exists():
             nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
