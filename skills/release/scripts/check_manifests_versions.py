@@ -47,14 +47,31 @@ if hasattr(sys.stdout, "buffer"):
 def load_yaml(path: Path):
     try:
         import yaml  # type: ignore
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
     except ImportError:
-        print(
-            "ERROR: PyYAML no esta instalado. Ejecuta: pip install pyyaml",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        pass
+
+    for base in [path.resolve(), Path(__file__).resolve().parents[3]]:
+        candidate = base
+        while candidate != candidate.parent:
+            if (candidate / "adevv").is_dir():
+                if str(candidate) not in sys.path:
+                    sys.path.insert(0, str(candidate))
+                break
+            candidate = candidate.parent
+
+    try:
+        from adevv.yaml_lite import load_yaml as adevv_load_yaml
+        return adevv_load_yaml(path)
+    except ImportError:
+        pass
+
+    print(
+        "ERROR: No se pudo cargar YAML (instala PyYAML o anade adevv al PYTHONPATH).",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
 
 def load_toml(path: Path):

@@ -12,12 +12,12 @@ outputs:
 
 Audita solo el código de producción del delta: todo lo que no es prueba, incluidos build, CI y configuración (las pruebas las revisa `/review-test`; la arquitectura, `/review-design`). Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
 
-**Análisis estático**: quien invoca entrega lint y tipado limpios sobre el delta; compruébalo con las herramientas que ya tenga el proyecto (linter, tipado, secretos, `git diff --check`; auditoría de dependencias solo si cambian los manifiestos). Fallo de tipado, compilación o secreto expuesto = 🔴; linter o vulnerabilidad = 🟠.
+**Análisis estático**: quien invoca entrega lint, tipado y chequeos de seguridad aplicables al delta (secretos, `git diff --check`; auditoría de dependencias si cambian manifiestos) en limpio; si ya constan en verde en la verificación del árbol (`--verificar`), no los relances: ejecuta con `--verificar` solo lo que falte. Fallo de tipado, compilación o secreto expuesto = 🔴; linter o vulnerabilidad = 🟠.
 
 **Evalúa (1-10 cada uno):**
 - **Corrección**: sin errores lógicos ni precondiciones implícitas; entradas, estados y valores extremos que la especificación no cubre se tratan bien.
 - **Seguridad**: credenciales, inyecciones y validación de entradas.
-- **Conformidad**: fiel al diseño de la tarea (`docs/design/[ID]-design.md`; divergencia no documentada = 🔴) y a la arquitectura del plan de plataforma (capas, stack, decisiones). Desviarse de la arquitectura sin una `DEC` en el plan de plataforma dentro del mismo delta = 🔴.
+- **Conformidad**: fiel al triaje de la tarea, a su diseño (`docs/design/[ID]-design.md`, cuando la Subfase B no se haya omitido en el triaje; divergencia no documentada = 🔴) y a la arquitectura del plan de plataforma (capas, stack, decisiones). Desviarse de la arquitectura sin una `DEC` en el plan de plataforma dentro del mismo delta = 🔴.
 - **Calidad**: estilo del proyecto, nombres claros, sin duplicación ni código muerto.
 - **Eficiencia**: complejidad y uso de recursos razonables.
 - **Documentación**: docstrings en la API pública, sin comentarios superfluos; ningún documento de usuario queda falso tras el delta.

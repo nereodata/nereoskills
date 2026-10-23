@@ -1,0 +1,17 @@
+[build-system]
+requires = []
+build-backend = "adevv._build"
+backend-path = ["."]
+
+[project]
+name = "adevv"
+version = "0.1.0"
+description = "Herramienta global para desarrollo orquestado multi-arnés"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Nereo Skills Team" }
+]
+
+[project.scripts]
+adevv = "adevv.cli:main"

@@ -23,6 +23,6 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 ## 🛠️ Uso
 Desde la raíz del proyecto, en una terminal aparte del bucle:
 ```bash
-python <ruta>/telegram_gateway/gateway.py            # escucha (long polling) hasta Ctrl+C
-python <ruta>/telegram_gateway/gateway.py --estado   # imprime lo que respondería /estado
+adevv telegram            # escucha (long polling) hasta Ctrl+C
+adevv telegram --estado   # imprime lo que respondería /estado
 ```

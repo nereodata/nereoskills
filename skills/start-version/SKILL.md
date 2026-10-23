@@ -33,6 +33,7 @@ Actualizar la versión a `X.Y.0` (o `vX.Y.0` según el formato de cada fichero) 
 | Fichero | Campo | Formato |
 |---------|-------|---------|
 | `task_config.yaml` | `project.version` | `"vX.Y.0"` |
+| `pyproject.toml` | `[project].version` | `"X.Y.0"` (sin `v`) |
 | `app/package.json` | `version` | `"X.Y.0"` (sin `v`) |
 | `services/orchestrator/pyproject.toml` | `[project].version` | `"X.Y.0"` (sin `v`) |
 | `services/context/pyproject.toml` | `[project].version` | `"X.Y.0"` (sin `v`) |

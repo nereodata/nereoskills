@@ -13,7 +13,7 @@ description: Generador de mensajes de commit estándar
 
 Has sido invocado para generar una propuesta de mensaje de commit analizando los cambios actuales.
 
-1. Usa la herramienta `view_file` en `../skills/commit-message-generate/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) para leer las instrucciones.
+1. Usa la herramienta `view_file` en `skills/commit-message-generate/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) para leer las instrucciones.
 2. Basándote únicamente en el hilo de conversación actual, identifica la tarea/bug y los cambios realizados.
 3. Genera una única propuesta de mensaje siguiendo el estándar **Aprexx v3.0**.
 

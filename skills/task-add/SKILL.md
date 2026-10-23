@@ -81,7 +81,7 @@ updated_at: YYYY-MM-DD
 # [ID]: [Título]
 
 ## 🔗 Tarea Maestra
-- [T-[PRJ]-XXXX: Título Maestros](../../../docs/plan/tasks/T-[PRJ]-XXXX.md)
+- [T-[PRJ]-XXXX: Título Maestros](docs/plan/tasks/T-[PRJ]-XXXX.md)
 
 ## 🎯 Objetivo Técnico
 [Descripción técnica]

@@ -66,10 +66,25 @@ def parse_frontmatter(text: str) -> dict:
 def load_yaml(path: Path):
     try:
         import yaml  # type: ignore
+        with open(path, "r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    except ImportError:
+        pass
+
+    for base in [path.resolve(), Path(__file__).resolve().parents[3]]:
+        candidate = base
+        while candidate != candidate.parent:
+            if (candidate / "adevv").is_dir():
+                if str(candidate) not in sys.path:
+                    sys.path.insert(0, str(candidate))
+                break
+            candidate = candidate.parent
+
+    try:
+        from adevv.yaml_lite import load_yaml as adevv_load_yaml
+        return adevv_load_yaml(path)
     except ImportError:
         return None
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
 
 
 def collect_globs(cfg: dict) -> list[str]:

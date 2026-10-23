@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,14 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    try:
+        from adevv import yaml_lite as yaml
+    except ImportError:
+        yaml = None
 
 HARNESS = {
     'claude': ['claude', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
@@ -51,6 +60,242 @@ def git(*args, env=None):
     return r.stdout.strip()
 
 
+def get_active_version_dir():
+    """Retorna la ruta absoluta del directorio de la versión activa instalada o la raíz del repositorio."""
+    try:
+        from adevv.store import get_active_version_dir as _gavd
+        return _gavd()
+    except Exception:
+        pass
+    return Path(__file__).resolve().parents[2]
+
+
+def es_repositorio_fuente_adevv(root):
+    """Comprueba si el directorio raíz corresponde al repositorio de desarrollo de Adevv."""
+    pyproject = Path(root) / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            txt = pyproject.read_text(encoding="utf-8")
+            if 'name = "adevv"' in txt and (Path(root) / "adevv").is_dir():
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def es_carpeta_personal(path):
+    """Comprueba si la ruta es la carpeta personal del usuario."""
+    p = Path(path).resolve()
+    sim = os.environ.get("ADEVV_SIMULATED_HOME")
+    if sim and p == Path(sim).resolve():
+        return True
+    return p == Path.home().resolve()
+
+
+def es_raiz_de_unidad(path):
+    r"""Detecta si la ruta corresponde a la raíz de una unidad (ej. C:\ o /)."""
+    p = Path(path).resolve()
+    sim = os.environ.get("ADEVV_SIMULATED_DRIVE_ROOT")
+    if sim and p == Path(sim).resolve():
+        return True
+    return p.parent == p
+
+
+def construir_prompt_paso(root, paso, arg):
+    """Construye el prompt de un paso para el arnés con rutas absolutas instaladas."""
+    version_dir = get_active_version_dir()
+    rol, cfg_rol = rol_de(root, paso)
+    persona = version_dir / "agents" / f"{rol}.md"
+    skill_file = version_dir / "skills" / "orquestar" / "SKILL.md"
+    skills_dir = version_dir / "skills"
+
+    instruccion_agente = (
+        f'Lee "{persona.resolve()}" y actúa como ese agente; ignora el modelo de su frontmatter. '
+        if persona.exists() else ""
+    )
+    args_str = f' con "{arg}"' if arg else ""
+    prompt_cuerpo = (
+        f'Lee "{skill_file.resolve()}" y ejecuta en modo orquestado el paso "{paso}"{args_str}. '
+        f'Las skills que cite (/nombre) están en "{skills_dir.resolve()}/<nombre>/SKILL.md". '
+        'No hagas preguntas: aplica las reglas del modo orquestado.'
+    )
+    extra = (
+        ' Verifica con `adevv orquestar --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol), '
+        'solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión.'
+    )
+    if config(root).get('hades') is not False:
+        extra += ' Lanza las revisiones de Hades con `adevv orquestar --agente hades --prompt-file <mandato>`.'
+
+    nota_fuente = ""
+    if es_repositorio_fuente_adevv(root):
+        nota_fuente = ' Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.'
+
+    return instruccion_agente + prompt_cuerpo + extra + nota_fuente
+
+
+def construir_prompt_agente(root, rol, prompt):
+    """Construye el mandato para un rol con --agente citando la versión activa instalada."""
+    version_dir = get_active_version_dir()
+    paso = os.environ.get("ORQUESTAR_PASO", "")
+    cfg = ajustes(config(root).get(rol, {}), paso)
+    instrucciones = cfg.get("instructions")
+    if instrucciones:
+        p_inst = Path(instrucciones)
+        if not p_inst.is_absolute():
+            p_inst = (root / p_inst).resolve()
+        instrucciones_str = str(p_inst)
+    else:
+        instrucciones_str = str((version_dir / "agents" / f"{rol}.md").resolve())
+
+    skills_dir = (version_dir / "skills").resolve()
+    cabecera = (
+        f'Lee "{instrucciones_str}" y actúa como ese agente; ignora el modelo de su frontmatter. '
+        f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
+    )
+    if es_repositorio_fuente_adevv(root):
+        cabecera += 'Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.\n\n'
+    f_ev = Path(root) / EVIDENCIAS
+    if f_ev.exists():
+        try:
+            clave = arbol(root)
+            cmds = list(dict.fromkeys(
+                e['comando'] for l in f_ev.read_text(encoding='utf-8').splitlines() if l.strip()
+                for e in (json.loads(l),) if e.get('arbol') == clave and e.get('codigo') == 0
+            ))
+            if cmds:
+                cabecera += (f'Verificado en verde sobre este árbol ({clave[:10]}): '
+                             f'{", ".join(f"`{c}`" for c in cmds)}. No los relances.\n\n')
+        except Exception:
+            pass
+    return cabecera + prompt
+
+
+def validar_lanzamiento_bucle(root, a):
+    """Valida precondiciones antes de lanzar el bucle e inicializa proyectos si procede."""
+    # 1. Comprobar si estamos en subcarpeta de otro repo git
+    try:
+        r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root, capture_output=True, text=True, encoding="utf-8")
+        if r.returncode == 0:
+            top_level = Path(r.stdout.strip()).resolve()
+            if not os.path.samefile(top_level, root):
+                sys.exit(f"Estás en una subcarpeta de {top_level}: lanza /orquestar desde la raíz.")
+    except (FileNotFoundError, OSError):
+        pass
+
+    # 2. Inicialización de proyecto nuevo si procede
+    if not (root / "task_config.yaml").exists():
+        es_home = es_carpeta_personal(root)
+        es_raiz = es_raiz_de_unidad(root)
+        docs_dir = getattr(a, "docs", "docs/requirements") or "docs/requirements"
+        reqs = root / docs_dir / "requirements.md"
+        if not es_home and not es_raiz and reqs.exists():
+            import unicodedata
+            norm = unicodedata.normalize('NFD', root.name)
+            sin_diacriticos = ''.join(c for c in norm if unicodedata.category(c) != 'Mn')
+            letras = ''.join(c for c in sin_diacriticos if c.isalpha()).upper()
+            prefijo = letras[:3] if len(letras) >= 3 else "PRJ"
+
+            if not (root / ".git").is_dir():
+                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+
+            task_cfg_content = (
+                f'project:\n  name: {root.name}\n  prefix: "{prefijo}"\n  version: "v0.0.0"\n\n'
+                f'levels:\n  master:\n    path: docs/plan/\n    folders:\n      tasks: tasks/\n      bugs: bugs/\n'
+                f'    tasks: tasks/\n    bugs: bugs/\n    id_prefix: "{prefijo}"\n'
+            )
+            (root / "task_config.yaml").write_text(task_cfg_content, encoding="utf-8")
+
+            gitignore_path = root / ".gitignore"
+            if not gitignore_path.exists():
+                gitignore_path.write_text(
+                    "orquestar.log\norquestar.pid\norquestar.parar\norquestar.espera\n"
+                    "orquestar_metricas.jsonl\norquestar_evidencias.jsonl\norquestar_buzon.jsonl*\n"
+                    ".env\n__pycache__/\n",
+                    encoding="utf-8",
+                )
+
+            subprocess.run(["git", "add", "task_config.yaml", ".gitignore"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Adevv", "-c", "user.email=adevv@local", "commit", "-m", "chore: inicializar proyecto"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+            )
+            print(f"[orquestar] inicializado repositorio Git y task_config.yaml (prefijo: {prefijo})", flush=True)
+
+    # 3. Validar orchestration.json: instructions de cada rol
+    cfg = config(root)
+    for rol_k, rol_v in cfg.items():
+        if isinstance(rol_v, dict) and "instructions" in rol_v:
+            inst = rol_v["instructions"]
+            p_inst = Path(inst)
+            if not p_inst.is_absolute():
+                p_inst = root / p_inst
+            if not p_inst.exists():
+                sys.exit(f"orchestration.json: {rol_k}.instructions apunta a {inst}, que no existe.")
+
+    # 4. Validar submódulo .agents (solo en proyectos consumidores)
+    if not es_repositorio_fuente_adevv(root):
+        gitmodules = root / ".gitmodules"
+        tiene_gm_agents = False
+        if gitmodules.exists():
+            try:
+                tiene_gm_agents = ".agents" in gitmodules.read_text(encoding="utf-8")
+            except Exception:
+                pass
+        if (root / ".agents").exists() or tiene_gm_agents:
+            sys.exit("Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.")
+
+    # 5. Validar elementos locales que ocultan
+    version_dir = get_active_version_dir()
+    nombres_distribuidos = set()
+    skills_dist = version_dir / "skills"
+    if skills_dist.is_dir():
+        for d in skills_dist.iterdir():
+            if d.is_dir() and not d.name.startswith("."):
+                nombres_distribuidos.add(d.name)
+    agents_dist = version_dir / "agents"
+    if agents_dist.is_dir():
+        for f in agents_dist.iterdir():
+            if f.is_file() and f.suffix in (".md", ".toml"):
+                nombres_distribuidos.add(f.stem)
+        codex_dist = agents_dist / "codex"
+        if codex_dist.is_dir():
+            for f in codex_dist.iterdir():
+                if f.is_file() and f.suffix == ".toml":
+                    nombres_distribuidos.add(f.stem)
+    wf_dist = version_dir / "workflows"
+    if wf_dist.is_dir():
+        for f in wf_dist.iterdir():
+            if f.is_file() and f.suffix == ".md":
+                nombres_distribuidos.add(f.stem)
+    if "telegram_gateway" in nombres_distribuidos:
+        nombres_distribuidos.add("telegram-gateway")
+
+    rutas_ocultan = []
+    rutas_candidatas = [
+        (root / ".claude" / "skills", True),
+        (root / ".claude" / "agents", False),
+        (root / ".codex" / "skills", True),
+        (root / ".codex" / "agents", False),
+        (root / ".agents" / "skills", True),
+        (root / ".agent" / "skills", True),
+        (root / ".agent" / "workflows", False),
+    ]
+    for c_dir, es_dir in rutas_candidatas:
+        if c_dir.exists():
+            for item in c_dir.iterdir():
+                nombre = item.name if es_dir else item.stem
+                if nombre in nombres_distribuidos:
+                    rutas_ocultan.append(os.path.relpath(item, root).replace("\\", "/"))
+
+    if rutas_ocultan:
+        sys.exit(
+            f"Este proyecto tiene skills, agentes o workflows propios que ocultan los de Adevv: "
+            f"{', '.join(sorted(rutas_ocultan))}. Bórralos o renómbralos."
+        )
+
+
 # ---------------------------------------------------------------- backlog y dependencias
 
 def frontmatter(path):
@@ -58,8 +303,12 @@ def frontmatter(path):
     if not m:
         return {}
     try:
-        import yaml
-        datos = yaml.safe_load(m[1])
+        if yaml and hasattr(yaml, 'safe_load'):
+            datos = yaml.safe_load(m[1])
+        elif yaml and hasattr(yaml, 'load_yaml'):
+            datos = yaml.load_yaml(m[1])
+        else:
+            datos = None
         if isinstance(datos, dict):
             return {k: (v if isinstance(v, list) else '' if v is None else str(v)) for k, v in datos.items()}
     except Exception:
@@ -78,9 +327,16 @@ def lista(valor):
 def backlog_dirs(root):
     base, tareas, bugs = 'docs/plan/', 'tasks/', 'bugs/'
     try:
-        import yaml
-        m = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))['levels']['master']
-        base, tareas, bugs = m['path'], m['folders']['tasks'], m['folders']['bugs']
+        if yaml and hasattr(yaml, 'safe_load'):
+            m = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))['levels']['master']
+        elif yaml and hasattr(yaml, 'load_yaml'):
+            m = yaml.load_yaml((root / 'task_config.yaml'))['levels']['master']
+        else:
+            m = {}
+        folders = m.get('folders', {})
+        base = m.get('path', 'docs/plan/')
+        tareas = folders.get('tasks', m.get('tasks', 'tasks/'))
+        bugs = folders.get('bugs', m.get('bugs', 'bugs/'))
     except Exception:
         pass
     return root / base / tareas, root / base / bugs
@@ -459,7 +715,8 @@ def arnes(a, rol):
 def comando(a, prompt, root=None, rol=None):
     rol = rol if rol is not None else rol_de(root or Path.cwd(), 'task-dev')[1]
     harness = arnes(a, rol)
-    plantilla = a.cmd.split() if a.cmd else HARNESS[harness]
+    plantilla = (shlex.split(a.cmd, posix=os.name != 'nt') if a.cmd else HARNESS[harness])
+    plantilla = [p.strip('"\'') for p in plantilla]
     exe = shutil.which(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
@@ -487,6 +744,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
         print(d.get('response', ''), flush=True)
         u = d.get('usage') or {}
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
+        if d.get('status') != 'SUCCESS':
+            print(f"[orquestar] agy status: {d.get('status')} (returncode: {r.returncode})", flush=True)
         m.update(turnos=d.get('num_turns'), error=d.get('status') != 'SUCCESS',
                  modelos={modelo: {'entrada': u.get('input_tokens'), 'salida': u.get('output_tokens'),
                                    'cache_leida': u.get('cache_read_tokens'),
@@ -555,11 +814,14 @@ def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
     cfg = ajustes(config(root).get(rol, {}), paso)
+    if 'instructions' in cfg:
+        p_inst = Path(cfg['instructions'])
+        if not p_inst.is_absolute():
+            p_inst = root / p_inst
+        if not p_inst.exists():
+            sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
     harness = cfg.get('harness', 'claude')
-    instrucciones = cfg.get('instructions') or os.path.relpath(AGENTES / f'{rol}.md', root).replace('\\', '/')
-    prompt = (f'Lee {instrucciones} y actúa como ese agente; ignora el modelo de su frontmatter. '
-              'Las skills están en ' + os.path.relpath(SKILL.parents[1], root).replace('\\', '/')
-              + '/<nombre>/SKILL.md.\n\n' + prompt)
+    prompt = construir_prompt_agente(root, rol, prompt)
     if harness == 'claude':
         base = ['claude', '-p', '--dangerously-skip-permissions', '--output-format', 'json']
     elif harness == 'codex':
@@ -574,10 +836,15 @@ def agente(root, rol, prompt):
         sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = con_modelo([exe] + base[1:], harness, cfg)
     codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt)
+    cuota = espera_cuota(salida) if codigo else None
     veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
     registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid, 'arnes': harness,
-                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}), **m})
-    if veredicto and veredicto[-1] == 'RECHAZADO':
+                     'codigo': codigo, **({'veredicto': veredicto[-1]} if veredicto else {}),
+                     **({'sin_cuota': True, 'espera_s': cuota} if cuota is not None else {}), **m})
+    if cuota is not None:
+        print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
+              'el bucle esperará la cuota y reintentará.', flush=True)
+    elif veredicto and veredicto[-1] == 'RECHAZADO':
         print(tope_de_rechazos(root, iid), flush=True)
     return codigo
 
@@ -585,11 +852,12 @@ def agente(root, rol, prompt):
 def tope_de_rechazos(root, iid):
     """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
     esc = rol_de(root, 'task-dev')[1].get('escalada') or {}
-    tope, n = esc.get('rechazos', 2), rechazos(root, iid)
-    if not esc or n < tope or n % tope:
+    tope, n = (esc.get('rechazos', 2) if esc else 3), rechazos(root, iid)
+    if n < tope or n % tope:
         return ''
-    if os.environ.get('ORQUESTAR_ESCALADA'):
-        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas, también tras la escalada: '
+    if not esc or os.environ.get('ORQUESTAR_ESCALADA'):
+        tras = ', también tras la escalada' if esc else ''
+        return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas{tras}: '
                 'no sigas corrigiendo; aplica la regla 5 del modo orquestado (bloquea la tarea con '
                 '`pendiente_de: especificador`, o `humano` si falta un recurso externo) y termina el paso.')
     return (f'[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que '
@@ -600,7 +868,7 @@ def tope_de_rechazos(root, iid):
 # ---------------------------------------------------------------- cuota
 
 CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
-                   r'|\b429\b|overloaded', re.I)
+                   r'|\b429\b|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
 
 
 def espera_cuota(salida, ahora=None):
@@ -753,9 +1021,13 @@ def suite(root, a=None):
     if a is not None and getattr(a, 'test', None):
         return a.test
     try:
-        import yaml
-        return (yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8')).get('validation')
-                or {}).get('command')
+        if yaml and hasattr(yaml, 'safe_load'):
+            cfg = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))
+        elif yaml and hasattr(yaml, 'load_yaml'):
+            cfg = yaml.load_yaml((root / 'task_config.yaml'))
+        else:
+            cfg = {}
+        return (cfg.get('validation') or {}).get('command')
     except Exception:
         return None
 
@@ -789,8 +1061,13 @@ def ahora():
 
 def excluir(root):
     """Excluye de git los ficheros del bucle, para no ensuciar el árbol."""
-    exclude = Path(git('rev-parse', '--git-path', 'info/exclude'))
+    res = git('rev-parse', '--git-path', 'info/exclude')
+    if not res:
+        return
+    exclude = Path(res)
     exclude = exclude if exclude.is_absolute() else root / exclude
+    if exclude.is_dir():
+        return
     actual = exclude.read_text(encoding='utf-8') if exclude.exists() else ''
     faltan = [f for f in PROPIOS if f not in actual.splitlines()]
     if faltan:
@@ -937,6 +1214,8 @@ def main():
         (root / PARADA).touch()
         print('[orquestar] parará al terminar el paso en curso')
         return 0
+    if not a.estado and not a.parar and not a.verificar and not a.agente and not a.aviso_prueba:
+        validar_lanzamiento_bucle(root, a)
     if a.fondo:
         return en_fondo(root)
     if a.estado:
@@ -964,12 +1243,6 @@ def bucle(a, root):
         (root / a.docs).mkdir(parents=True, exist_ok=True)
         (root / a.docs / 'requirements.md').write_text(a.idea + '\n', encoding='utf-8')
 
-    script = os.path.relpath(Path(__file__).resolve(), root).replace('\\', '/')
-    skill = os.path.relpath(SKILL, root).replace('\\', '/')
-    extra = (f' Verifica con `python {script} --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol),'
-             f' solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión.')
-    if 'hades' in config(root):
-        extra += f' Lanza las revisiones de Hades con `python {script} --agente hades --prompt-file <mandato>`.'
     cmd_suite = suite(root, a)
     sin_progreso = esperado = 0
     for n in range(1, a.max_pasos + 1):
@@ -1003,16 +1276,19 @@ def bucle(a, root):
         if escalado:
             print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '
                   f'escalo a {cfg_rol.get("model") or cfg_rol.get("harness")}', flush=True)
-        persona = AGENTES / f'{rol}.md'
-        prompt = (f'Lee {os.path.relpath(persona, root).replace(chr(92), "/")} y actúa como ese agente; '
-                  'ignora el modelo de su frontmatter. ' if persona.exists() else '') + PROMPT.format(skill=skill, skills=os.path.dirname(os.path.dirname(skill)) or '.',
-                               paso=paso, args=f' con "{arg}"' if arg else '') + extra
+        prompt = construir_prompt_paso(root, paso, arg)
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
+        f_met = root / METRICAS
+        n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
         codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_rol)
         cuota = espera_cuota(salida) if codigo else None
+        if cuota is None and f_met.exists():
+            nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+            cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                          if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                          'rol': rol, 'arnes': a.cmd or arnes(a, cfg_rol), 'codigo': codigo, **m,
                          **({'escalado': True} if escalado else {}),
@@ -1029,11 +1305,15 @@ def bucle(a, root):
                 print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
                 return 2
             continue
-        if codigo:
+        if codigo or cuota is not None:
+            if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
+                sin_progreso = 0
+                continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             return parar(root, 'cuota' if cuota is not None else 'error',
-                         f'el arnés terminó con código {codigo} ({motivo}). Relanza cuando se resuelva.')
+                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.')
         esperado = 0
 
         if firma(root, a.docs) == antes:

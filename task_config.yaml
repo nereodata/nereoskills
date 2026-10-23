@@ -3,7 +3,7 @@
 project:
   name: Adevv
   prefix: ADV
-  version: "v0.0.0"
+  version: "v0.1.0"
 
 levels:
   master:
@@ -21,4 +21,7 @@ release:
   manifests:
     - path: task_config.yaml
       type: yaml
+      key: project.version
+    - path: pyproject.toml
+      type: toml
       key: project.version

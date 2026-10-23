@@ -49,7 +49,7 @@ class OrquestarRegressionTests(unittest.TestCase):
             subprocess.run(['git', 'add', '.'], cwd=root, check=True, capture_output=True)
             index_before = (root / '.git/index').read_bytes()
             with (patch.object(motor, 'estado', return_value=('PASO', 'task-dev')),
-                 patch.object(motor, 'git', return_value='unchanged'),
+                  patch.object(motor, 'git', return_value='unchanged'),
                   patch.object(motor, 'backlog', return_value=[])):
                 before = motor.firma(root, 'docs')
                 self.assertEqual(before, motor.firma(root, 'docs'))
@@ -467,6 +467,51 @@ class EscaladaTests(unittest.TestCase):
         _, impreso = self.hades('RECHAZADO', escalada=True)
         self.assertIn('regla 5', impreso)
         self.assertIn('pendiente_de: especificador', impreso)
+
+    def test_without_escalation_three_rejections_block_the_task(self):
+        sin_escalada = {'artemisa': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium'},
+                        'hades': {'harness': 'claude', 'model': 'opus'}}
+        with patch.object(motor, 'config', return_value=sin_escalada):
+            for _ in range(2):
+                _, impreso = self.hades('RECHAZADO')
+                self.assertNotIn('regla 5', impreso)
+            _, impreso = self.hades('RECHAZADO')
+            self.assertIn('regla 5', impreso)
+            self.assertIn('pendiente_de: especificador', impreso)
+
+    def test_subagent_out_of_credits_triggers_quota_wait_in_loop(self):
+        msg = '{"type":"error","message":"Your workspace is out of credits. Add credits to continue."}'
+        self.assertEqual(motor.espera_cuota(msg), 1800)
+
+        def ejecutar_paso(a, root, prompt, env=None, rol=None):
+            with (patch.dict(motor.os.environ, env or {}, clear=True),
+                  patch.object(motor, 'lanzar', return_value=(1, {}, msg)),
+                  patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+                  patch.object(motor, 'excluir')):
+                motor.agente(root, 'hades', 'revisa')
+            return 0, {}, 'No puedo seguir sin Hades.'
+
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False, max_pasos=2,
+                                        reintentos=2, espera_max=2, cmd=None)
+        with (patch.object(motor, 'estado', side_effect=[('PASO', 'task-dev', 'T-ADV-0001', ''),
+                                                         ('FIN', 'Cerrado.')]),
+              patch.object(motor, 'ejecutar', side_effect=ejecutar_paso),
+              patch.object(motor, 'esperar', return_value=True) as esperar,
+              patch.object(motor, 'firma', return_value='igual'),
+              patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'ingerir', return_value=[]),
+              patch.object(motor, 'avisar'),
+              patch.object(motor, 'excluir')):
+            self.assertEqual(motor.bucle(args, self.root), 0)
+        esperar.assert_called_once_with(self.root, 1800)
+
+    def test_agent_prompt_lists_verified_commands_for_current_tree(self):
+        clave = 'b' * 40
+        (self.root / motor.EVIDENCIAS).write_text(
+            f'{{"arbol":"{clave}","comando":"npm run content:validate","codigo":0}}\n', encoding='utf-8')
+        with patch.object(motor, 'arbol', return_value=clave):
+            prompt = motor.construir_prompt_agente(self.root, 'hades', 'revisa')
+        self.assertIn('Verificado en verde sobre este árbol (bbbbbbbbbb): `npm run content:validate`', prompt)
 
     def test_loop_launches_the_escalated_model_with_its_flag(self):
         for _ in range(2):

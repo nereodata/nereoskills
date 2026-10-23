@@ -12,4 +12,4 @@ description: Proxy para el workflow /start-version
 # /start-version
 
 Has sido invocado para inicializar un nuevo bloque funcional (release). Tu **único objetivo** es leer y ejecutar estrictamente los pasos definidos en la skill correspondiente:
-👉 Usa la herramienta `view_file` en `../skills/start-version/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) y sigue sus instrucciones.
+👉 Usa la herramienta `view_file` en `skills/start-version/SKILL.md` (o la ruta correspondiente si estás en un proyecto consumidor) y sigue sus instrucciones.

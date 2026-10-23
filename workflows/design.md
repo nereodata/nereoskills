@@ -8,7 +8,7 @@ description: Proxy para el workflow /design
 
 # /design [TASK_ID]
 
-Ejecuta solo los pasos definidos en `../skills/design/SKILL.md`:
+Ejecuta solo los pasos definidos en `skills/design/SKILL.md`:
 
 1. **Analiza**: Código existente, requisitos (BDD), alcance del cambio.
 2. **Diseña**: Cambios por archivo (`[NEW]`, `[MODIFY]`, `[DELETE]`), SOLID/DRY/KISS/YAGNI.
