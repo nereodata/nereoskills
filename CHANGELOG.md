@@ -2,6 +2,22 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.4.0] - 2026-10-23
+
+### Añadido
+
+#### General
+- **T-ADV-0013** — Comando de métricas (`adevv metrics` / `adevv orquestar --metricas`) con tabla por versión, exportación CSV y coste estimado de API
+- **T-ADV-0014** — Mostrar agentes configurados para la tarea actual y estado de cuota en `/estado`
+- **T-ADV-0015** — Control remoto del bucle (`/lanzar`, `/parar`) y consulta de `/metricas` desde Telegram
+- **T-ADV-0016** — Ejecución en segundo plano de `adevv telegram` (`--fondo`, `--parar`) y auto-arranque desde `orquestar`
+- **T-ADV-0017** — Canal limpio de prompts en `--agente` (`--prompt` y limpieza automática de temporales)
+
+### Corregido
+
+#### General
+- **B-ADV-0002** — Ajustes menores transversales v0.3: coexistencia de clave `telegram` en `orchestration.json` y marca `sin_cuota` en intento intermedio de paso
+
 ## [0.3.0] - 2026-10-23
 
 ### Añadido

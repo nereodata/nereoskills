@@ -2,17 +2,20 @@
 """Gateway de Telegram de Adevv: atiende a los usuarios autorizados mientras el bucle trabaja.
 
 Comandos: /estado (/status) resume el bucle y el backlog; /tarea (/task) y /bug registran una entrada
-sin versión. /nuevo (/reset) reinicia el hilo de conversación. Cualquier otro mensaje sin comando mantiene
+sin versión. /lanzar (/run) y /parar (/stop) controlan el bucle; /metricas (/metrics) consulta consumo.
+/nuevo (/reset) reinicia el hilo de conversación. Cualquier otro mensaje sin comando mantiene
 una conversación interactiva con el asistente del proyecto conservando el hilo entre mensajes.
 Nunca escribe en el backlog con el bucle en marcha: deja la petición en el buzón y el bucle
 la registra entre pasos, con su propio commit. La configuración, el envío y el estado son los de
 orquestar.py: TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS.
 """
 import argparse
+import ctypes
 import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -24,8 +27,19 @@ _spec = importlib.util.spec_from_file_location(
 motor = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(motor)
 
+_spec_metricas = importlib.util.spec_from_file_location(
+    'metricas_gateway', Path(__file__).resolve().parents[1] / 'orquestar' / 'metricas.py')
+metricas = importlib.util.module_from_spec(_spec_metricas)
+_spec_metricas.loader.exec_module(metricas)
+
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
+PID = 'telegram.pid'
+LOG = 'telegram.log'
+PARADA = 'telegram.parar'
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
+         '/lanzar (o /run) — lanza el bucle en segundo plano\n'
+         '/parar (o /stop) — para al terminar el paso en curso\n'
+         '/metricas [filtro] (o /metrics) — consumo por tarea; por defecto ultima\n'
          '/tarea <título> — nueva tarea en el backlog, sin versión\n'
          '/bug <título> — nuevo bug, sin versión\n'
          '/nuevo (o /reset) — reinicia tu hilo de conversación\n'
@@ -165,10 +179,9 @@ def invocar(root, prompt, cfg, sesion=None):
 def conversar(root, usuario, texto):
     """Mantiene la conversación con el modelo del proyecto conservando la sesión."""
     cfg_todo = motor.config(root) if hasattr(motor, 'config') else {}
-    if 'telegram' in cfg_todo:
-        cfg = cfg_todo['telegram']
-    else:
-        cfg = cfg_todo.get('atenea', {})
+    cfg_atenea = cfg_todo.get('atenea', {}) if isinstance(cfg_todo.get('atenea'), dict) else {}
+    cfg_tg = cfg_todo.get('telegram', {}) if isinstance(cfg_todo.get('telegram'), dict) else {}
+    cfg = {**cfg_atenea, **cfg_tg}
     harness = cfg.get('harness', 'claude')
     sesion = obtener_sesion(root, usuario, harness)
     prompt = construir_prompt(root, texto)
@@ -191,6 +204,24 @@ def conversar(root, usuario, texto):
     return respuesta
 
 
+def resumen_metricas(root, filtro):
+    """Presenta tiempo, tokens E/C/S y coste por tarea con el cálculo de la CLI."""
+    try:
+        filas = metricas.consultar(root, motor.backlog(root), filtro)
+    except (ValueError, OSError) as error:
+        return f'No se pudieron consultar las métricas: {error}'
+    if not filas:
+        return 'Sin métricas para el filtro seleccionado.'
+    lineas = ['Métricas · tokens E/C/S: entrada/caché leída/salida · coste estimado USD']
+    for fila in filas:
+        lineas.append(
+            f"{fila['id']} ({fila['version']}): {fila['tiempo_real_min']:.2f} min · "
+            f"Dev E/C/S={fila['dev_tokens_originales']}/{fila['dev_tokens_cache']}/{fila['dev_tokens_salida']} · "
+            f"Hades E/C/S={fila['hades_tokens_originales']}/{fila['hades_tokens_cache']}/{fila['hades_tokens_salida']} · "
+            f"USD≈{fila['coste_estimado_usd']:.6f}")
+    return '\n'.join(lineas)
+
+
 def responder(root, usuario, texto, autorizados):
     """Respuesta a un mensaje, o None si el usuario no está autorizado."""
     if str(usuario).strip() not in autorizados:
@@ -199,6 +230,24 @@ def responder(root, usuario, texto, autorizados):
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
         return motor.parte(root)
+    if comando in ('/parar', '/stop'):
+        if not (root / motor.PID).exists():
+            return 'El bucle ya está parado.'
+        motor.excluir(root)
+        (root / motor.PARADA).touch()
+        return 'El bucle se detendrá al terminar el paso en curso.'
+    if comando in ('/lanzar', '/run'):
+        if (root / motor.PID).exists():
+            return 'El bucle ya está en marcha.'
+        estado = motor.estado(root, 'docs/requirements')
+        try:
+            motor.en_fondo(root, argumentos=[])
+        except SystemExit as error:
+            return str(error)
+        paso = ' '.join(str(x) for x in estado[1:3] if x)
+        return f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}'
+    if comando in ('/metricas', '/metrics'):
+        return resumen_metricas(root, argumento or 'ultima')
     if comando in ALTAS:
         if not argumento:
             return f'Uso: {comando} <título>'
@@ -230,12 +279,102 @@ def actualizaciones(token, desde=None, espera=25):
         return []
 
 
+def pid_vivo(root):
+    """Devuelve el PID registrado si sigue vivo; ignora marcas inválidas o muertas."""
+    try:
+        pid = int((root / PID).read_text(encoding='utf-8').strip())
+        if pid <= 0:
+            return None
+        if os.name == 'nt':
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+            kernel.OpenProcess.restype = ctypes.c_void_p
+            kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            handle = kernel.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return pid if ctypes.get_last_error() == 5 else None
+            try:
+                codigo = ctypes.c_ulong()
+                if not kernel.GetExitCodeProcess(handle, ctypes.byref(codigo)):
+                    return pid
+                return pid if codigo.value == 259 else None
+            finally:
+                kernel.CloseHandle(handle)
+        os.kill(pid, 0)
+        return pid
+    except PermissionError:
+        return pid
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def reservar(root):
+    """Reserva el PID de forma exclusiva y retira restos de una ejecución anterior."""
+    motor.excluir(root)
+    try:
+        archivo = (root / PID).open('x', encoding='utf-8')
+    except FileExistsError:
+        vivo = pid_vivo(root)
+        if vivo:
+            sys.exit(f'Ya hay un gateway en marcha (pid {vivo}).')
+        (root / PID).unlink(missing_ok=True)
+        archivo = (root / PID).open('x', encoding='utf-8')
+    with archivo:
+        archivo.write(str(os.getpid()))
+    (root / PARADA).unlink(missing_ok=True)
+
+
+def limpiar(root):
+    """Retira las marcas solo si el proceso actual conserva la propiedad del PID."""
+    try:
+        if (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
+            (root / PARADA).unlink(missing_ok=True)
+            (root / PID).unlink(missing_ok=True)
+    except FileNotFoundError:
+        return
+
+
+def en_fondo(root):
+    """Lanza gateway.py desacoplado, publica el PID y revierte reservas fallidas."""
+    reservar(root)
+    opciones = {'start_new_session': True}
+    if os.name == 'nt':
+        opciones = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    try:
+        with (root / LOG).open('a', encoding='utf-8') as log:
+            proceso = subprocess.Popen(
+                [sys.executable, '-u', str(Path(__file__).resolve()), '--root', str(root), '--gestionado'],
+                cwd=root, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **opciones)
+        (root / PID).write_text(str(proceso.pid), encoding='utf-8')
+    except BaseException:
+        limpiar(root)
+        raise
+    print(f'[gateway] lanzado en segundo plano (pid {proceso.pid}); salida en {LOG}', flush=True)
+    return 0
+
+
+def parar(root):
+    """Solicita parada cooperativa sin credenciales ni señales destructivas al PID."""
+    motor.excluir(root)
+    if pid_vivo(root):
+        (root / PARADA).touch()
+        print('[gateway] parará al terminar la operación actual', flush=True)
+    else:
+        (root / PID).unlink(missing_ok=True)
+        (root / PARADA).unlink(missing_ok=True)
+        print('[gateway] ya está parado', flush=True)
+    return 0
+
+
 def escuchar(root, token, autorizados, vueltas=None):
     """Bucle de long polling: responde a cada mensaje autorizado; un mensaje que falla no para el resto."""
     desde, n = None, 0
-    while vueltas is None or n < vueltas:
+    while (vueltas is None or n < vueltas) and not (root / PARADA).exists():
         n += 1
         for u in actualizaciones(token, desde):
+            if (root / PARADA).exists():
+                return
             desde = u['update_id'] + 1
             m = u.get('message') or {}
             try:
@@ -251,7 +390,11 @@ def main():
     """Punto de entrada principal para la ejecución en línea de comandos."""
     ap = argparse.ArgumentParser(description='Gateway de Telegram de Adevv.')
     ap.add_argument('--root', type=Path, default=Path.cwd(), help='raíz del proyecto')
-    ap.add_argument('--estado', action='store_true', help='imprime el resumen que devuelve /estado y sale')
+    modo = ap.add_mutually_exclusive_group()
+    modo.add_argument('--estado', action='store_true', help='imprime el resumen que devuelve /estado y sale')
+    modo.add_argument('--fondo', action='store_true', help=f'escucha en segundo plano, salida en {LOG}')
+    modo.add_argument('--parar', action='store_true', help='pide parar el gateway al acabar la operación actual')
+    modo.add_argument('--gestionado', action='store_true', help=argparse.SUPPRESS)
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
     root = a.root.resolve()
@@ -259,14 +402,32 @@ def main():
     if a.estado:
         print(motor.parte(root))
         return 0
+    if a.parar:
+        return parar(root)
     token, autorizados = motor.credenciales(root)
     if not token or not autorizados:
         sys.exit('Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_ALLOWED_USER_IDS (en .env o en el entorno).')
-    print(f'[gateway] escuchando para {root.name} ({len(autorizados)} usuarios autorizados)', flush=True)
+    if a.fondo:
+        if pid_vivo(root):
+            print('[gateway] ya está en marcha', flush=True)
+            return 0
+        return en_fondo(root)
+    if a.gestionado:
+        for _ in range(100):
+            if (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
+                break
+            time.sleep(0.05)
+        else:
+            sys.exit('No se publicó el PID del gateway; se cancela la escucha.')
+    else:
+        reservar(root)
     try:
+        print(f'[gateway] escuchando para {root.name} ({len(autorizados)} usuarios autorizados)', flush=True)
         escuchar(root, token, set(autorizados))
     except KeyboardInterrupt:
         pass
+    finally:
+        limpiar(root)
     return 0
 
 

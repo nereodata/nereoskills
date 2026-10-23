@@ -7,6 +7,7 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -29,7 +30,7 @@ except ImportError:
 
 HARNESS = {
     'claude': ['claude', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
-    'codex': ['codex', 'exec', '--full-auto', '--json', '{prompt}'],
+    'codex': ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '--json', '{prompt}'],
     'gemini': ['gemini', '--yolo', '-p', '{prompt}'],
     'cursor': ['cursor-agent', '-p', '--force', '{prompt}'],
     'agy': ['agy', '-p', '{prompt}', '--dangerously-skip-permissions', '--output-format', 'json'],
@@ -46,7 +47,9 @@ PARADA = 'orquestar.parar'
 ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
 TELEGRAM_SESIONES = 'orquestar_telegram.json'  # sesiones de conversación de usuarios en Telegram
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES)  # ficheros del bucle, excluidos de git
+PROMPT_FILE_DEFAULT = 'orquestar_prompt.txt'
+PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
+           PROMPT_FILE_DEFAULT, 'telegram.pid', 'telegram.log', 'telegram.parar')
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
@@ -775,8 +778,7 @@ def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
     if iid and (root / METRICAS).exists():
-        for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
-            f = json.loads(linea) if linea.strip() else {}
+        for f in leer_metricas(root):
             if f.get('id') == iid and f.get('tipo') == 'promocion':
                 n = 0
             elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('id') == iid and f.get('veredicto'):
@@ -1101,6 +1103,7 @@ def agente(root, rol, prompt):
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
+            m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota)
             cuotas_acumuladas.append(cuota)
             if hay_mas_reservas:
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
@@ -1370,6 +1373,31 @@ def excluir(root):
             f.write('\n' + '\n'.join(faltan) + '\n')
 
 
+def es_fichero_rastreado_git(root, ruta):
+    """Comprueba si un fichero está bajo seguimiento en git."""
+    try:
+        p = Path(ruta)
+        try:
+            rel = p.relative_to(Path(root).resolve())
+            arg_ruta = str(rel).replace('\\', '/')
+        except ValueError:
+            arg_ruta = p.name
+        res = subprocess.run(
+            ['git', 'ls-files', '--error-unmatch', '--', arg_ruta],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False
+        )
+        if res.returncode == 0:
+            return True
+        if res.returncode == 1 and 'did not match any file' in (res.stderr or ''):
+            return False
+        return True
+    except Exception:
+        return True
+
+
 def registrar(root, fila):
     """Añade una línea al registro común de métricas (pasos, agentes, esperas y verificaciones)."""
     excluir(root)
@@ -1378,17 +1406,104 @@ def registrar(root, fila):
         f.write(json.dumps(fila, ensure_ascii=False) + '\n')
 
 
+
+def leer_metricas(root):
+    """Lee registros completos; tolera una última línea aún en escritura."""
+    ruta = root / METRICAS
+    filas = []
+    if ruta.exists():
+        for linea in ruta.read_text(encoding='utf-8').splitlines():
+            try:
+                fila = json.loads(linea)
+            except ValueError:
+                continue
+            if isinstance(fila, dict):
+                filas.append(fila)
+    return filas
+
+
+def fecha_estado(valor):
+    """Convierte ISO local o con offset en un instante comparable con zona."""
+    try:
+        return datetime.fromisoformat(str(valor)).astimezone()
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def perfil_estado(cfg):
+    """Describe un perfil efectivo sin resolver de nuevo sus ajustes."""
+    return (f'{cfg.get("harness") or "claude"}/{cfg.get("model") or "predeterminado"}'
+            + (f' ({cfg["effort"]})' if cfg.get('effort') else ''))
+
+
+def detalle_estado(root, e):
+    """Presentación común de agentes efectivos y evidencia reciente de uso/cuota."""
+    instante = fecha_estado(ahora())
+    lineas, perfiles = [], []
+    if e[0] == 'PASO':
+        paso, iid = e[1:3]
+        dificultad = dificultad_de(root, iid) if iid else None
+        rol, cfg = rol_de(root, paso, dificultad=dificultad)
+        cfg, escalado = escalada(root, rol, cfg, iid)
+        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
+        lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
+        for nombre, perfil in ((rol, cfg), ('hades', hades)):
+            reservas = lista_reservas(perfil)
+            perfiles.extend([perfil] + reservas)
+            lineas.append(f'{nombre}: {perfil_estado(perfil)}'
+                          + (' [escalada]' if nombre == rol and escalado else '')
+                          + ('; reservas: ' + ', '.join(perfil_estado(r) for r in reservas) if reservas else ''))
+    uso, cuotas = {}, {}
+    for perfil in perfiles:
+        uso.setdefault((perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado'), 0)
+    for fila in leer_metricas(root):
+        fecha = fecha_estado(fila.get('fecha'))
+        if fecha is None or not instante - timedelta(hours=5) <= fecha <= instante:
+            continue
+        arnes = fila.get('arnes') or 'desconocido'
+        modelos = fila.get('modelos') or {}
+        for modelo, tokens in modelos.items():
+            clave = (arnes, modelo)
+            uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
+                                                 ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
+        segundos = fila.get('cuota_espera_s')
+        modelo = fila.get('modelo_cuota')
+        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
+            segundos = fila['espera_s']
+            modelo = next(iter(modelos)) if len(modelos) == 1 else None
+        if modelo and isinstance(segundos, (int, float)):
+            clave = (arnes, modelo)
+            hasta = fecha + timedelta(seconds=segundos)
+            uso.setdefault(clave, 0)
+            if hasta > instante:
+                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
+    espera = root / ESPERA
+    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
+    if hasta and hasta > instante:
+        minutos = int((hasta - instante).total_seconds() + 59) // 60
+        lineas.append(f'Espera global: hasta {hasta:%Y-%m-%d %H:%M %z} ({minutos} min restantes)')
+    if not uso:
+        lineas.append('Sin uso registrado en las últimas 5 h')
+    for clave, tokens in sorted(uso.items()):
+        hasta = cuotas.get(clave)
+        cuota = (f'agotado hasta {hasta:%Y-%m-%d %H:%M %z} '
+                 f'({int((hasta - instante).total_seconds() + 59) // 60} min restantes)' if hasta else
+                 'sin agotamiento registrado')
+        lineas.append(f'{clave[0]}/{clave[1]}: {tokens} tokens (5 h); {cuota}')
+    return lineas
+
+
 def resumen(root):
     """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
     if (root / PID).exists():
         print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
-        if (root / ESPERA).exists():
-            print(f'[orquestar] esperando cuota hasta {(root / ESPERA).read_text().strip()}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
+    for linea in detalle_estado(root, estado(root, 'docs/requirements')):
+        print(f'[orquestar] {linea}')
     if not (root / METRICAS).exists():
         return
-    filas = [json.loads(l) for l in (root / METRICAS).read_text(encoding='utf-8').splitlines() if l.strip()]
+    filas = leer_metricas(root)
     tipo = lambda t: [f for f in filas if f.get('tipo', 'paso') == t]
     coste = sum(f.get('coste_usd') or 0 for f in filas)
     horas = sum(f.get('duracion_s') or 0 for f in tipo('paso') + tipo('espera')) / 3600
@@ -1411,12 +1526,14 @@ def resumen(root):
 
 def parte(root, docs='docs/requirements'):
     """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
-    if (root / ESPERA).exists():
-        marcha = f'esperando cuota hasta {(root / ESPERA).read_text().strip()[-5:]}'
+    hasta = fecha_estado((root / ESPERA).read_text(encoding='utf-8').strip()) if (root / ESPERA).exists() else None
+    if hasta and hasta > fecha_estado(ahora()):
+        marcha = f'esperando cuota hasta {hasta:%H:%M}'
     else:
         marcha = 'en marcha' if (root / PID).exists() else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
+    lineas.extend(detalle_estado(root, e))
     items = backlog(root)
     abiertas = sorted({i['version'] for i in items if vkey(i['version']) and i['status'] not in CERRADO}, key=vkey)
     for v in abiertas[:1]:
@@ -1431,20 +1548,36 @@ def parte(root, docs='docs/requirements'):
         pendientes = sum(1 for l in (root / BUZON).read_text(encoding='utf-8').splitlines() if l.strip())
         lineas.append(f'*Por registrar:* {pendientes} (entre pasos del bucle)')
     if (root / METRICAS).exists():
-        pasos = [json.loads(l) for l in (root / METRICAS).read_text(encoding='utf-8').splitlines()
-                 if l.strip() and json.loads(l).get('tipo', 'paso') == 'paso']
+        pasos = [f for f in leer_metricas(root) if f.get('tipo', 'paso') == 'paso']
         if pasos:
             lineas.append(f'*Último paso:* {pasos[-1].get("paso", "")} {pasos[-1].get("id") or ""} ({pasos[-1].get("fecha", "")[:16]})')
     return '\n'.join(lineas)
 
 
-def en_fondo(root):
-    """Relanza el bucle desacoplado, con la salida en LOG, y vuelve enseguida."""
+def iniciar_gateway(root):
+    """Solicita el gateway opcional sin abortar el bucle si falla su lanzador."""
+    try:
+        if not telegram(root):
+            return
+        resultado = subprocess.run(
+            [sys.executable, str(SKILL.parent.parent / 'telegram_gateway' / 'gateway.py'),
+             '--root', str(root), '--fondo'], cwd=root, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=10,
+            **({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}))
+        if resultado.returncode:
+            print('[orquestar] gateway no iniciado (ya activo o fallo; consulta telegram.log)', flush=True)
+    except Exception as error:
+        print(f'[orquestar] gateway no iniciado ({type(error).__name__}); el bucle continúa', flush=True)
+
+
+def en_fondo(root, argumentos=None):
+    """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
     if (root / PID).exists():
         sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
                  f'Si no es así, borra {PID}.')
     excluir(root)
-    args = [x for x in sys.argv[1:] if x != '--fondo']
+    iniciar_gateway(root)
+    args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
     opciones = {'start_new_session': True}
     if os.name == 'nt':
         opciones = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
@@ -1471,9 +1604,15 @@ def main():
     ap.add_argument('--espera-max', type=float, default=12,
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
+    ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
+                    help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
+    ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
+    ap.add_argument('--csv', nargs='?', const='-', metavar='RUTA',
+                    help='exporta métricas CSV a stdout (-) o a un fichero UTF-8')
     ap.add_argument('--fondo', action='store_true', help=f'lanza el bucle desacoplado, con la salida en {LOG}')
     ap.add_argument('--parar', action='store_true', help='pide al bucle en marcha que pare tras el paso en curso')
     ap.add_argument('--agente', metavar='ROL', help=f'lanza un rol (hades, clio, cronos) según {CONFIG}')
+    ap.add_argument('--prompt', help='mandato directo para --agente')
     ap.add_argument('--prompt-file', type=Path, help='mandato para --agente (si no, por la entrada estándar)')
     ap.add_argument('--verificar', nargs='?', const='suite', metavar='CMD',
                     help='ejecuta la suite (o CMD) o reutiliza su resultado en verde para el mismo árbol')
@@ -1483,11 +1622,43 @@ def main():
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
 
+    if a.metricas is not None:
+        spec = importlib.util.spec_from_file_location('adevv_metricas', SKILL.with_name('metricas.py'))
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        try:
+            return modulo.mostrar(root, backlog(root), a.version_filtro or a.metricas, a.csv, sys.stdout)
+        except (ValueError, OSError) as error:
+            ap.error(str(error))
+    if a.csv is not None or a.version_filtro is not None:
+        ap.error('--csv y --version-filtro requieren --metricas / --metrics.')
+
     if a.agente:
-        prompt = a.prompt_file.read_text(encoding='utf-8') if a.prompt_file else sys.stdin.read()
-        if not prompt.strip():
-            sys.exit('Falta el mandato: --prompt-file o entrada estándar.')
-        return agente(root, a.agente, prompt)
+        borrar_prompt_file = False
+        ruta_prompt_file = None
+        prompt = None
+        if a.prompt is not None:
+            prompt = a.prompt
+        elif a.prompt_file is not None:
+            ruta_prompt_file = (root / a.prompt_file).resolve()
+            if not ruta_prompt_file.exists():
+                sys.exit(f'No existe el fichero de prompt: {a.prompt_file}')
+            prompt = ruta_prompt_file.read_text(encoding='utf-8')
+            if ruta_prompt_file.parent == root.resolve() and not es_fichero_rastreado_git(root, ruta_prompt_file):
+                borrar_prompt_file = True
+        else:
+            prompt = sys.stdin.read()
+
+        try:
+            if not prompt or not prompt.strip():
+                sys.exit('Falta el mandato: --prompt, --prompt-file o entrada estándar.')
+            return agente(root, a.agente, prompt)
+        finally:
+            if borrar_prompt_file and ruta_prompt_file and ruta_prompt_file.exists():
+                try:
+                    ruta_prompt_file.unlink()
+                except OSError:
+                    pass
     if a.verificar:
         cmd = suite(root, a) if a.verificar == 'suite' else a.verificar
         if not cmd:
@@ -1533,6 +1704,8 @@ def cierre_de_version(e):
 
 
 def bucle(a, root):
+    if not a.estado:
+        iniciar_gateway(root)
     if a.idea and not (root / a.docs / 'requirements.md').exists():
         (root / a.docs).mkdir(parents=True, exist_ok=True)
         (root / a.docs / 'requirements.md').write_text(a.idea + '\n', encoding='utf-8')
@@ -1615,12 +1788,14 @@ def bucle(a, root):
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
             if codigo and cuota_propia is not None:
+                m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota_propia)
                 cuotas_paso.append(cuota_propia)
                 if hay_mas_reservas:
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
                                      'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
-                                     **({'escalado': True} if escalado else {})})
+                                     **({'escalado': True} if escalado else {}),
+                                     'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
                           f'conmutando a reserva...', flush=True)
                     arnes_anterior = arnes_paso

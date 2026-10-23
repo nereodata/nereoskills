@@ -98,6 +98,35 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue(sesiones_file.exists())
         self.assertEqual(gateway.obtener_sesion(self.root, '12345', 'claude'), 'sess-101')
 
+    def test_conversation_coexistence_with_telegram_false_inherits_atenea(self):
+        cfg = {
+            'atenea': {'harness': 'codex', 'model': 'model-atenea'},
+            'telegram': False,
+        }
+        with patch.object(motor, 'config', return_value=cfg), \
+             patch.object(gateway, 'invocar', return_value=(0, 'sess-tg', 'Respuesta')) as inv:
+            resp = self.responder('Hola')
+        self.assertEqual(resp, 'Respuesta')
+        inv.assert_called_once()
+        cfg_usada = inv.call_args.args[2] if len(inv.call_args.args) > 2 else inv.call_args.kwargs.get('cfg')
+        self.assertEqual(cfg_usada.get('harness'), 'codex')
+        self.assertEqual(cfg_usada.get('model'), 'model-atenea')
+
+    def test_conversation_coexistence_with_telegram_events_dict_inherits_atenea(self):
+        cfg = {
+            'atenea': {'harness': 'codex', 'model': 'model-atenea', 'effort': 'high'},
+            'telegram': {'eventos': ['version'], 'model': 'model-overridden'},
+        }
+        with patch.object(motor, 'config', return_value=cfg), \
+             patch.object(gateway, 'invocar', return_value=(0, 'sess-tg', 'Respuesta')) as inv:
+            resp = self.responder('Hola')
+        self.assertEqual(resp, 'Respuesta')
+        inv.assert_called_once()
+        cfg_usada = inv.call_args.args[2] if len(inv.call_args.args) > 2 else inv.call_args.kwargs.get('cfg')
+        self.assertEqual(cfg_usada.get('harness'), 'codex')
+        self.assertEqual(cfg_usada.get('model'), 'model-overridden')
+        self.assertEqual(cfg_usada.get('effort'), 'high')
+
     def test_conversation_reuses_existing_session(self):
         gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-existente')
         with patch.object(gateway, 'invocar', return_value=(0, 'sess-renovada', 'Respuesta continua.')) as inv:
