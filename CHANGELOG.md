@@ -2,6 +2,15 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.5.0] - 2026-10-24
+
+### A?adido
+
+#### General
+- **T-ADV-0018** ? Auto-recarga autom?tica del bucle y del gateway de Telegram al cambiar la versi?n activa de Adevv
+- **T-ADV-0019** ? Firma con la versi?n de Adevv al pie de todos los mensajes de Telegram
+- **T-ADV-0020** ? Comando independiente /agentes (--agentes) con porcentaje de cuota consumida por modelo y limpieza de /estado
+
 ## [0.4.0] - 2026-10-23
 
 ### Añadido
