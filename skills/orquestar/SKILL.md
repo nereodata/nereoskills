@@ -100,7 +100,7 @@ Al arrancar el bucle en primer o segundo plano, esas credenciales también activ
 "telegram": {"eventos": ["version", "cuota", "respuesta"]}
 ```
 
-`adevv orquestar --aviso-prueba` envía un mensaje de prueba. Un aviso que no se puede enviar se anota en el log y el bucle sigue. Parar con `adevv orquestar --parar` no avisa.
+`adevv orquestar --aviso-prueba` envía un mensaje de prueba. Un aviso que no se puede enviar se anota en el log y el bucle sigue. Parar con `adevv orquestar --parar` no avisa. Todos los avisos enviados a Telegram por el bucle añaden al pie la firma con la versión de Adevv en ejecución (`— Adevv vX.Y.Z`).
 
 **Buzón.** Las tareas y bugs pedidos por Telegram con el bucle en marcha esperan en `orquestar_buzon.jsonl`. Al empezar cada paso, el bucle los registra sin versión (`status: backlog`), los commitea solos (`docs(plan): altas desde Telegram (…)`) y avisa del ID. No entran en la versión en curso: les pones versión tú, o `revisar-deuda` si son bugs.
 

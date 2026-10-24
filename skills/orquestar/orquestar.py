@@ -59,6 +59,63 @@ PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
 
+def version_adevv(script=None):
+    """Devuelve la versión de Adevv del proceso en ejecución (deducida del almacén o metadatos)."""
+    try:
+        p = Path(script or __file__).resolve()
+        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
+        if len(p.parents) >= 3 and p.parents[2].parent == home / 'versions':
+            v = p.parents[2].name
+            if re.fullmatch(r'v?\d+(\.\d+)*', v):
+                return v.lstrip('v')
+        if p.is_relative_to(home / 'versions'):
+            rel = p.relative_to(home / 'versions')
+            if rel.parts and re.fullmatch(r'v?\d+(\.\d+)*', rel.parts[0]):
+                return rel.parts[0].lstrip('v')
+    except (OSError, ValueError):
+        pass
+    try:
+        import adevv
+        v = getattr(adevv, '__version__', None)
+        if isinstance(v, str) and v.strip():
+            return v.strip().lstrip('v')
+    except Exception:
+        pass
+    try:
+        for padre in Path(script or __file__).resolve().parents:
+            pyproj = padre / 'pyproject.toml'
+            if pyproj.is_file():
+                m = re.search(r"version\s*=\s*['\"]([^'\"]+)['\"]", pyproj.read_text(encoding='utf-8'))
+                if m:
+                    return m.group(1).strip().lstrip('v')
+    except Exception:
+        pass
+    return '0.5.0'
+
+
+def tiene_firma(texto):
+    """Indica si el texto ya termina con una firma de versión de Adevv."""
+    if not texto or not isinstance(texto, str):
+        return False
+    lineas = [l.strip() for l in texto.strip().splitlines() if l.strip()]
+    if not lineas:
+        return False
+    return bool(re.fullmatch(r'[—–-]\s*Adevv\s+v\S*(?:\s*·\s*.+)?', lineas[-1]))
+
+
+def firmar(texto, extra=None, script=None):
+    """Añade la firma de versión al pie de un mensaje de Telegram si no la tiene ya."""
+    if not texto or not isinstance(texto, str):
+        return texto
+    if tiene_firma(texto):
+        return texto
+    ver = version_adevv(script)
+    firma = f'— Adevv v{ver}'
+    if extra:
+        firma += f' · {extra}'
+    return f'{texto.rstrip()}\n\n{firma}'
+
+
 def version_activa_distinta(script):
     """Devuelve el homólogo activo solo para motores del almacén versionado."""
     try:
@@ -1331,6 +1388,7 @@ def enviar(token, chat, texto, markdown=False):
     """Envía un mensaje; si Telegram rechaza el Markdown, lo reintenta en texto plano. Nunca lanza."""
     import urllib.parse
     import urllib.request
+    texto = firmar(texto)
     error = None
     for modo in ('Markdown', None) if markdown else (None,):
         campos = {'chat_id': chat, 'text': texto, 'disable_web_page_preview': 'true', **({'parse_mode': modo} if modo else {})}
@@ -1352,7 +1410,8 @@ def avisar(root, evento, texto):
     if not cfg or (evento and evento not in cfg[2]):
         return False
     token, usuarios, _ = cfg
-    return all([enviar(token, u, f'[{root.name}] {texto}') for u in usuarios])
+    texto_firmado = firmar(f'[{root.name}] {texto}')
+    return all([enviar(token, u, texto_firmado) for u in usuarios])
 
 
 def parar(root, evento, texto):

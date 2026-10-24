@@ -31,6 +31,7 @@ _spec_metricas = importlib.util.spec_from_file_location(
     'metricas_gateway', Path(__file__).resolve().parents[1] / 'orquestar' / 'metricas.py')
 metricas = importlib.util.module_from_spec(_spec_metricas)
 _spec_metricas.loader.exec_module(metricas)
+firmar = motor.firmar
 
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
 PID = 'telegram.pid'
@@ -201,7 +202,8 @@ def conversar(root, usuario, texto):
 
     if nueva_sesion:
         guardar_sesion(root, usuario, harness, nueva_sesion)
-    return respuesta
+    modelo = cfg.get('model') or 'predeterminado'
+    return firmar(respuesta, extra=f'{harness}/{modelo}')
 
 
 def resumen_metricas(root, filtro):
@@ -229,40 +231,45 @@ def responder(root, usuario, texto, autorizados):
     comando, _, argumento = texto.strip().partition(' ')
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
-        return motor.parte(root)
-    if comando in ('/parar', '/stop'):
+        resp = motor.parte(root)
+    elif comando in ('/agentes', '/agents'):
+        det = motor.detalle_estado(root, motor.estado(root, 'docs/requirements'))
+        resp = '\n'.join(det) if isinstance(det, (list, tuple)) else str(det or '')
+    elif comando in ('/parar', '/stop'):
         if not (root / motor.PID).exists():
-            return 'El bucle ya está parado.'
+            return firmar('El bucle ya está parado.')
         motor.excluir(root)
         (root / motor.PARADA).touch()
-        return 'El bucle se detendrá al terminar el paso en curso.'
-    if comando in ('/lanzar', '/run'):
+        return firmar('El bucle se detendrá al terminar el paso en curso.')
+    elif comando in ('/lanzar', '/run'):
         if (root / motor.PID).exists():
-            return 'El bucle ya está en marcha.'
+            return firmar('El bucle ya está en marcha.')
         estado = motor.estado(root, 'docs/requirements')
         try:
             motor.en_fondo(root, argumentos=[])
         except SystemExit as error:
-            return str(error)
+            return firmar(str(error))
         paso = ' '.join(str(x) for x in estado[1:3] if x)
-        return f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}'
-    if comando in ('/metricas', '/metrics'):
-        return resumen_metricas(root, argumento or 'ultima')
-    if comando in ALTAS:
+        return firmar(f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}')
+    elif comando in ('/metricas', '/metrics'):
+        resp = resumen_metricas(root, argumento or 'ultima')
+    elif comando in ALTAS:
         if not argumento:
-            return f'Uso: {comando} <título>'
+            return firmar(f'Uso: {comando} <título>')
         motor.apuntar(root, ALTAS[comando], argumento, str(usuario))
         if (root / motor.PID).exists():
-            return f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.'
+            return firmar(f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.')
         hechos = motor.ingerir(root)
-        return '\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \
-            or 'Apuntado; se registrará en el próximo intento.'
-    if comando in ('/nuevo', '/reset'):
+        return firmar('\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \
+            or 'Apuntado; se registrará en el próximo intento.')
+    elif comando in ('/nuevo', '/reset'):
         borrar_sesion(root, usuario)
-        return 'Hilo de conversación reiniciado.'
-    if comando in ('/start', '/ayuda', '/help'):
-        return AYUDA
-    return conversar(root, usuario, texto)
+        return firmar('Hilo de conversación reiniciado.')
+    elif comando in ('/start', '/ayuda', '/help'):
+        resp = AYUDA
+    else:
+        return conversar(root, usuario, texto)
+    return firmar(resp)
 
 
 def actualizaciones(token, desde=None, espera=25):
@@ -383,7 +390,7 @@ def escuchar(root, token, autorizados, vueltas=None, desde=None):
                 respuesta = responder(root, m.get('from', {}).get('id', ''), m.get('text') or '', autorizados)
             except Exception as ex:
                 print(f'[gateway] error con el mensaje {u["update_id"]}: {ex!r}', flush=True)
-                respuesta = 'No he podido procesarlo; mira el log del gateway.'
+                respuesta = firmar('No he podido procesarlo; mira el log del gateway.')
             if respuesta and m.get('chat', {}).get('id'):
                 motor.enviar(token, m['chat']['id'], respuesta, markdown=True)
 
