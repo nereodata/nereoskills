@@ -34,7 +34,7 @@ class TestFirmaGateway(unittest.TestCase):
         with patch.object(gateway.motor, 'version_adevv', return_value='0.5.0', create=True), \
              patch.object(gateway.motor, 'parte', return_value='Parte del bucle'), \
              patch.object(gateway.motor, 'estado', return_value=('PASO', 'task-dev', 'T-ADV-0019', 'release/v0.5')), \
-             patch.object(gateway.motor, 'detalle_estado', return_value=['Agentes para task-dev T-ADV-0019', 'hades: agy/gemini-4-argon-medium', 'Sin agotamiento registrado']), \
+             patch.object(gateway.motor, 'informe_agentes', return_value='Agentes para task-dev T-ADV-0019\nhades: agy/gemini-4-argon-medium'), \
              patch.object(gateway.motor, 'en_fondo'), \
              patch.object(gateway.motor, 'apuntar'), \
              patch.object(gateway.motor, 'ingerir', return_value=[('T-ADV-0099', 'Tarea')]), \

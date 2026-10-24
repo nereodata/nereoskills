@@ -9,6 +9,7 @@ Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 import argparse
 import importlib.util
 import json
+import math
 import os
 import re
 import shlex
@@ -1563,6 +1564,163 @@ def perfil_estado(cfg):
             + (f' ({cfg["effort"]})' if cfg.get('effort') else ''))
 
 
+def perfiles_agentes(root):
+    """Enumera perfiles declarados y reservas con su configuración heredada."""
+    resultado = []
+    cfg = config(root)
+    for rol in ('artemisa', 'hades', 'atenea', 'clio', 'cronos', 'development'):
+        base = cfg.get(rol)
+        if not isinstance(base, dict):
+            continue
+        variantes = [('base', ajustes(base))]
+        for dificultad in base.get('dificultad', {}):
+            variantes.append((f'dificultad {dificultad}', ajustes(base, dificultad=dificultad)))
+        for paso in base.get('pasos', {}):
+            variantes.append((f'paso {paso}', ajustes(base, paso)))
+            for dificultad in base.get('dificultad', {}):
+                variantes.append((f'dificultad {dificultad}, paso {paso}',
+                                  ajustes(base, paso, dificultad)))
+        if isinstance(base.get('escalada'), dict):
+            variantes.append(('escalada', {**ajustes(base), **base['escalada']}))
+        for etiqueta, perfil in variantes:
+            resultado.append((rol, etiqueta, perfil))
+            for numero, reserva in enumerate(lista_reservas(perfil), 1):
+                resultado.append((rol, f'{etiqueta}, reserva {numero}',
+                                  {**perfil, **reserva}))
+    return resultado
+
+
+def numero_cuota(valor):
+    """Admite únicamente números reales finitos, excluyendo booleanos."""
+    return isinstance(valor, (int, float)) and not isinstance(valor, bool) and math.isfinite(valor)
+
+
+def limite_cuota(perfil):
+    """Límite configurable o referencia ilustrativa de tokens por familia."""
+    limite = perfil.get('cuota_tokens_5h')
+    if numero_cuota(limite) and limite > 0:
+        return limite
+    modelo = str(perfil.get('model') or '').lower()
+    if 'flash' in modelo:
+        return 20_000_000
+    if any(familia in modelo for familia in ('argon', 'pro', 'opus', 'sonnet')):
+        return 5_000_000
+    return 10_000_000
+
+
+def cuota_codex(instante):
+    """Última cuota primaria vigente de la cuenta, leída sin modificar sesiones."""
+    sesiones = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'sessions'
+    ultima = None
+    try:
+        for ruta in sesiones.rglob('*.jsonl'):
+            try:
+                with ruta.open(encoding='utf-8') as archivo:
+                    for linea in archivo:
+                        try:
+                            evento = json.loads(linea)
+                            if not isinstance(evento, dict):
+                                continue
+                            payload = evento.get('payload')
+                            if not isinstance(payload, dict) or payload.get('type') != 'token_count':
+                                continue
+                            primary = (payload.get('rate_limits') or {}).get('primary') or {}
+                            porcentaje, reset = primary.get('used_percent'), primary.get('resets_at')
+                            fecha = fecha_estado(evento.get('timestamp'))
+                            if not (numero_cuota(porcentaje) and 0 <= porcentaje <= 100 and numero_cuota(reset)):
+                                continue
+                            hasta = datetime.fromtimestamp(reset).astimezone()
+                            if (fecha and instante - timedelta(hours=5) <= fecha <= instante < hasta
+                                    and (ultima is None or fecha > ultima[0])):
+                                ultima = (fecha, porcentaje, hasta)
+                        except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+                            continue
+            except (OSError, UnicodeError):
+                continue
+    except OSError:
+        pass
+    return ultima
+
+
+def consumo_cuotas(root, instante):
+    """Suma la ventana de tokens y conserva todo agotamiento todavía vigente."""
+    uso, cuotas = {}, {}
+    for fila in leer_metricas(root):
+        fecha = fecha_estado(fila.get('fecha'))
+        if fecha is None or fecha > instante:
+            continue
+        arnes = fila.get('arnes') or 'desconocido'
+        modelos = fila.get('modelos') or {}
+        if instante - timedelta(hours=5) <= fecha:
+            for modelo, tokens in modelos.items():
+                clave = (arnes, modelo)
+                uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
+                                                     ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
+        segundos = fila.get('cuota_espera_s')
+        modelo = fila.get('modelo_cuota')
+        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
+            segundos = fila['espera_s']
+            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
+        if modelo and numero_cuota(segundos) and segundos >= 0:
+            try:
+                hasta = fecha + timedelta(seconds=segundos)
+            except OverflowError:
+                continue
+            if hasta > instante:
+                clave = (arnes, modelo)
+                uso.setdefault(clave, 0)
+                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
+    return uso, cuotas
+
+
+def informe_agentes(root, docs='docs/requirements'):
+    """Informe de roles y porcentaje consumido para CLI y Telegram."""
+    e = estado(root, docs)
+    instante = fecha_estado(ahora())
+    perfiles = perfiles_agentes(root)
+    lineas = ['Agentes configurados:']
+    for rol, etiqueta, perfil in perfiles:
+        lineas.append(f'{rol}: {perfil_estado(perfil)} [{etiqueta}]')
+    if not perfiles:
+        lineas.append('Sin roles definidos en orchestration.json')
+    if e[0] == 'PASO':
+        paso, iid = e[1:3]
+        dificultad = dificultad_de(root, iid) if iid else None
+        rol, perfil = rol_de(root, paso, dificultad=dificultad)
+        perfil, escalado = escalada(root, rol, perfil, iid)
+        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
+        lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
+        for nombre, efectivo in ((rol, perfil), ('hades', hades)):
+            lineas.append(f'{nombre}: {perfil_estado(efectivo)}'
+                          + (' [escalada]' if nombre == rol and escalado else ''))
+    limites = {}
+    for _, _, perfil in perfiles:
+        clave = (perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado')
+        limite = limite_cuota(perfil)
+        limites[clave] = min(limites.get(clave, limite), limite)
+    uso, cuotas = consumo_cuotas(root, instante)
+    nativo = cuota_codex(instante) if any(h == 'codex' for h, _ in limites) else None
+    lineas.append('Cuota por modelo (referencia local cuando no hay dato nativo):')
+    for clave, limite in sorted(limites.items()):
+        tokens = uso.get(clave, 0)
+        hasta = cuotas.get(clave)
+        if hasta:
+            minutos = math.ceil((hasta - instante).total_seconds() / 60)
+            detalle = f'100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min)'
+        elif clave[0] == 'codex' and nativo:
+            detalle = f'{nativo[1]:.1f}% consumido · resetea {nativo[2]:%H:%M %z}'
+        else:
+            porcentaje = min(100.0, round(tokens * 100.0 / limite, 1))
+            detalle = f'{porcentaje:.1f}% consumido ({tokens} / {limite} tokens en 5 h)'
+        lineas.append(f'{clave[0]}/{clave[1]}: {detalle}')
+    espera = root / ESPERA
+    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
+    if hasta and hasta > instante:
+        lineas.append(f'Espera global: hasta {hasta:%H:%M %z} '
+                      f'({math.ceil((hasta - instante).total_seconds() / 60)} min restantes)')
+    return '\n'.join(lineas)
+
+
 def detalle_estado(root, e):
     """Presentación común de agentes efectivos y evidencia reciente de uso/cuota."""
     instante = fecha_estado(ahora())
@@ -1580,30 +1738,9 @@ def detalle_estado(root, e):
             lineas.append(f'{nombre}: {perfil_estado(perfil)}'
                           + (' [escalada]' if nombre == rol and escalado else '')
                           + ('; reservas: ' + ', '.join(perfil_estado(r) for r in reservas) if reservas else ''))
-    uso, cuotas = {}, {}
+    uso, cuotas = consumo_cuotas(root, instante)
     for perfil in perfiles:
         uso.setdefault((perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado'), 0)
-    for fila in leer_metricas(root):
-        fecha = fecha_estado(fila.get('fecha'))
-        if fecha is None or not instante - timedelta(hours=5) <= fecha <= instante:
-            continue
-        arnes = fila.get('arnes') or 'desconocido'
-        modelos = fila.get('modelos') or {}
-        for modelo, tokens in modelos.items():
-            clave = (arnes, modelo)
-            uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
-                                                 ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
-        segundos = fila.get('cuota_espera_s')
-        modelo = fila.get('modelo_cuota')
-        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
-            segundos = fila['espera_s']
-            modelo = next(iter(modelos)) if len(modelos) == 1 else None
-        if modelo and isinstance(segundos, (int, float)):
-            clave = (arnes, modelo)
-            hasta = fecha + timedelta(seconds=segundos)
-            uso.setdefault(clave, 0)
-            if hasta > instante:
-                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
     espera = root / ESPERA
     hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
     if hasta and hasta > instante:
@@ -1626,8 +1763,6 @@ def resumen(root):
         print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
-    for linea in detalle_estado(root, estado(root, 'docs/requirements')):
-        print(f'[orquestar] {linea}')
     if not (root / METRICAS).exists():
         return
     filas = leer_metricas(root)
@@ -1660,7 +1795,6 @@ def parte(root, docs='docs/requirements'):
         marcha = 'en marcha' if (root / PID).exists() else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
-    lineas.extend(detalle_estado(root, e))
     items = backlog(root)
     abiertas = sorted({i['version'] for i in items if vkey(i['version']) and i['status'] not in CERRADO}, key=vkey)
     for v in abiertas[:1]:
@@ -1731,6 +1865,7 @@ def main():
     ap.add_argument('--espera-max', type=float, default=12,
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
+    ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
     ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
                     help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
     ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
@@ -1748,6 +1883,10 @@ def main():
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+
+    if a.agentes:
+        print(informe_agentes(root, a.docs))
+        return 0
 
     if a.metricas is not None:
         spec = importlib.util.spec_from_file_location('adevv_metricas', SKILL.with_name('metricas.py'))

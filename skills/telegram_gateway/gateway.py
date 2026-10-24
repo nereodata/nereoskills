@@ -38,6 +38,7 @@ PID = 'telegram.pid'
 LOG = 'telegram.log'
 PARADA = 'telegram.parar'
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
+         '/agentes (o /agents) — roles, modelos y porcentaje de cuota consumida\n'
          '/lanzar (o /run) — lanza el bucle en segundo plano\n'
          '/parar (o /stop) — para al terminar el paso en curso\n'
          '/metricas [filtro] (o /metrics) — consumo por tarea; por defecto ultima\n'
@@ -233,8 +234,7 @@ def responder(root, usuario, texto, autorizados):
     if comando in ('/estado', '/status'):
         resp = motor.parte(root)
     elif comando in ('/agentes', '/agents'):
-        det = motor.detalle_estado(root, motor.estado(root, 'docs/requirements'))
-        resp = '\n'.join(det) if isinstance(det, (list, tuple)) else str(det or '')
+        resp = motor.informe_agentes(root)
     elif comando in ('/parar', '/stop'):
         if not (root / motor.PID).exists():
             return firmar('El bucle ya está parado.')

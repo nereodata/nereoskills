@@ -1,7 +1,5 @@
 """Estado operativo compartido entre CLI y Telegram (T-ADV-0014)."""
-import contextlib
 import importlib.util
-import io
 import json
 import tempfile
 import unittest
@@ -15,7 +13,7 @@ SPEC.loader.exec_module(motor)
 
 
 class EstadoAgentesTests(unittest.TestCase):
-    """Contratos observables de ambas consultas, con reloj fijo y sin red."""
+    """Compatibilidad del detalle histórico, con reloj fijo y sin red."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -34,16 +32,13 @@ class EstadoAgentesTests(unittest.TestCase):
         (self.root / motor.CONFIG).write_text(json.dumps(self.cfg), encoding='utf-8')
 
     def outputs(self, step='task-dev', kind='PASO'):
-        """Consulta las dos superficies con idénticas dependencias de disco."""
+        """Consulta el helper histórico tras separar el estado conciso."""
         with (patch.object(motor, 'estado', return_value=(kind, step, 'T-ADV-0014', 'release/v0.4')),
               patch.object(motor, 'dificultad_de', return_value='dificil'),
               patch.object(motor, 'backlog', return_value=[]),
               patch.object(motor, 'ahora', return_value='2026-10-23T12:00:00+00:00')):
-            telegram = motor.parte(self.root)
-            cli = io.StringIO()
-            with contextlib.redirect_stdout(cli):
-                motor.resumen(self.root)
-            return telegram, cli.getvalue()
+            detalle = '\n'.join(motor.detalle_estado(self.root, motor.estado(self.root, 'docs/requirements')))
+            return (detalle,)
 
     def metrics(self, rows):
         (self.root / motor.METRICAS).write_text('\n'.join(json.dumps(r) for r in rows), encoding='utf-8')
