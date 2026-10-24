@@ -18,7 +18,7 @@ La tabla de resultados, su precedencia, sus mensajes y las definiciones (versió
 
 **Aplicación**
 - **RF-F03-07** Cuando se aplique una actualización, el sistema deberá instalar desde el origen fijo el commit al que apuntaba la etiqueta en la consulta, comprobar que la versión instalada es la de la etiqueta, sincronizar los destinos (`F-01`) y ejecutar la acción de la orden que la disparó con la versión nueva; si la instalación falla, no termina en ≤ 180 s o la versión no coincide, deberá ejecutar la acción con la versión anterior, intacta, y guardar la versión como fallida.
-- **RF-F03-08** El sistema no deberá modificar durante la instalación ningún archivo que use un proceso de Adevv en marcha, incluida la propia orden y los gateways (que siguen con su versión hasta reiniciarse), ni lanzar un bucle o un gateway antes de que la instalación haya terminado o fallado.
+- **RF-F03-08** El sistema no deberá modificar durante la instalación ningún archivo que use un proceso de Adevv en marcha, incluida la propia orden y los gateways (que siguen con su versión durante la instalación y la operación en curso, y hasta reiniciarse en versiones anteriores a `v0.5.0`, sin perjuicio de la auto-recarga cooperativa entre ciclos de los motores en `skills/` a partir de `v0.5.0` según `DEC-P10`), ni lanzar un bucle o un gateway antes de que la instalación haya terminado o fallado.
 - **RF-F03-09** Si la sincronización de algún destino falla tras instalar, entonces la versión instalada deberá quedar en la nueva, el destino `DESFASADO` (se reintenta según `RF-F01-11`) y el mensaje de `APLICADA` deberá añadir «Arneses sin sincronizar: <arnés>: <causa>.».
 
 **Orden manual y vuelta atrás**
@@ -54,7 +54,7 @@ Comprobación automática; instalada 0.1.0; publicada 0.2.0 salvo que se diga; s
 | Caso | Comportamiento |
 |---|---|
 | Un paso del bucle ejecuta `adevv orquestar --verificar` | `DENTRO_DE_ORQUESTACION`: ni consulta ni instala |
-| El gateway lleva días en marcha | No impide la actualización; sigue con su versión y el aviso pide reiniciarlo |
+| El gateway lleva días en marcha | No impide la actualización; sigue con su versión durante la instalación y la operación en curso (y hasta reiniciarse en versiones anteriores a `v0.5.0`, o hasta su auto-recarga cooperativa entre vueltas de polling desde `v0.5.0` según `DEC-P10`) y el aviso del instalador pide reiniciarlo |
 | `adevv --version` abierto en otra consola | Tipo `otro`: no aplaza; sigue con su versión |
 | Bucle lanzado desde el antiguo submódulo o la copia congelada | Cuenta como bucle en marcha (su línea de órdenes ejecuta `orquestar.py`) |
 | PID reutilizado por otro programa en `orquestar.pid` | No cuenta: un proceso cuenta por lo que ejecuta, no por el archivo |

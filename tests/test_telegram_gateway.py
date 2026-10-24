@@ -56,7 +56,7 @@ class GatewayTests(unittest.TestCase):
 
     def test_task_without_loop_is_registered_now_without_version(self):
         respuesta = self.responder('/tarea Exportar informe')
-        self.assertEqual(respuesta, 'Registrada T-ADV-0003: Exportar informe (backlog, sin versión).')
+        self.assertEqual(respuesta, motor.firmar('Registrada T-ADV-0003: Exportar informe (backlog, sin versión).'))
         fm = motor.frontmatter(self.root / 'docs/plan/tasks/T-ADV-0003-exportar-informe.md')
         self.assertEqual((fm['status'], fm['version']), ('backlog', ''))
         self.assertIn('T-ADV-0003', self.git('log', '-1', '--format=%s'))
@@ -73,7 +73,7 @@ class GatewayTests(unittest.TestCase):
         self.assertIn('Exportar informe', (self.root / motor.BUZON).read_text(encoding='utf-8'))
 
     def test_empty_title_asks_for_usage(self):
-        self.assertEqual(self.responder('/tarea'), 'Uso: /tarea <título>')
+        self.assertEqual(self.responder('/tarea'), motor.firmar('Uso: /tarea <título>'))
         self.assertFalse((self.root / motor.BUZON).exists())
 
     def test_status_summarizes_loop_version_and_backlog(self):
@@ -91,7 +91,7 @@ class GatewayTests(unittest.TestCase):
     def test_free_conversation_invokes_model_and_saves_session(self):
         with patch.object(gateway, 'invocar', return_value=(0, 'sess-101', 'Hola, soy el asistente.')) as inv:
             resp = self.responder('Hola, ¿qué hace este proyecto?')
-        self.assertEqual(resp, 'Hola, soy el asistente.')
+        self.assertEqual(resp, motor.firmar('Hola, soy el asistente.', extra='claude/predeterminado'))
         self.assertEqual(inv.call_count, 1)
         self.assertIsNone(inv.call_args.kwargs['sesion'])
         sesiones_file = self.root / getattr(motor, 'TELEGRAM_SESIONES', 'orquestar_telegram.json')
@@ -106,7 +106,7 @@ class GatewayTests(unittest.TestCase):
         with patch.object(motor, 'config', return_value=cfg), \
              patch.object(gateway, 'invocar', return_value=(0, 'sess-tg', 'Respuesta')) as inv:
             resp = self.responder('Hola')
-        self.assertEqual(resp, 'Respuesta')
+        self.assertEqual(resp, motor.firmar('Respuesta', extra='codex/model-atenea'))
         inv.assert_called_once()
         cfg_usada = inv.call_args.args[2] if len(inv.call_args.args) > 2 else inv.call_args.kwargs.get('cfg')
         self.assertEqual(cfg_usada.get('harness'), 'codex')
@@ -120,7 +120,7 @@ class GatewayTests(unittest.TestCase):
         with patch.object(motor, 'config', return_value=cfg), \
              patch.object(gateway, 'invocar', return_value=(0, 'sess-tg', 'Respuesta')) as inv:
             resp = self.responder('Hola')
-        self.assertEqual(resp, 'Respuesta')
+        self.assertEqual(resp, motor.firmar('Respuesta', extra='codex/model-overridden'))
         inv.assert_called_once()
         cfg_usada = inv.call_args.args[2] if len(inv.call_args.args) > 2 else inv.call_args.kwargs.get('cfg')
         self.assertEqual(cfg_usada.get('harness'), 'codex')
@@ -131,7 +131,7 @@ class GatewayTests(unittest.TestCase):
         gateway.guardar_sesion(self.root, '12345', 'claude', 'sess-existente')
         with patch.object(gateway, 'invocar', return_value=(0, 'sess-renovada', 'Respuesta continua.')) as inv:
             resp = self.responder('Siguiente duda')
-        self.assertEqual(resp, 'Respuesta continua.')
+        self.assertEqual(resp, motor.firmar('Respuesta continua.', extra='claude/predeterminado'))
         inv.assert_called_once()
         self.assertEqual(inv.call_args.kwargs['sesion'], 'sess-existente')
         self.assertEqual(gateway.obtener_sesion(self.root, '12345', 'claude'), 'sess-renovada')
@@ -143,7 +143,7 @@ class GatewayTests(unittest.TestCase):
             (0, 'sess-nueva', 'Respuesta en sesion nueva.')
         ]) as inv:
             resp = self.responder('Pregunta tras fallo')
-        self.assertEqual(resp, 'Respuesta en sesion nueva.')
+        self.assertEqual(resp, motor.firmar('Respuesta en sesion nueva.', extra='claude/predeterminado'))
         self.assertEqual(inv.call_count, 2)
         self.assertEqual(inv.call_args_list[0].kwargs['sesion'], 'sess-invalida')
         self.assertIsNone(inv.call_args_list[1].kwargs['sesion'])
@@ -195,7 +195,8 @@ class GatewayTests(unittest.TestCase):
             gateway.escuchar(self.root, 'tok', AUTORIZADOS, vueltas=1)
         act.assert_called_once_with('tok', None)
         self.assertEqual([c.args[1:3] for c in enviar.call_args_list],
-                         [(555, 'No he podido procesarlo; mira el log del gateway.'), (555, 'ayuda')])
+                         [(555, motor.firmar('No he podido procesarlo; mira el log del gateway.')),
+                          (555, 'ayuda')])
 
 
 

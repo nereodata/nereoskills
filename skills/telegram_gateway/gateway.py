@@ -31,12 +31,14 @@ _spec_metricas = importlib.util.spec_from_file_location(
     'metricas_gateway', Path(__file__).resolve().parents[1] / 'orquestar' / 'metricas.py')
 metricas = importlib.util.module_from_spec(_spec_metricas)
 _spec_metricas.loader.exec_module(metricas)
+firmar = motor.firmar
 
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
 PID = 'telegram.pid'
 LOG = 'telegram.log'
 PARADA = 'telegram.parar'
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
+         '/agentes (o /agents) — roles, modelos y porcentaje de cuota consumida\n'
          '/lanzar (o /run) — lanza el bucle en segundo plano\n'
          '/parar (o /stop) — para al terminar el paso en curso\n'
          '/metricas [filtro] (o /metrics) — consumo por tarea; por defecto ultima\n'
@@ -201,7 +203,8 @@ def conversar(root, usuario, texto):
 
     if nueva_sesion:
         guardar_sesion(root, usuario, harness, nueva_sesion)
-    return respuesta
+    modelo = cfg.get('model') or 'predeterminado'
+    return firmar(respuesta, extra=f'{harness}/{modelo}')
 
 
 def resumen_metricas(root, filtro):
@@ -229,40 +232,44 @@ def responder(root, usuario, texto, autorizados):
     comando, _, argumento = texto.strip().partition(' ')
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
-        return motor.parte(root)
-    if comando in ('/parar', '/stop'):
+        resp = motor.parte(root)
+    elif comando in ('/agentes', '/agents'):
+        resp = motor.informe_agentes(root)
+    elif comando in ('/parar', '/stop'):
         if not (root / motor.PID).exists():
-            return 'El bucle ya está parado.'
+            return firmar('El bucle ya está parado.')
         motor.excluir(root)
         (root / motor.PARADA).touch()
-        return 'El bucle se detendrá al terminar el paso en curso.'
-    if comando in ('/lanzar', '/run'):
+        return firmar('El bucle se detendrá al terminar el paso en curso.')
+    elif comando in ('/lanzar', '/run'):
         if (root / motor.PID).exists():
-            return 'El bucle ya está en marcha.'
+            return firmar('El bucle ya está en marcha.')
         estado = motor.estado(root, 'docs/requirements')
         try:
             motor.en_fondo(root, argumentos=[])
         except SystemExit as error:
-            return str(error)
+            return firmar(str(error))
         paso = ' '.join(str(x) for x in estado[1:3] if x)
-        return f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}'
-    if comando in ('/metricas', '/metrics'):
-        return resumen_metricas(root, argumento or 'ultima')
-    if comando in ALTAS:
+        return firmar(f'Lanzamiento solicitado en segundo plano. Siguiente estado previsto: {estado[0]} {paso}')
+    elif comando in ('/metricas', '/metrics'):
+        resp = resumen_metricas(root, argumento or 'ultima')
+    elif comando in ALTAS:
         if not argumento:
-            return f'Uso: {comando} <título>'
+            return firmar(f'Uso: {comando} <título>')
         motor.apuntar(root, ALTAS[comando], argumento, str(usuario))
         if (root / motor.PID).exists():
-            return f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.'
+            return firmar(f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.')
         hechos = motor.ingerir(root)
-        return '\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \
-            or 'Apuntado; se registrará en el próximo intento.'
-    if comando in ('/nuevo', '/reset'):
+        return firmar('\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \
+            or 'Apuntado; se registrará en el próximo intento.')
+    elif comando in ('/nuevo', '/reset'):
         borrar_sesion(root, usuario)
-        return 'Hilo de conversación reiniciado.'
-    if comando in ('/start', '/ayuda', '/help'):
-        return AYUDA
-    return conversar(root, usuario, texto)
+        return firmar('Hilo de conversación reiniciado.')
+    elif comando in ('/start', '/ayuda', '/help'):
+        resp = AYUDA
+    else:
+        return conversar(root, usuario, texto)
+    return firmar(resp)
 
 
 def actualizaciones(token, desde=None, espera=25):
@@ -367,10 +374,12 @@ def parar(root):
     return 0
 
 
-def escuchar(root, token, autorizados, vueltas=None):
+def escuchar(root, token, autorizados, vueltas=None, desde=None):
     """Bucle de long polling: responde a cada mensaje autorizado; un mensaje que falla no para el resto."""
-    desde, n = None, 0
+    n = 0
     while (vueltas is None or n < vueltas) and not (root / PARADA).exists():
+        if motor.recargar_version(__file__, root, PID, {'desde': desde}, 'gateway'):
+            return
         n += 1
         for u in actualizaciones(token, desde):
             if (root / PARADA).exists():
@@ -381,7 +390,7 @@ def escuchar(root, token, autorizados, vueltas=None):
                 respuesta = responder(root, m.get('from', {}).get('id', ''), m.get('text') or '', autorizados)
             except Exception as ex:
                 print(f'[gateway] error con el mensaje {u["update_id"]}: {ex!r}', flush=True)
-                respuesta = 'No he podido procesarlo; mira el log del gateway.'
+                respuesta = firmar('No he podido procesarlo; mira el log del gateway.')
             if respuesta and m.get('chat', {}).get('id'):
                 motor.enviar(token, m['chat']['id'], respuesta, markdown=True)
 
@@ -412,18 +421,22 @@ def main():
             print('[gateway] ya está en marcha', flush=True)
             return 0
         return en_fondo(root)
-    if a.gestionado:
+    recarga = motor.recibir_recarga(root, PID, __file__)
+    if recarga is None and a.gestionado:
         for _ in range(100):
             if (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
                 break
             time.sleep(0.05)
         else:
             sys.exit('No se publicó el PID del gateway; se cancela la escucha.')
-    else:
+    elif recarga is None:
         reservar(root)
     try:
         print(f'[gateway] escuchando para {root.name} ({len(autorizados)} usuarios autorizados)', flush=True)
-        escuchar(root, token, set(autorizados))
+        if recarga is None:
+            escuchar(root, token, set(autorizados))
+        else:
+            escuchar(root, token, set(autorizados), desde=recarga['desde'])
     except KeyboardInterrupt:
         pass
     finally:

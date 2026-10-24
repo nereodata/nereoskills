@@ -331,11 +331,21 @@ def main_cli(args: Optional[List[str]] = None, out: Optional[TextIO] = None, err
     actualizar_parser = subparsers.add_parser("actualizar", help="actualiza adevv a la última versión publicada o a una específica")
     actualizar_parser.add_argument("target_version", nargs="?", default=None, help="versión específica X.Y.Z a instalar")
     subparsers.add_parser("orquestar", add_help=False, help="despacha el bucle o comandos de orquestación")
+    subparsers.add_parser("agentes", add_help=False, help="muestra los agentes configurados y el porcentaje de cuota consumido")
+    subparsers.add_parser("agents", add_help=False, help="muestra los agentes configurados y el porcentaje de cuota consumido")
     subparsers.add_parser("metrics", add_help=False, help="muestra métricas de consumo y exporta CSV")
     subparsers.add_parser("metricas", add_help=False, help="muestra métricas de consumo y exporta CSV")
     subparsers.add_parser("telegram", add_help=False, help="despacha el gateway de Telegram")
     subparsers.add_parser("release", add_help=False, help="despacha scripts de gestión de lanzamientos")
     subparsers.add_parser("migrar", help="diagnostica la migración de submódulo .agents a adevv")
+
+    if args and args[0] in ("agentes", "agents"):
+        res, msg, ver = updater.evaluar_comprobacion_actualizacion(es_instalar=False)
+        if msg:
+            print(msg, file=err_stream)
+        _resincronizar_desfasados_al_arrancar(out_stream, err_stream)
+        script_path = _resolver_script("skills/orquestar/orquestar.py")
+        return _despachar_script(script_path, ["--agentes", *args[1:]], out_stream, err_stream)
 
     if args and args[0] in ("metrics", "metricas"):
         raw_sub = args[1:]
