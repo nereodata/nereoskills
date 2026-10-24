@@ -59,6 +59,74 @@ PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
 
+def version_activa_distinta(script):
+    """Devuelve el homólogo activo solo para motores del almacén versionado."""
+    try:
+        script = Path(script).resolve()
+        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
+        version_dir = script.parents[2]
+        if version_dir.parent != home / 'versions':
+            return None
+        datos = json.loads((home / 'active.json').read_text(encoding='utf-8'))
+        version = datos.get('version') if isinstance(datos, dict) else None
+        if not isinstance(version, str) or not re.fullmatch(r'\d+\.\d+\.\d+', version):
+            return None
+        destino = (home / 'versions' / version / script.relative_to(version_dir)).resolve()
+        if destino != script and destino.is_file() and destino.is_relative_to(home / 'versions' / version):
+            return destino, version
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
+    """Publica el PID del sucesor antes de cederle la ejecución entre ciclos."""
+    nueva = version_activa_distinta(script)
+    if nueva is None:
+        return False
+    destino, version = nueva
+    root = root.resolve()
+    pid = root / pid_file
+    temporal = pid.with_suffix('.recarga.tmp')
+    hijo = None
+    try:
+        if pid.read_text(encoding='utf-8').strip() != str(os.getpid()):
+            return False
+        datos = {'root': str(root), 'script': str(destino), 'estado': estado_recarga}
+        env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos)}
+        argumentos = list(sys.argv[1:])
+        if etiqueta == 'gateway':
+            argumentos += ['--root', str(root)]
+        opciones = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
+        hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env, **opciones)
+        temporal.write_text(str(hijo.pid), encoding='utf-8')
+        os.replace(temporal, pid)
+    except OSError as error:
+        if hijo is not None:
+            hijo.terminate()
+            hijo.wait()
+        temporal.unlink(missing_ok=True)
+        print(f'[{etiqueta}] no se pudo recargar: {error}', flush=True)
+        return False
+    print(f'[{etiqueta}] recargado a versión {version}', flush=True)
+    return True
+
+
+def recibir_recarga(root, pid_file, script):
+    """Consume el estado del padre solo tras recibir la propiedad del PID."""
+    texto = os.environ.pop('ADEVV_RECARGA', None)
+    if texto is None:
+        return None
+    datos = json.loads(texto)
+    if datos['root'] != str(root.resolve()) or datos['script'] != str(Path(script).resolve()):
+        raise ValueError('Transferencia de recarga destinada a otro proceso')
+    for _ in range(100):
+        if (root / pid_file).read_text(encoding='utf-8').strip() == str(os.getpid()):
+            return datos['estado']
+        time.sleep(0.05)
+    raise RuntimeError('No se publicó el PID de la recarga')
+
+
 def git(*args, env=None):
     r = subprocess.run(['git', *args], capture_output=True, text=True, encoding='utf-8', env=env)
     return r.stdout.strip()
@@ -1679,12 +1747,15 @@ def main():
         (root / PARADA).touch()
         print('[orquestar] parará al terminar el paso en curso')
         return 0
-    if not a.estado and not a.parar and not a.verificar and not a.agente and not a.aviso_prueba:
+    a.recarga = recibir_recarga(root, PID, __file__)
+    if a.recarga is None and not a.estado and not a.parar and not a.verificar and not a.agente and not a.aviso_prueba:
         validar_lanzamiento_bucle(root, a)
     if a.fondo:
         return en_fondo(root)
     if a.estado:
         resumen(root)
+    elif a.recarga is not None:
+        pass
     elif (root / PID).exists():
         sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). Si no es así, borra {PID}.')
     else:
@@ -1693,7 +1764,7 @@ def main():
     try:
         return bucle(a, root)
     finally:
-        if not a.estado:
+        if not a.estado and (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
             for f in (PID, PARADA, ESPERA):
                 (root / f).unlink(missing_ok=True)
 
@@ -1711,11 +1782,16 @@ def bucle(a, root):
         (root / a.docs / 'requirements.md').write_text(a.idea + '\n', encoding='utf-8')
 
     cmd_suite = suite(root, a)
-    sin_progreso = esperado = 0
-    for n in range(1, a.max_pasos + 1):
+    recarga = getattr(a, 'recarga', None) or {}
+    sin_progreso = recarga.get('sin_progreso', 0)
+    esperado = recarga.get('esperado', 0)
+    for n in range(recarga.get('n', 1), a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
             return 2
+        if not a.estado and recargar_version(__file__, root, PID,
+                                             {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado}, 'orquestar'):
+            return 0
         if not a.estado:
             for iid, titulo in ingerir(root):
                 print(f'[orquestar] alta desde Telegram: {iid} {titulo}', flush=True)

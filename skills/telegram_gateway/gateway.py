@@ -367,10 +367,12 @@ def parar(root):
     return 0
 
 
-def escuchar(root, token, autorizados, vueltas=None):
+def escuchar(root, token, autorizados, vueltas=None, desde=None):
     """Bucle de long polling: responde a cada mensaje autorizado; un mensaje que falla no para el resto."""
-    desde, n = None, 0
+    n = 0
     while (vueltas is None or n < vueltas) and not (root / PARADA).exists():
+        if motor.recargar_version(__file__, root, PID, {'desde': desde}, 'gateway'):
+            return
         n += 1
         for u in actualizaciones(token, desde):
             if (root / PARADA).exists():
@@ -412,18 +414,22 @@ def main():
             print('[gateway] ya está en marcha', flush=True)
             return 0
         return en_fondo(root)
-    if a.gestionado:
+    recarga = motor.recibir_recarga(root, PID, __file__)
+    if recarga is None and a.gestionado:
         for _ in range(100):
             if (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
                 break
             time.sleep(0.05)
         else:
             sys.exit('No se publicó el PID del gateway; se cancela la escucha.')
-    else:
+    elif recarga is None:
         reservar(root)
     try:
         print(f'[gateway] escuchando para {root.name} ({len(autorizados)} usuarios autorizados)', flush=True)
-        escuchar(root, token, set(autorizados))
+        if recarga is None:
+            escuchar(root, token, set(autorizados))
+        else:
+            escuchar(root, token, set(autorizados), desde=recarga['desde'])
     except KeyboardInterrupt:
         pass
     finally:
