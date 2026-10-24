@@ -73,7 +73,7 @@ def version_adevv(script=None):
             rel = p.relative_to(home / 'versions')
             if rel.parts and re.fullmatch(r'v?\d+(\.\d+)*', rel.parts[0]):
                 return rel.parts[0].lstrip('v')
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         pass
     try:
         import adevv
@@ -132,7 +132,7 @@ def version_activa_distinta(script):
         destino = (home / 'versions' / version / script.relative_to(version_dir)).resolve()
         if destino != script and destino.is_file() and destino.is_relative_to(home / 'versions' / version):
             return destino, version
-    except (OSError, ValueError, IndexError):
+    except (OSError, ValueError, IndexError, RuntimeError):
         return None
     return None
 
