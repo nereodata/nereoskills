@@ -5,7 +5,8 @@ type: funcional
 weight: 100
 dificultad: media
 version: "v0.5.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "Evitar tener que reiniciar manualmente bucles o gateways en otros proyectos tras instalar una nueva versión de Adevv"
 created_at: 2026-10-24
@@ -22,3 +23,8 @@ Lograr que cuando se instale o active una nueva versión de Adevv en `~/.adevv/a
 - [ ] **CA-M-2 (Auto-reemplazo del gateway entre vueltas de polling):** En `escuchar()` de `skills/telegram_gateway/gateway.py`, al inicio de cada vuelta de polling (cuando no hay ningún mensaje en procesamiento y antes de pedir `actualizaciones`), si detecta que la versión activa en `~/.adevv/active.json` ha cambiado respecto a la versión en ejecución, lanza o reemplaza el proceso hacia el nuevo `gateway.py` conservando `sys.argv[1:]` y el `root` del proyecto (actualizando `telegram.pid` si aplica) y termina limpiamente el proceso antiguo registrándolo en el log (`[gateway] recargado a versión X.Y.Z`).
 - [ ] **CA-M-3 (Auto-reemplazo del bucle entre pasos):** En `bucle()` de `skills/orquestar/orquestar.py`, al inicio de cada iteración antes de calcular o ejecutar el siguiente paso (nunca a mitad de un paso), si detecta que la versión activa en `~/.adevv/active.json` ha cambiado respecto a la versión en ejecución, transfiere la ejecución al nuevo `orquestar.py` conservando `sys.argv[1:]` y `orquestar.pid` y registrándolo en la salida (`[orquestar] recargado a versión X.Y.Z`).
 - [ ] **CA-M-4 (Desbloqueo de sincronización/actualización frente a versiones antiguas):** Pruebas unitarias en `skills/orquestar/` y `skills/telegram_gateway/` verifican que tanto `bucle()` entre pasos como `escuchar()` entre ciclos de polling detectan el cambio de versión activa y delegan al script nuevo sin perder argumentos ni estado.
+
+## Bloqueo de especificación (modo orquestado)
+Hades `/review-spec`: **RECHAZADO**, hallazgo crítico `para: especificador`, `destino: resolver`. La recarga automática solicitada requiere conciliar CA-M-2/CA-M-3 con CA-F03-05/RF-F03-08/DEC-P01 y respaldar el alcance de v0.5 en `skills/` antes de implementar. No se requiere intervención humana. Instrucciones concretas en `docs/review/spec_reviews/T-ADV-0018-spec-review.md` y `docs/review/versions/v0.5-revision.md`.
+
+El intento y su triaje se conservan en `wip/T-ADV-0018` (`5b335bd`); no hay cambios de producción. Verificación de este cierre documental: `git diff --cached --check` mediante `adevv orquestar --verificar`. Las pruebas funcionales previstas en WIP no se ejecutaron porque todavía no existen; tampoco se ejecutó la suite completa. El siguiente paso del bucle es `especificar`, no otra ejecución de desarrollo sin resolver el contrato.
