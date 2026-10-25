@@ -1095,8 +1095,9 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
         m['sesion'] = sesion_id
     if uso:
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x in ('-m', '--model')), 'codex')
+        entrada = max(0, (uso.get('input_tokens') or 0) - (uso.get('cached_input_tokens') or 0))
         m.update(turnos=turnos, modelos={modelo: {
-            'entrada': uso.get('input_tokens'), 'salida': uso.get('output_tokens'),
+            'entrada': entrada, 'salida': uso.get('output_tokens'),
             'cache_leida': uso.get('cached_input_tokens'), 'cache_escrita': uso.get('cache_write_input_tokens'),
             'razonamiento': uso.get('reasoning_output_tokens')}})
     return p.returncode, m, ''.join(lineas[-200:])
@@ -1180,7 +1181,7 @@ def base_comando_agente(harness, prompt, sesion=None):
     elif harness == 'codex':
         if sesion:
             return ['codex', 'exec', 'resume', sesion, '--json', '-c', 'approval_policy="never"',
-                    '--sandbox', 'workspace-write', '-']
+                    '-c', 'sandbox_mode="workspace-write"', '-']
         return ['codex', 'exec', '--json', '-c', 'approval_policy="never"',
                 '--sandbox', 'workspace-write', '-']
     elif harness == 'agy':
