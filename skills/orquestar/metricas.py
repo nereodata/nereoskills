@@ -107,7 +107,9 @@ def agregar(registros, items, filtro='todas'):
         grupo = 'dev' if tipo == 'paso' else 'hades' if (
             tipo == 'agente' and registro.get('rol') == 'hades') else None
         if grupo == 'hades':
-            fila['hades_llamadas'] += 1
+            fila['hades_llamadas'] += (not registro.get('cuota_espera_s')
+                                       and not registro.get('sin_cuota')
+                                       and registro.get('modelos') != {})
             fila['hades_rechazos'] += registro.get('veredicto') == 'RECHAZADO'
         if grupo:
             for modelo, uso in (registro.get('modelos') or {}).items():

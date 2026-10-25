@@ -905,6 +905,16 @@ def lista_reservas(cfg_rol):
     return resultado
 
 
+def configuraciones_con_cuota(root, configuraciones):
+    """Omite agotamientos vigentes con reservas, conservando la última si todos agotaron."""
+    if len(configuraciones) < 2:
+        return configuraciones
+    cuotas = consumo_cuotas(root, fecha_estado(ahora()))[1]
+    disponibles = [cfg for cfg in configuraciones
+                   if (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado') not in cuotas]
+    return disponibles or configuraciones[-1:]
+
+
 def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
@@ -1250,7 +1260,7 @@ def agente(root, rol, prompt):
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
 
     reservas = lista_reservas(cfg)
-    configs_a_probar = [cfg] + reservas
+    configs_a_probar = configuraciones_con_cuota(root, [cfg] + reservas)
     cuotas_acumuladas = []
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
 
@@ -2078,6 +2088,8 @@ def bucle(a, root):
             env['ORQUESTAR_ESCALADA'] = '1'
         reservas = lista_reservas(cfg_rol)
         configs_a_probar = [cfg_rol] + reservas
+        if not a.cmd and not a.harness:
+            configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
         cuotas_paso = []
         sesion_anterior = None
         arnes_anterior = None
