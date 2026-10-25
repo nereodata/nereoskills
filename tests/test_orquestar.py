@@ -16,6 +16,9 @@ SPEC.loader.exec_module(motor)
 
 
 class OrquestarRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
+
     def test_failed_capture_neither_reads_nor_writes_validation_evidence(self):
         for failed_command in ('add', 'write-tree'):
             with self.subTest(command=failed_command), tempfile.TemporaryDirectory() as directory:
@@ -100,6 +103,7 @@ class RevisionProductoTests(unittest.TestCase):
     """Versión v0.1 cerrada (tarea completada y revisada, revisión de arquitectura hecha) y v0.2 pendiente."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
@@ -159,6 +163,7 @@ class EnrutadoBloqueoTests(unittest.TestCase):
     """Tarea bloqueada en v0.1 según a quién la envió Hades, junto a otra elegible."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
@@ -301,6 +306,7 @@ class BuzonTests(unittest.TestCase):
     """Altas desde Telegram: sin versión, con el ID siguiente y un commit que solo lleva esos ficheros."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.git('init', '-q')
@@ -412,6 +418,7 @@ class EscaladaTests(unittest.TestCase):
     """Hades deja su veredicto en las métricas; tras dos rechazos seguidos, Artemisa para y sube de modelo."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.cfg = patch.object(motor, 'config', return_value=ESCALADA)
@@ -685,6 +692,7 @@ class DificultadTests(unittest.TestCase):
     """Clasificación de dificultad (sencilla, media, dificil) y selección de modelo/esfuerzo."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
 
@@ -950,6 +958,7 @@ class ReservaCuotaTests(unittest.TestCase):
     """Modelos de reserva ante agotamiento de cuota en pasos y subagentes."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
 

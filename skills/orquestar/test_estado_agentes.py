@@ -16,6 +16,7 @@ class EstadoAgentesTests(unittest.TestCase):
     """Compatibilidad del detalle histórico, con reloj fijo y sin red."""
 
     def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

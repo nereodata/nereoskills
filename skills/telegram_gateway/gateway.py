@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -157,7 +158,7 @@ def invocar(root, prompt, cfg, sesion=None):
     base = motor.base_comando_agente(harness, prompt, sesion=sesion)
     if not base:
         raise RuntimeError(f'Arnés no soportado: {harness}')
-    exe = shutil.which(base[0])
+    exe = getattr(motor, 'buscar_ejecutable', shutil.which)(base[0])
     if not exe:
         raise RuntimeError(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = motor.con_modelo([exe] + base[1:], harness, cfg)
@@ -280,6 +281,14 @@ def actualizaciones(token, desde=None, espera=25):
         with urllib.request.urlopen(url, timeout=espera + 10) as r:
             datos = json.loads(r.read().decode('utf-8'))
         return datos.get('result', []) if datos.get('ok') else []
+    except urllib.error.HTTPError as ex:
+        if ex.code == 409:
+            print('[gateway] conflicto 409 en Telegram: otra instancia está escuchando con el mismo token', flush=True)
+            time.sleep(5)
+            raise
+        print(f'[gateway] sin respuesta de Telegram ({type(ex).__name__})', flush=True)
+        time.sleep(5)
+        return []
     except Exception as ex:
         print(f'[gateway] sin respuesta de Telegram ({type(ex).__name__})', flush=True)
         time.sleep(5)
@@ -332,14 +341,19 @@ def reservar(root):
     (root / PARADA).unlink(missing_ok=True)
 
 
+def es_propietario_pid(root):
+    """Comprueba si el proceso actual conserva la propiedad del PID."""
+    try:
+        return (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid())
+    except (FileNotFoundError, OSError, ValueError):
+        return False
+
+
 def limpiar(root):
     """Retira las marcas solo si el proceso actual conserva la propiedad del PID."""
-    try:
-        if (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
-            (root / PARADA).unlink(missing_ok=True)
-            (root / PID).unlink(missing_ok=True)
-    except FileNotFoundError:
-        return
+    if es_propietario_pid(root):
+        (root / PARADA).unlink(missing_ok=True)
+        (root / PID).unlink(missing_ok=True)
 
 
 def en_fondo(root):
@@ -377,11 +391,23 @@ def parar(root):
 def escuchar(root, token, autorizados, vueltas=None, desde=None):
     """Bucle de long polling: responde a cada mensaje autorizado; un mensaje que falla no para el resto."""
     n = 0
+    conflictos_409 = 0
     while (vueltas is None or n < vueltas) and not (root / PARADA).exists():
         if motor.recargar_version(__file__, root, PID, {'desde': desde}, 'gateway'):
             return
         n += 1
-        for u in actualizaciones(token, desde):
+        try:
+            items = actualizaciones(token, desde)
+            conflictos_409 = 0
+        except urllib.error.HTTPError as ex:
+            if ex.code == 409:
+                conflictos_409 += 1
+                if not es_propietario_pid(root) or conflictos_409 >= 3:
+                    print('[gateway] deteniendo escucha por conflicto 409 en Telegram', flush=True)
+                    return
+                continue
+            raise
+        for u in items:
             if (root / PARADA).exists():
                 return
             desde = u['update_id'] + 1

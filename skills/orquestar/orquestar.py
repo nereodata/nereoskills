@@ -22,6 +22,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
+    import winreg
+except ImportError:
+    winreg = None
+
+try:
     import yaml
 except ImportError:
     try:
@@ -984,6 +989,47 @@ def con_modelo(cmd, harness, rol):
     return cmd
 
 
+def buscar_ejecutable(nombre):
+    """Encuentra el ejecutable en el PATH o en las rutas de usuario habituales en Windows."""
+    exe = shutil.which(nombre)
+    if exe:
+        return exe
+    if os.name == 'nt':
+        rutas = []
+        if winreg is not None:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as k:
+                    val, _ = winreg.QueryValueEx(k, 'Path')
+                    if val:
+                        if hasattr(winreg, 'ExpandEnvironmentStrings'):
+                            val = winreg.ExpandEnvironmentStrings(val)
+                        else:
+                            val = os.path.expandvars(val)
+                        rutas.extend(val.split(os.pathsep))
+            except (OSError, ValueError):
+                pass
+        home = Path.home()
+        rutas.append(str(home / '.local/bin'))
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            rutas.append(str(Path(appdata) / 'npm'))
+        else:
+            rutas.append(str(home / 'AppData/Roaming/npm'))
+        localappdata = os.environ.get('LOCALAPPDATA')
+        if localappdata:
+            rutas.append(str(Path(localappdata) / 'agy/bin'))
+            rutas.append(str(Path(localappdata) / 'OpenAI/Codex/bin'))
+        else:
+            rutas.append(str(home / 'AppData/Local/agy/bin'))
+            rutas.append(str(home / 'AppData/Local/OpenAI/Codex/bin'))
+
+        path_extra = os.pathsep.join(os.path.expandvars(r) for r in rutas if r)
+        exe = shutil.which(nombre, path=f"{os.environ.get('PATH', '')}{os.pathsep}{path_extra}")
+        if exe:
+            return exe
+    return None
+
+
 def arnes(a, rol):
     """Arnés de un paso: --harness o el de su rol (claude por defecto); None con --cmd."""
     return None if a.cmd else a.harness or rol.get('harness', 'claude')
@@ -994,7 +1040,7 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
     harness = arnes(a, rol)
     plantilla = (shlex.split(a.cmd, posix=os.name != 'nt') if a.cmd else HARNESS[harness])
     plantilla = [p.strip('"\'') for p in plantilla]
-    exe = shutil.which(plantilla[0])
+    exe = buscar_ejecutable(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
     if sesion and not a.cmd:
@@ -1217,7 +1263,7 @@ def agente(root, rol, prompt):
         base = base_comando_agente(harness, prompt_texto, sesion=sesion)
         if not base:
             sys.exit(f'Arnés no soportado para roles: {harness}')
-        exe = shutil.which(base[0])
+        exe = buscar_ejecutable(base[0])
         if not exe:
             sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
