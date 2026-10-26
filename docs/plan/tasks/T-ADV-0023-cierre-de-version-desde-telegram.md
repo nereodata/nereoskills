@@ -5,11 +5,12 @@ type: funcional
 weight: 100
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "La única intervención humana por versión obliga a volver a la máquina para lanzar /release y relanzar"
 created_at: 2026-10-26
-updated_at: 2026-10-26
+updated_at: 2026-10-27
 ---
 
 # T-ADV-0023: Cerrar la versión y relanzar el bucle desde Telegram
