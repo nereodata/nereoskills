@@ -1,4 +1,55 @@
-﻿# Revisión de especificación — T-ADV-0022
+**Veredicto:** APROBADO
+
+# Revisión de especificación — T-ADV-0022
+
+- **Veredicto actual: APROBADO**.
+- Fecha: 2026-10-26. Revisor: Hades, mediante `/review-spec`, en modo orquestado.
+- Referencia: HEAD `7414be56fdab34520c8902e481a001caf9ff7836`.
+- Alcance: nueva especificación `skills/orquestar/features/calidad_delta.feature`, criterios y DEC-ESP-01/02/03/04/05 de la tarea; resolución de H-01/H-02/H-03 y no regresión de `skills/orquestar/features/orquestacion.feature`.
+- Método: lectura de especificación, criterios, DEC e informe anterior, y comparación frente a HEAD. Sin leer diseño, código ni tests; sin suite completa ni pruebas funcionales.
+
+## Comprobaciones obligatorias actuales
+
+| Comprobación | Resultado | Motivo |
+| --- | --- | --- |
+| No regresión | ✅ | El diff de `orquestacion.feature` respecto a HEAD está vacío. La característica nueva se añade en otro archivo y conserva íntegros los escenarios aprobados de reservas. |
+| Coherencia | ✅ | Las DEC delimitan base, objetivos, precedencia por etapa, compatibilidad, escritura y evidencia. El comando explícito sin marcador conserva su alcance declarado y avisa; los deducidos se limitan al delta. Se distingue escritura del desarrollador de comprobación sin escritura de Hades. |
+| Trazabilidad | ✅ | No hay etiquetas `@CA-*` inexistentes. `@T-ADV-0022` identifica la tarea. Resolución, argumentos, errores y omisiones (líneas 8–97) corresponden a CA-M-1; cierre de ambos flujos (99–137), a CA-M-2; evidencia y revisión de Hades (138–166), a CA-M-3. CA-M-4 sigue siendo obligación posterior de pruebas y documentación, no un resultado validado en este paso. |
+| Delta real | ✅ | Añade calidad del delta sin duplicar reservas ni retirar escenarios aprobados. |
+
+## Puntuaciones actuales
+
+| Criterio | Puntuación | Motivo |
+| --- | --- | --- |
+| Claridad | 9/10 | Contextos separados y desencadenantes, actores y resultados explícitos. |
+| Completitud | 9/10 | Resolución explícita y deducida, errores, omisiones, nombres de fichero, cierre en verde y rojo y vigencia de evidencia. |
+| Testeabilidad | 9/10 | Comandos y argumentos concretos, códigos cero/uno, bloqueo de completed y reutilización frente a nueva ejecución observables. |
+| Estructura | 10/10 | Característica propia nombrada por funcionalidad, sin alterar la de reservas. |
+| **Media** | **9,25/10** | Supera 8; sin hallazgos críticos ni altos pendientes. |
+
+## Resolución de los hallazgos anteriores
+
+| Hallazgo | Severidad anterior | para | destino | Estado y evidencia actual |
+| --- | --- | --- | --- | --- |
+| H-01 | 🟠 ALTA | especificador | resolver | **Resuelto.** Líneas 99–137: el intento de cierre en ambos flujos dispara escritura disponible y comprobaciones; verde permite completed y rojo lo impide. Líneas 156–166: Hades comprueba sin escritura y devuelve el fallo al desarrollador. DEC-ESP-05 fija el contrato. |
+| H-02 | 🟠 ALTA | especificador | resolver | **Resuelto.** Líneas 24–97 separan precedencia, deducción npm/ruff, herramientas ausentes, script desconocido, configuración inválida, base inexistente y ausencia de objetivos. Líneas 99–137 distinguen formato corregible, falta de escritura y fallos independientes de formato/lint. Líneas 138–155 distinguen reutilización del mismo árbol y comando de invalidación tras cambio o formateo. |
+| H-03 | 🟡 MEDIA | especificador | resolver | **Resuelto.** `calidad_delta.feature:3–6` declara la funcionalidad propia y `orquestacion.feature` permanece sin cambios respecto a HEAD. |
+
+## Hallazgos nuevos
+
+Ninguno pendiente en los artefactos finalmente leídos. Al principio se observó una cabecera literal `Caracter?stica`; durante la revisión los artefactos se actualizaron y una nueva lectura confirmó `Característica` y los acentos restaurados. No se considera defecto vigente. Hades no modificó esos archivos.
+
+## Evidencia y límites
+
+Se consultó `orquestar_evidencias.jsonl`. Sus verdes no se atribuyen automáticamente al árbol revisado: no se pudo confirmar su identidad mediante el mecanismo autorizado. Tampoco se utilizan resultados funcionales de otros árboles como prueba de esta especificación.
+
+Único intento de verificación: `adevv orquestar --verificar "git diff --check"`. Terminó con código 1 antes de ejecutar la comprobación, al fallar `git add -A .` con código 128 durante la preparación del índice temporal. No se acredita un nuevo verde de integridad. Es una limitación de verificación, no un defecto demostrado del contrato. No se inspeccionó ni modificó el mecanismo ni se ejecutaron alternativas o pruebas adicionales.
+
+La aprobación se limita a especificación; no acredita implementación, automatización BDD ni cumplimiento material de CA-M-4. Solo se actualiza este informe, sin modificar escenarios ni tarea y sin commit.
+
+## Histórico conservado — rechazo anterior
+
+Resumen: **RECHAZADO**, media **6,25/10**; H-01/H-02 altos y H-03 medio, todos para `especificador`, destino `resolver`. El texto anterior se conserva a continuación; su veredicto queda sustituido por la reevaluación actual.
 
 - **Veredicto: RECHAZADO**
 - Fecha: 2026-10-26.
