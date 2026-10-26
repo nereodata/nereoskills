@@ -5,7 +5,8 @@ type: funcional
 weight: 60
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "B-ADV-0006: la suite llega en rojo al cierre por formato (Prettier) acumulado tarea a tarea"
 created_at: 2026-10-26
@@ -25,3 +26,7 @@ Cada tarea verifica solo las pruebas de su triaje, así que los fallos de format
 
 ## 📋 Notas
 - La suite completa al cerrar versión se mantiene como red de seguridad (B-ADV-0006).
+
+## Bloqueo de especificaci?n (2026-10-26)
+
+Hades `/review-spec`: RECHAZADO. H-01/H-02 altos y H-03 medio, todos para especificador con destino resolver. Ver [informe](../../review/spec_reviews/T-ADV-0022-spec-review.md) y [revisi?n de versi?n](../../review/versions/v1.0-revision.md). Se requiere concretar ambos flujos de cierre, contextos y resultados independientes, vigencia de evidencia y estructura de la caracter?stica. Avance conservado en `wip/T-ADV-0022` (`e47461f`); release mantiene el estado funcional previo. No hay implementaci?n ni pruebas funcionales ejecutadas. Triaje y borradores en WIP pendientes de ajustar tras especificar.
