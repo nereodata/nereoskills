@@ -5,8 +5,7 @@ type: funcional
 weight: 100
 dificultad: media
 version: "v1.0.0"
-status: blocked
-pendiente_de: especificador
+status: planned
 depende_de: []
 origen: "La única intervención humana por versión obliga a volver a la máquina para lanzar /release y relanzar"
 created_at: 2026-10-26
@@ -55,3 +54,8 @@ Cuando el bucle para con «Versión vX.Y terminada», el humano revisa y cierra 
 
 - Revisión aislada vigente: Hades APROBADO, media 9/10, H-01/H-02 resueltos y sin hallazgos pendientes; `docs/review/spec_reviews/T-ADV-0023-spec-review.md`.
 - Interrupción: el lanzador ordenó terminar sin cambiar estados por el contador de rechazos acumulados, después de emitir el veredicto aprobatorio. Se guarda este avance y se mantienen blocked/pendiente_de: especificador; el paso no se marca completado. No hay requisito externo ni pregunta humana pendiente.
+
+### Reanudación del especificador · 2026-10-27
+
+- DEC-ESP-04: conservar la especificación y la aprobación vigente de Hades sin repetir `/review-spec`, pues no hay delta respecto a los escenarios aprobados en `c8ca47d`. Se descartan reescribir escenarios correctos o repetir la revisión solo por la interrupción del lanzador: no queda ningún hallazgo pendiente y la skill excluye de nueva revisión lo ya aprobado. La nueva invocación permite cerrar el paso interrumpido y devolver la tarea a `planned`, sin `pendiente_de`.
+- Verificación de este paso: únicamente `adevv orquestar --verificar "git diff --check"`, según triaje documental A, sobre el árbol final antes del commit. Se reutiliza evidencia si coincide el árbol. El desarrollo, sus pruebas dirigidas y QA siguen pendientes; no se declara funcionalidad implementada ni se ejecuta la suite completa.
