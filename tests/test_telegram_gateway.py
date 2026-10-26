@@ -1,5 +1,10 @@
 import importlib.util
+import shutil
 import subprocess
+import io
+import os
+import urllib.error
+import urllib.request
 import tempfile
 import unittest
 from pathlib import Path
@@ -220,6 +225,106 @@ class GatewayTests(unittest.TestCase):
             tok, usr = motor.credenciales(self.root)
             self.assertEqual(tok, 'token_local')
             self.assertEqual(usr, ['555'])
+
+
+    def test_actualizaciones_409_conflict_logs_and_raises(self):
+        err = urllib.error.HTTPError('https://api.telegram.org', 409, 'Conflict', {}, io.BytesIO(b'{}'))
+        with patch('urllib.request.urlopen', side_effect=err), \
+             patch('time.sleep'), \
+             patch('builtins.print') as mock_print:
+            with self.assertRaises(urllib.error.HTTPError):
+                gateway.actualizaciones('fake_token', espera=1)
+            mock_print.assert_called_with(
+                '[gateway] conflicto 409 en Telegram: otra instancia está escuchando con el mismo token',
+                flush=True
+            )
+
+    def test_escuchar_stops_on_409_when_not_owner_of_pid(self):
+        err = urllib.error.HTTPError('https://api.telegram.org', 409, 'Conflict', {}, io.BytesIO(b'{}'))
+        (self.root / 'telegram.pid').write_text('999999', encoding='utf-8')
+        with patch.object(gateway, 'actualizaciones', side_effect=err), \
+             patch('builtins.print') as mock_print:
+            gateway.escuchar(self.root, 'tok', AUTORIZADOS, vueltas=5)
+            self.assertTrue(any('conflicto 409' in str(c) for c in mock_print.call_args_list))
+
+    def test_escuchar_stops_after_three_consecutive_409_conflicts_for_owner(self):
+        err = urllib.error.HTTPError('https://api.telegram.org', 409, 'Conflict', {}, io.BytesIO(b'{}'))
+        (self.root / 'telegram.pid').write_text(str(os.getpid()), encoding='utf-8')
+        calls = []
+
+        def mock_actualizaciones(*args, **kwargs):
+            calls.append(1)
+            raise err
+
+        with patch.object(gateway, 'actualizaciones', side_effect=mock_actualizaciones), \
+             patch('builtins.print') as mock_print:
+            gateway.escuchar(self.root, 'tok', AUTORIZADOS, vueltas=10)
+            self.assertEqual(len(calls), 3)
+            self.assertTrue(any('deteniendo escucha por conflicto 409' in str(c) for c in mock_print.call_args_list))
+
+    def test_buscar_ejecutable_resolves_fallback_user_path_on_windows(self):
+        with tempfile.TemporaryDirectory() as fake_home:
+            user_bin = Path(fake_home) / '.local/bin'
+            user_bin.mkdir(parents=True)
+            fake_claude = user_bin / ('claude.cmd' if os.name == 'nt' else 'claude')
+            fake_claude.write_text('echo fake claude', encoding='utf-8')
+            if os.name != 'nt':
+                fake_claude.chmod(0o755)
+
+            real_which = shutil.which
+            def mock_which(cmd, mode=os.F_OK | os.X_OK, path=None):
+                if path is None:
+                    return None
+                return real_which(cmd, mode, path)
+
+            with patch('shutil.which', side_effect=mock_which), \
+                 patch('pathlib.Path.home', return_value=Path(fake_home)), \
+                 patch.dict(os.environ, {'PATH': ''}, clear=True):
+                if hasattr(motor, 'buscar_ejecutable'):
+                    res = motor.buscar_ejecutable('claude')
+                else:
+                    res = None
+                self.assertIsNotNone(res)
+                self.assertEqual(Path(res).stem.lower(), 'claude')
+
+    def test_buscar_ejecutable_expands_registry_variables_such_as_userprofile(self):
+        with tempfile.TemporaryDirectory() as fake_custom:
+            custom_bin = Path(fake_custom) / 'custom_bin'
+            custom_bin.mkdir()
+            fake_exe = custom_bin / ('custom_arnes.cmd' if os.name == 'nt' else 'custom_arnes')
+            fake_exe.write_text('echo fake', encoding='utf-8')
+            if os.name != 'nt':
+                fake_exe.chmod(0o755)
+
+            with patch.dict(os.environ, {'MY_CUSTOM_DIR': fake_custom, 'PATH': ''}, clear=True):
+                class FakeWinreg:
+                    HKEY_CURRENT_USER = 1
+                    REG_EXPAND_SZ = 2
+
+                    @staticmethod
+                    def OpenKey(*args):
+                        class Key:
+                            def __enter__(self):
+                                return self
+
+                            def __exit__(self, *a):
+                                pass
+
+                        return Key()
+
+                    @staticmethod
+                    def QueryValueEx(k, name):
+                        return '%MY_CUSTOM_DIR%\\custom_bin', 2
+
+                    @staticmethod
+                    def ExpandEnvironmentStrings(s):
+                        return os.path.expandvars(s)
+
+                with patch.object(motor, 'winreg', FakeWinreg), \
+                     patch('pathlib.Path.home', return_value=Path(fake_custom)):
+                    res = motor.buscar_ejecutable('custom_arnes')
+                    self.assertIsNotNone(res)
+                    self.assertEqual(Path(res).resolve(), fake_exe.resolve())
 
 
 if __name__ == '__main__':

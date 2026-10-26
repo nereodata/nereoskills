@@ -5,10 +5,10 @@ type: bug
 weight: 50
 dificultad: sencilla
 version: "v0.6.0"
-status: backlog
+status: completed
 depende_de: []
 created_at: 2026-10-24
-updated_at: 2026-10-24
+updated_at: 2026-10-25
 ---
 
 # B-ADV-0003: Aislamiento de iniciar_gateway en tests de bucle, PATH de usuario en subprocesos y colisión 409 en gateway.py
@@ -38,3 +38,14 @@ Durante el uso en producción del gateway de Telegram en múltiples proyectos si
 ## 📋 Evidencias
 
 - `C:\Users\Iván Moreno\SW\Adayy\repo\telegram.log`: 94 entradas consecutivas de `[gateway] sin respuesta de Telegram (HTTPError)` y `RuntimeError('No se encuentra el arnés "claude" en el PATH.')`.
+
+## 📋 Triaje de Alcance
+
+- **Subfase A: Definición** → `[SKIP]` (No altera requisitos de usuario de la especificación BDD; es robustez técnica interna y aislamiento de tests).
+- **Subfase B: Diseño** → `[SKIP]` (Solución técnica localizada y sin nuevas decisiones arquitecturales en orquestar.py y gateway.py).
+- **Subfase C1: Pruebas** → `[EXEC]` (Tests unitarios para aislamiento de iniciar_gateway en bucle, búsqueda en PATH de usuario en Windows y detección de colisión 409).
+- **Subfase C2: Corrección** → `[EXEC]` (Aislar tests de test_orquestar.py, implementar buscar_ejecutable en orquestar.py y gateway.py, y gestionar 409 con detección de propietario de PID y corte limpio tras conflictos).
+- **Subfase D: QA** → `[EXEC]` (Revisión aislada de Hades /review-code sobre el delta).
+- **Subfase E: Documentación** → `[SKIP]` (Comportamiento interno sin cambios de comandos ni opciones de usuario).
+- **Subfase F: Cierre** → `[EXEC]` (Commit semántico y cierre del bug).
+- **Verificación al cierre**: `python -m unittest tests/test_telegram_gateway.py tests/test_orquestar.py skills/orquestar/test_estado_agentes.py` (ejercita la suite de gateway y las suites de orquestador afectadas por el aislamiento y resolución de ejecutables).

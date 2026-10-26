@@ -22,6 +22,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
+    import winreg
+except ImportError:
+    winreg = None
+
+try:
     import yaml
 except ImportError:
     try:
@@ -900,6 +905,16 @@ def lista_reservas(cfg_rol):
     return resultado
 
 
+def configuraciones_con_cuota(root, configuraciones):
+    """Omite agotamientos vigentes con reservas, conservando la última si todos agotaron."""
+    if len(configuraciones) < 2:
+        return configuraciones
+    cuotas = consumo_cuotas(root, fecha_estado(ahora()))[1]
+    disponibles = [cfg for cfg in configuraciones
+                   if (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado') not in cuotas]
+    return disponibles or configuraciones[-1:]
+
+
 def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
@@ -984,6 +999,47 @@ def con_modelo(cmd, harness, rol):
     return cmd
 
 
+def buscar_ejecutable(nombre):
+    """Encuentra el ejecutable en el PATH o en las rutas de usuario habituales en Windows."""
+    exe = shutil.which(nombre)
+    if exe:
+        return exe
+    if os.name == 'nt':
+        rutas = []
+        if winreg is not None:
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, 'Environment') as k:
+                    val, _ = winreg.QueryValueEx(k, 'Path')
+                    if val:
+                        if hasattr(winreg, 'ExpandEnvironmentStrings'):
+                            val = winreg.ExpandEnvironmentStrings(val)
+                        else:
+                            val = os.path.expandvars(val)
+                        rutas.extend(val.split(os.pathsep))
+            except (OSError, ValueError):
+                pass
+        home = Path.home()
+        rutas.append(str(home / '.local/bin'))
+        appdata = os.environ.get('APPDATA')
+        if appdata:
+            rutas.append(str(Path(appdata) / 'npm'))
+        else:
+            rutas.append(str(home / 'AppData/Roaming/npm'))
+        localappdata = os.environ.get('LOCALAPPDATA')
+        if localappdata:
+            rutas.append(str(Path(localappdata) / 'agy/bin'))
+            rutas.append(str(Path(localappdata) / 'OpenAI/Codex/bin'))
+        else:
+            rutas.append(str(home / 'AppData/Local/agy/bin'))
+            rutas.append(str(home / 'AppData/Local/OpenAI/Codex/bin'))
+
+        path_extra = os.pathsep.join(os.path.expandvars(r) for r in rutas if r)
+        exe = shutil.which(nombre, path=f"{os.environ.get('PATH', '')}{os.pathsep}{path_extra}")
+        if exe:
+            return exe
+    return None
+
+
 def arnes(a, rol):
     """Arnés de un paso: --harness o el de su rol (claude por defecto); None con --cmd."""
     return None if a.cmd else a.harness or rol.get('harness', 'claude')
@@ -994,7 +1050,7 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
     harness = arnes(a, rol)
     plantilla = (shlex.split(a.cmd, posix=os.name != 'nt') if a.cmd else HARNESS[harness])
     plantilla = [p.strip('"\'') for p in plantilla]
-    exe = shutil.which(plantilla[0])
+    exe = buscar_ejecutable(plantilla[0])
     if not exe:
         sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
     if sesion and not a.cmd:
@@ -1095,8 +1151,9 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
         m['sesion'] = sesion_id
     if uso:
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x in ('-m', '--model')), 'codex')
+        entrada = max(0, (uso.get('input_tokens') or 0) - (uso.get('cached_input_tokens') or 0))
         m.update(turnos=turnos, modelos={modelo: {
-            'entrada': uso.get('input_tokens'), 'salida': uso.get('output_tokens'),
+            'entrada': entrada, 'salida': uso.get('output_tokens'),
             'cache_leida': uso.get('cached_input_tokens'), 'cache_escrita': uso.get('cache_write_input_tokens'),
             'razonamiento': uso.get('reasoning_output_tokens')}})
     return p.returncode, m, ''.join(lineas[-200:])
@@ -1180,7 +1237,7 @@ def base_comando_agente(harness, prompt, sesion=None):
     elif harness == 'codex':
         if sesion:
             return ['codex', 'exec', 'resume', sesion, '--json', '-c', 'approval_policy="never"',
-                    '--sandbox', 'workspace-write', '-']
+                    '-c', 'sandbox_mode="workspace-write"', '-']
         return ['codex', 'exec', '--json', '-c', 'approval_policy="never"',
                 '--sandbox', 'workspace-write', '-']
     elif harness == 'agy':
@@ -1203,7 +1260,7 @@ def agente(root, rol, prompt):
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
 
     reservas = lista_reservas(cfg)
-    configs_a_probar = [cfg] + reservas
+    configs_a_probar = configuraciones_con_cuota(root, [cfg] + reservas)
     cuotas_acumuladas = []
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
 
@@ -1216,7 +1273,7 @@ def agente(root, rol, prompt):
         base = base_comando_agente(harness, prompt_texto, sesion=sesion)
         if not base:
             sys.exit(f'Arnés no soportado para roles: {harness}')
-        exe = shutil.which(base[0])
+        exe = buscar_ejecutable(base[0])
         if not exe:
             sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
@@ -2031,6 +2088,8 @@ def bucle(a, root):
             env['ORQUESTAR_ESCALADA'] = '1'
         reservas = lista_reservas(cfg_rol)
         configs_a_probar = [cfg_rol] + reservas
+        if not a.cmd and not a.harness:
+            configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
         cuotas_paso = []
         sesion_anterior = None
         arnes_anterior = None
