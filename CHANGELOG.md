@@ -2,6 +2,13 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.6.1] - 2026-10-26
+
+### Corregido
+
+#### General
+- **B-ADV-0008** — La nota del prompt para el repositorio fuente de Adevv se lee como una restricción a skills/, agents/ y workflows/
+
 ## [0.6.0] - 2026-10-26
 
 ### Añadido
