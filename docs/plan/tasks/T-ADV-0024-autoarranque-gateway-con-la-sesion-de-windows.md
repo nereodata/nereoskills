@@ -5,11 +5,12 @@ type: funcional
 weight: 110
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: blocked
 depende_de: []
+pendiente_de: especificador
 origen: "NO-01 de docs/requirements/requirements.md, aplazado a una versión posterior"
 created_at: 2026-10-26
-updated_at: 2026-10-26
+updated_at: 2026-10-27
 ---
 
 # T-ADV-0024: Arranque del gateway de Telegram con la sesión de Windows
