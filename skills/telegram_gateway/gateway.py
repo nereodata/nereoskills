@@ -10,13 +10,16 @@ la registra entre pasos, con su propio commit. La configuración, el envío y el
 orquestar.py: TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS.
 """
 import argparse
+import base64
 import ctypes
+import hashlib
 import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.error
@@ -467,6 +470,74 @@ def escuchar(root, token, autorizados, vueltas=None, desde=None):
                 motor.enviar(token, m['chat']['id'], respuesta, markdown=True)
 
 
+def carpeta_inicio():
+    """Resuelve Inicio del usuario con la API de carpetas especiales de Windows."""
+    shell = ctypes.WinDLL('shell32')
+    resolver = shell.SHGetFolderPathW
+    resolver.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
+                        ctypes.c_ulong, ctypes.c_wchar_p]
+    resolver.restype = ctypes.c_long
+    ruta = ctypes.create_unicode_buffer(32768)
+    if resolver(None, 7, None, 0, ruta) != 0:
+        raise OSError('No se pudo resolver la carpeta Inicio del usuario')
+    return Path(ruta.value)
+
+
+def programa_inicio(root, log):
+    """Genera una entrada sin credenciales que invoca una vez la orden estable."""
+    raiz = "'" + str(root).replace("'", "''") + "'"
+    destino = "'" + str(log).replace("'", "''") + "'"
+    carpeta_log = "'" + str(log.parent).replace("'", "''") + "'"
+    programa = (
+        "$ErrorActionPreference = 'Stop'; "
+        f"$raiz = {raiz}; $log = {destino}; "
+        f"[IO.Directory]::CreateDirectory({carpeta_log}) | Out-Null; "
+        "try { "
+        "if (-not (Test-Path -LiteralPath $raiz -PathType Container)) { "
+        "throw ('proyecto inexistente: ' + $raiz) }; "
+        "Set-Location -LiteralPath $raiz; "
+        "& adevv telegram --fondo 2>&1 | Out-File -LiteralPath $log -Encoding utf8 -Append; "
+        "exit $LASTEXITCODE "
+        "} catch { $_.Exception.Message | Out-File -LiteralPath $log -Encoding utf8 -Append; exit 1 }")
+    codificado = base64.b64encode(programa.encode('utf-16le')).decode('ascii')
+    comando = ('powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden '
+               f'-EncodedCommand {codificado}')
+    return ('Set shell = CreateObject("WScript.Shell")\r\n'
+            f'WScript.Quit shell.Run("{comando}", 0, True)\r\n')
+
+
+def gestionar_autoarranque(root, accion):
+    """Registra, consulta o retira únicamente la entrada de Inicio de este proyecto."""
+    if sys.platform != 'win32':
+        print(f'[gateway] {root}: el autoarranque no está soportado en este sistema')
+        return 1
+    try:
+        identidad = hashlib.sha256(os.path.normcase(str(root)).encode('utf-8')).hexdigest()
+        entrada = carpeta_inicio() / f'Adevv-Telegram-{identidad}.vbs'
+        if accion == 'on':
+            base = Path(os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+                        or Path.home() / 'AppData' / 'Local')
+            log = base / 'Adevv' / 'autoarranque' / f'{identidad}.log'
+            entrada.parent.mkdir(parents=True, exist_ok=True)
+            temporal = None
+            try:
+                with tempfile.NamedTemporaryFile(dir=entrada.parent, suffix='.tmp', delete=False) as archivo:
+                    temporal = Path(archivo.name)
+                    archivo.write(programa_inicio(root, log).encode('utf-16'))
+                os.replace(temporal, entrada)
+            finally:
+                if temporal is not None:
+                    temporal.unlink(missing_ok=True)
+        elif accion == 'off':
+            entrada.unlink(missing_ok=True)
+        estado = 'registrado' if entrada.exists() else 'no registrado'
+        print(f'[gateway] {root}: autoarranque {estado}')
+        return 0
+    except OSError as error:
+        print(f'[gateway] {root}: no se pudo gestionar el autoarranque: {error}')
+        return 1
+
+
 def main():
     """Punto de entrada principal para la ejecución en línea de comandos."""
     ap = argparse.ArgumentParser(description='Gateway de Telegram de Adevv.')
@@ -476,9 +547,13 @@ def main():
     modo.add_argument('--fondo', action='store_true', help=f'escucha en segundo plano, salida en {LOG}')
     modo.add_argument('--parar', action='store_true', help='pide parar el gateway al acabar la operación actual')
     modo.add_argument('--gestionado', action='store_true', help=argparse.SUPPRESS)
+    modo.add_argument('--autoarranque', choices=('on', 'off', 'estado'),
+                      help='registra, quita o consulta el arranque con la sesión de Windows')
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding='utf-8')
     root = a.root.resolve()
+    if a.autoarranque:
+        return gestionar_autoarranque(root, a.autoarranque)
     os.chdir(root)
     if a.estado:
         print(motor.parte(root))

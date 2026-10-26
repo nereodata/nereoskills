@@ -49,6 +49,21 @@ adevv telegram --estado   # imprime lo que respondería /estado
 
 `--fondo` reserva `telegram.pid`, evita duplicar un proceso vivo y recupera marcas obsoletas. La salida se añade a `telegram.log`. `--parar` funciona sin credenciales y crea `telegram.parar`; el gateway limpia PID y señal al salir, incluso si falla. Estos tres archivos quedan excluidos de git. La parada espera al polling actual (hasta unos 35 segundos) o a la conversación en curso. El comando Telegram `/parar` controla el bucle; la CLI `adevv telegram --parar` controla el gateway.
 
+### Inicio con la sesión de Windows
+
+Desde la raíz de cada proyecto:
+```bash
+adevv telegram --autoarranque on
+adevv telegram --autoarranque estado
+adevv telegram --autoarranque off
+```
+
+`on` registra una entrada propia en la carpeta Inicio del usuario, sin administrador. Repetirlo actualiza esa entrada; proyectos distintos conservan entradas independientes. `estado` identifica la raíz y muestra registrado/no registrado sin escribir; `off` elimina únicamente la entrada del proyecto y se puede repetir. Quitar el registro no detiene un gateway ya iniciado: usa `adevv telegram --parar` si lo necesitas. Fuera de Windows la activación informa de que no está soportada y termina con error sin cambios.
+
+Al iniciar sesión, la entrada VBS ejecuta PowerShell sin ventana y solicita una sola vez `adevv telegram --fondo` desde la raíz absoluta registrada. Necesita Windows Script Host, PowerShell y `adevv` disponible en el PATH del usuario de la sesión; emplea la orden estable y sobrevive a las actualizaciones. No guarda credenciales ni rutas a versiones instaladas. El token debe estar en el `.env` del proyecto; los IDs pueden proceder del archivo o del entorno.
+
+Los diagnósticos del intento se añaden a `%LOCALAPPDATA%\Adevv\autoarranque\<identificador>.log` (respaldo en `%APPDATA%`); el nombre comparte el identificador de la entrada `Adevv-Telegram-<identificador>.vbs` de Inicio. La escucha conserva su salida habitual en `telegram.log`. Proyecto eliminado, credenciales incompletas, token solo ambiental o lanzador ausente terminan con diagnóstico y sin reintentos automáticos. Corrige la causa y ejecuta `adevv telegram --fondo` para volver a intentarlo sin cerrar sesión.
+
 Desde v0.5, un gateway ejecutado desde `~/.adevv/versions/` (o `$ADEVV_HOME/versions/`) detecta los cambios de `active.json` antes del siguiente polling. Tras completar el lote en curso, transfiere `telegram.pid` al motor de la versión activa y escribe `[gateway] recargado a versión X.Y.Z`. Conserva argumentos, raíz, sesiones y offset de Telegram para no repetir mensajes ya atendidos. Las señales de parada tienen prioridad; un puntero inválido, motor ausente o fallo de lanzamiento mantiene el gateway actual. Los árboles de desarrollo no se recargan. La instalación conserva intactos los archivos en uso; gateways anteriores a v0.5 requieren reinicio manual.
 
 Al ejecutar `adevv orquestar` en primer o segundo plano se solicita automáticamente `--fondo` si `telegram(root)` tiene credenciales y Telegram está habilitado. Un gateway vivo se conserva; un fallo de arranque deja un aviso sin abortar el bucle. `"telegram": false` en `orchestration.json` desactiva este autoarranque y los avisos. Las consultas de estado, métricas, verificaciones y revisiones no lo activan. El gateway permanece escuchando cuando acaba o se para el bucle; usa `adevv telegram --parar` para detenerlo.

@@ -3,9 +3,9 @@ id: T-ADV-0024
 title: "Arranque del gateway de Telegram con la sesión de Windows"
 type: funcional
 weight: 110
-dificultad: sencilla
+dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "NO-01 de docs/requirements/requirements.md, aplazado a una versión posterior"
 created_at: 2026-10-26
@@ -18,11 +18,11 @@ updated_at: 2026-10-27
 Que los gateways de Telegram de los proyectos configurados estén siempre escuchando tras iniciar sesión, sin abrir una terminal, para poder consultar el estado, recibir avisos y cerrar versiones (T-ADV-0023) desde el móvil.
 
 ## 📋 Criterios de Aceptación (Nivel Máster)
-- [ ] **CA-M-1 (Orden):** `adevv telegram --autoarranque on|off|estado` en la raíz de un proyecto registra, quita o muestra el arranque de su gateway con la sesión del usuario. Usa la orden `adevv` (nunca rutas al almacén de versiones), de modo que sobrevive a las actualizaciones.
-- [ ] **CA-M-2 (Mecanismo en Windows):** una entrada por proyecto en el arranque de usuario (carpeta Inicio o Programador de tareas, sin privilegios de administrador) que ejecuta `adevv telegram --fondo` en ese proyecto, sin ventana visible.
-- [ ] **CA-M-3 (Robustez):** si el proyecto ya no existe o no tiene credenciales, el arranque no falla en bucle: registra el motivo y termina. Activarlo dos veces no duplica la entrada.
-- [ ] **CA-M-4 (Otros SO):** en sistemas no Windows, `on` informa de que no está soportado sin cambiar nada.
-- [ ] **CA-M-5 (Pruebas y documentación):** pruebas con la carpeta de arranque y el lanzador simulados; documentación en `skills/telegram_gateway/SKILL.md`.
+- [x] **CA-M-1 (Orden):** `adevv telegram --autoarranque on|off|estado` en la raíz de un proyecto registra, quita o muestra el arranque de su gateway con la sesión del usuario. Usa la orden `adevv` (nunca rutas al almacén de versiones), de modo que sobrevive a las actualizaciones.
+- [x] **CA-M-2 (Mecanismo en Windows):** una entrada por proyecto en el arranque de usuario (carpeta Inicio o Programador de tareas, sin privilegios de administrador) que ejecuta `adevv telegram --fondo` en ese proyecto, sin ventana visible.
+- [x] **CA-M-3 (Robustez):** si el proyecto ya no existe o no tiene credenciales, el arranque no falla en bucle: registra el motivo y termina. Activarlo dos veces no duplica la entrada.
+- [x] **CA-M-4 (Otros SO):** en sistemas no Windows, `on` informa de que no está soportado sin cambiar nada.
+- [x] **CA-M-5 (Pruebas y documentación):** pruebas con la carpeta de arranque y el lanzador simulados; documentación en `skills/telegram_gateway/SKILL.md`.
 
 ## Resolución del especificador · 2026-10-27
 
@@ -50,3 +50,16 @@ Que los gateways de Telegram de los proyectos configurados estén siempre escuch
 - **D · QA [EXEC, siguiente desarrollo]:** revisiones de Hades y evidencia reutilizable mediante `adevv orquestar --verificar` sobre el mismo árbol, solo con el comando C1. Suite completa reservada al bucle al cerrar versión.
 - **E · Documentación [EXEC, siguiente desarrollo]:** actualizar `skills/telegram_gateway/SKILL.md`.
 - **F · Cierre [EXEC, siguiente desarrollo]:** completar tarea y commit semántico tras desarrollar; los criterios permanecen sin marcar en especificar.
+
+## Triaje de desarrollo · 2026-10-27
+
+- **Base de calidad:** `5c4ffee9555a2efa5bdd2884a16073c396924f64`; dificultad media conservada del bucle.
+- **A [SKIP]:** escenarios @T-ADV-0024 ya incorporados y aprobados; sin delta ni nueva review-spec.
+- **B [EXEC]:** registro determinista en Inicio de usuario y ejecución oculta; diseño nuevo, sin recuperar WIP.
+- **C1 [EXEC]:** `python -m unittest skills.telegram_gateway.test_autoarranque_windows`; incluye ejecución real del intérprete de Inicio de Windows contra lanzador ficticio, sin red ni Inicio real.
+- **C2 [EXEC]:** CLI y generación de entrada en gateway.py, reutilizando validación y lifecycle existentes.
+- **D [EXEC]:** Hades review-test y review-code sobre el alcance conjunto; evidencia con --verificar.
+- **E [EXEC]:** guía telegram_gateway/SKILL.md, changelog y revisión de versión.
+- **F [EXEC]:** completed y commit tras QA.
+- **Verificación al cierre:** comando C1 y `git diff --check`, compilación del delta; sin herramientas de lint/tipado configuradas, sin dependencias nuevas. Suite completa reservada al bucle.
+- **DEC-DEV-01:** entrada VBS mínima en Inicio de usuario (carpeta especial Windows), que ejecuta PowerShell codificado en UTF-16LE con ventana 0 y espera su salida. PowerShell fija raíz literal, comprueba existencia y llama la orden pública `adevv telegram --fondo`, conservando diagnósticos en LocalAppData/Adevv/autoarranque. No se guarda token ni ruta a una versión instalada.
