@@ -5,7 +5,7 @@ backend-path = ["."]
 
 [project]
 name = "adevv"
-version = "0.6.0"
+version = "1.0.0"
 description = "Herramienta global para desarrollo orquestado multi-arnés"
 readme = "README.md"
 requires-python = ">=3.11"

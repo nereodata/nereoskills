@@ -3,7 +3,7 @@
 project:
   name: Adevv
   prefix: ADV
-  version: "v0.6.0"
+  version: "v1.0.0"
 
 levels:
   master:
