@@ -5,14 +5,16 @@ type: bug
 weight: 30
 dificultad: sencilla
 version: "v1.0.0"
-status: blocked
-pendiente_de: especificador
+status: planned
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
 ---
 
 # B-ADV-0007: Las pruebas de test_cli_commands arrancan un gateway de Telegram real con el token del entorno
+
+## 🔓 Alcance (decisión humana, 2026-10-26)
+HC-01 queda resuelto: `tests/test_cli_commands.py` está dentro del alcance. La nota del prompt sobre "skills/", "agents/" y "workflows/" solo distinguía el árbol de trabajo de la copia instalada; no restringe rutas (B-ADV-0008, corregido en v0.6.1). Se puede modificar cualquier ruta del repositorio, incluidas `tests/` y `adevv/`.
 
 ## 🎯 Descripción del Fallo
 
