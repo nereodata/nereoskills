@@ -2,12 +2,14 @@
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -157,7 +159,8 @@ def _config(root):
         return {}
     if not isinstance(cfg, dict):
         raise ValueError('task_config.yaml debe ser un mapa')
-    return cfg.get('validation', {})
+    validation = cfg.get('validation', {})
+    return {} if validation is None else validation
 
 
 def _lanzar(root, comando, herramienta=None):
@@ -184,14 +187,29 @@ def _lanzar(root, comando, herramienta=None):
         return 1
 
 
-def _comando_verificable(sha, ficheros, etapa, fila):
-    """Codifica identidad y argumentos para que el shell del verificador no interprete nombres."""
+def _almacen(root):
+    """Localiza las cargas útiles fuera del árbol observado, también en worktrees."""
+    return Path(_git(root, 'rev-parse', '--absolute-git-dir').strip()) / 'adevv-calidad'
+
+
+def _comando_verificable(root, sha, ficheros, etapa, fila):
+    """Guarda los argumentos por hash y mantiene corta la orden del verificador."""
     datos = {'base': sha, 'ficheros': ficheros, 'etapa': etapa,
              'comando': fila['comando'], 'herramienta': fila['herramienta']}
-    payload = base64.b64encode(json.dumps(datos, ensure_ascii=True).encode()).decode()
+    payload = json.dumps(datos, ensure_ascii=True).encode('utf-8')
+    identidad = hashlib.sha256(payload).hexdigest()
+    almacen = _almacen(root)
+    almacen.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=almacen, delete=False) as temporal:
+        ruta_temporal = Path(temporal.name)
+        temporal.write(payload)
+    try:
+        os.replace(ruta_temporal, almacen / (identidad + '.json'))
+    finally:
+        ruta_temporal.unlink(missing_ok=True)
     ruta = base64.b64encode(str(Path(__file__).resolve()).encode('utf-8')).decode()
     codigo = f"import base64,runpy;runpy.run_path(base64.b64decode('{ruta}').decode('utf-8'),run_name='__main__')"
-    args = [sys.executable, '-c', codigo, '--ejecutar', payload]
+    args = [sys.executable, '-c', codigo, '--ejecutar', identidad]
     return subprocess.list2cmdline(args) if os.name == 'nt' else shlex.join(args)
 
 
@@ -214,7 +232,7 @@ def ejecutar(root, base, aplicar, verificar):
                 continue
             if fila['aviso']:
                 print(f"[calidad] {etapa}: {fila['aviso']}", flush=True)
-            resultado = verificar(root, _comando_verificable(sha, ficheros, etapa, fila))
+            resultado = verificar(root, _comando_verificable(root, sha, ficheros, etapa, fila))
             if resultado:
                 print(f'[calidad] fallo de {etapa}; no se permite completed', flush=True)
                 codigo = resultado
@@ -225,11 +243,17 @@ def ejecutar(root, base, aplicar, verificar):
 
 
 def main():
-    """Ejecutor interno de un comando de calidad ya resuelto y codificado."""
+    """Ejecuta la carga útil identificada por hash sin interpolar sus argumentos."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ejecutar', required=True)
     args = parser.parse_args()
-    datos = json.loads(base64.b64decode(args.ejecutar).decode())
+    identidad = args.ejecutar
+    if len(identidad) != 64 or any(c not in '0123456789abcdef' for c in identidad):
+        parser.error('identidad de calidad inválida')
+    payload = (_almacen(Path.cwd()) / (identidad + '.json')).read_bytes()
+    if hashlib.sha256(payload).hexdigest() != identidad:
+        parser.error('carga útil de calidad alterada')
+    datos = json.loads(payload)
     return _lanzar(Path.cwd(), datos['comando'], datos['herramienta'])
 
 

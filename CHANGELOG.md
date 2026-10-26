@@ -6,6 +6,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Añadido
 
+- **T-ADV-0022** — Formato y lint por tarea sobre el delta Git estable, comandos explícitos o deducción conservadora y evidencia reutilizable por Hades.
 - **T-ADV-0026** — Reservas conversacionales de Telegram por cuota o fallo de arranque, continuidad de sesiones propias, retorno al titular y diagnóstico por modelo con cuotas compartidas.
 
 ### Corregido

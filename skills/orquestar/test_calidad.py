@@ -242,6 +242,36 @@ sys.exit(1 if modo == fallo else 0)
         self.config(lint='herramienta-inexistente-adv-0022 {ficheros}')
         self.assertNotEqual(calidad.ejecutar(self.root, self.base, False, motor.verificar), 0)
 
+    def test_regresion_hades_delta_largo(self):
+        self.herramienta()
+        self.escribir('uno.py', 'corregido\n')
+        nombres = [f'src/{i:03d}_nombre_de_archivo_con_espacios y acentos_á.py' for i in range(100)]
+        for nombre in nombres:
+            self.escribir(nombre, 'nuevo\n')
+        comandos = []
+
+        def verificar(root, comando):
+            """Exige una orden corta y la ejecuta mediante el verificador real."""
+            comandos.append(comando)
+            self.assertLess(len(comando), 8191)
+            return motor.verificar(root, comando)
+
+        self.assertEqual(calidad.ejecutar(self.root, self.base, False, verificar), 0)
+        self.assertEqual([l[0] for l in self.llamadas()], ['formato', 'lint'])
+        for _, argumentos in self.llamadas():
+            self.assertTrue(set(nombres).issubset(argumentos))
+        self.assertEqual(calidad.ejecutar(self.root, self.base, False, verificar), 0)
+        self.assertEqual(len(self.llamadas()), 2)
+        self.assertEqual(comandos[:2], comandos[2:])
+
+    def test_regresion_hades_validation_vacio(self):
+        self.escribir('task_config.yaml', 'validation:\n')
+        self.assertEqual(calidad.ejecutar(self.root, self.base, False, motor.verificar), 0)
+        self.escribir('pyproject.toml', '[tool.ruff]\n')
+        plan = calidad.resolver(self.root, calidad._config(self.root), ['uno.py'])
+        self.assertEqual(plan['formato']['comando'], ['ruff', 'format', '--check', 'uno.py'])
+        self.assertEqual(plan['lint']['comando'], ['ruff', 'check', 'uno.py'])
+
     def test_cli_calidad_no_arranca_bucle_y_valida_base(self):
         with patch.object(sys, 'argv', ['adevv', '--calidad', '--base', self.base]), \
                 patch.object(Path, 'cwd', return_value=self.root), \

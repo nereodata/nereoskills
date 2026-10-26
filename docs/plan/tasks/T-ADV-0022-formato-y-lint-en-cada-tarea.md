@@ -3,9 +3,9 @@ id: T-ADV-0022
 title: "Formato y lint del proyecto sobre los ficheros tocados en cada tarea, no solo al cerrar la versión"
 type: funcional
 weight: 60
-dificultad: media
+dificultad: dificil
 version: "v1.0.0"
-status: in_progress
+status: completed
 depende_de: []
 origen: "B-ADV-0006: la suite llega en rojo al cierre por formato (Prettier) acumulado tarea a tarea"
 created_at: 2026-10-26
@@ -18,10 +18,10 @@ updated_at: 2026-10-26
 Cada tarea verifica solo las pruebas de su triaje, así que los fallos de formato y lint (p. ej. Prettier, ESLint, ruff) se acumulan y solo aparecen al pasar la suite completa al cerrar la versión. B-ADV-0006 hace que el bucle se recupere de ese rojo; esta tarea evita que llegue a producirse, comprobando formato y lint en cada `task-dev` / `bug-fix` y en la revisión de Hades.
 
 ## 📋 Criterios de Aceptación (Nivel Máster)
-- [ ] **CA-M-1 (Detección de las etapas de formato y lint):** el proyecto puede declarar en `task_config.yaml` (p. ej. `validation.formato` y `validation.lint`) los comandos de formato y lint, aceptando un marcador de ficheros (`{ficheros}`) para limitarlos al delta. Sin declaración, se deducen de forma conservadora de los manifiestos habituales (`package.json` scripts `format:check`/`lint`, `pyproject.toml` con `ruff`, etc.) o se omiten sin error.
-- [ ] **CA-M-2 (Uso en cada tarea):** `/task-dev` y `/bug-fix` ejecutan esas etapas sobre los ficheros que tocan antes de cerrar (aplicando el formateador si existe modo de escritura), y la tarea no pasa a `completed` con formato o lint en rojo en su delta.
-- [ ] **CA-M-3 (Hades):** la revisión de código de Hades comprueba (vía `--verificar`, reutilizando evidencia del mismo árbol) que formato y lint pasan sobre el delta; un fallo es un hallazgo para el `desarrollador`.
-- [ ] **CA-M-4 (Pruebas y documentación):** pruebas unitarias de la resolución de comandos y del marcador `{ficheros}`; documentación en las skills afectadas y en `skills/orquestar/SKILL.md`.
+- [x] **CA-M-1 (Detección de las etapas de formato y lint):** el proyecto puede declarar en `task_config.yaml` (p. ej. `validation.formato` y `validation.lint`) los comandos de formato y lint, aceptando un marcador de ficheros (`{ficheros}`) para limitarlos al delta. Sin declaración, se deducen de forma conservadora de los manifiestos habituales (`package.json` scripts `format:check`/`lint`, `pyproject.toml` con `ruff`, etc.) o se omiten sin error.
+- [x] **CA-M-2 (Uso en cada tarea):** `/task-dev` y `/bug-fix` ejecutan esas etapas sobre los ficheros que tocan antes de cerrar (aplicando el formateador si existe modo de escritura), y la tarea no pasa a `completed` con formato o lint en rojo en su delta.
+- [x] **CA-M-3 (Hades):** la revisión de código de Hades comprueba (vía `--verificar`, reutilizando evidencia del mismo árbol) que formato y lint pasan sobre el delta; un fallo es un hallazgo para el `desarrollador`.
+- [x] **CA-M-4 (Pruebas y documentación):** pruebas unitarias de la resolución de comandos y del marcador `{ficheros}`; documentación en las skills afectadas y en `skills/orquestar/SKILL.md`.
 
 ## 📋 Notas
 - La suite completa al cerrar versión se mantiene como red de seguridad (B-ADV-0006).
@@ -66,3 +66,7 @@ Hades /review-spec APROBADO (9,25/10), ratificado mediante el lanzador con vered
 Hades review-test: primer informe con tres hallazgos para desarrollador; corregidos y segunda revisión APROBADO (9/10), sin pendientes. El lanzador de esa segunda revisión emitió aun así `[orquestar] Hades ha rechazado T-ADV-0022 2 veces seguidas: no sigas corrigiendo. Commitea lo que tengas ... termina el paso sin cambiar estados`. Se obedece sin marcar completed ni lanzar review-code.
 
 Antes de recibir esa orden ya se había implementado el helper y lanzado su verificación: `python -m unittest discover -s skills/orquestar -p test_calidad.py`, vía `adevv orquestar --verificar`: 19 tests OK. Salida en `.git/T-ADV-0022-green.log`. La compilación de las pruebas también pasó vía --verificar. No se ejecutó suite completa. Pendientes para el siguiente intento: regresiones del triaje, análisis estático del delta completo, Hades review-code y cierre funcional. La evidencia de este verde corresponde al árbol anterior a esta nota de interrupción; no se atribuye al árbol final del commit.
+
+## Reanudación y correcciones de QA
+
+Se retoma el avance sin descartar cambios, con dificultad dificil asignada por el bucle. Hades detecta H-01 (límite de cmd.exe), H-02 (documentar lanzadores Windows) y H-03 (validation vacío), todos para desarrollador y resueltos en esta ronda. H-04/H-05 tienen destino descartar. El triaje mantiene los mismos dos comandos de pruebas; test_calidad.py añade dos regresiones por estos hallazgos. Rojo reproducido: 2 fallos en .git/T-ADV-0022-hades-red.log; verde: 2 OK en .git/T-ADV-0022-hades-green.log. La instalación activa no se modifica: para verificar la nueva CLI se ejecuta el motor de skills/orquestar/orquestar.py mediante adevv orquestar --verificar. Reevaluación de Hades APROBADO (9,2/10), sin hallazgos pendientes; pruebas APROBADAS (9/10). R-01 bajo resuelto con deducción Ruff explícitamente comprobada. H-04/H-05/H-06/H-07 descartados según destino del revisor, sin deuda nueva.

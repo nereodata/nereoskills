@@ -172,3 +172,7 @@ Para migrar el propio repositorio fuente de Adevv (que utiliza una junction `.ag
    ```
 4. Relanzar el bucle con `adevv orquestar`.
 5. La copia congelada en `~/.adevv/congelado` solo debe borrarse cuando se confirme que ningún proceso ni arnés en el sistema la está utilizando.
+
+### Calidad por tarea
+
+El triaje conserva una base Git estable. Las skills task-dev y bug-fix aplican el formato disponible y comprueban formato y lint del delta antes de cerrar; Hades comprueba sin escritura. Configuración, deducción conservadora y omisiones justificadas: [calidad del delta](skills/orquestar/SKILL.md#calidad-del-delta-en-cada-tarea). La suite completa sigue correspondiendo al cierre de versión.
