@@ -5,7 +5,8 @@ type: bug
 weight: 30
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
