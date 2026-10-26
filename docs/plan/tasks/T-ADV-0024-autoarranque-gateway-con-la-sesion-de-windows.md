@@ -5,9 +5,8 @@ type: funcional
 weight: 110
 dificultad: sencilla
 version: "v1.0.0"
-status: blocked
+status: planned
 depende_de: []
-pendiente_de: especificador
 origen: "NO-01 de docs/requirements/requirements.md, aplazado a una versión posterior"
 created_at: 2026-10-26
 updated_at: 2026-10-27
@@ -35,6 +34,12 @@ Que los gateways de Telegram de los proyectos configurados estén siempre escuch
 - **DEC-ESP-05:** no Windows rechaza `on` con código distinto de cero y sin efectos. No se amplía el contrato multiplataforma de `off|estado`, fuera del criterio pedido. Pruebas con datos ficticios, entorno aislado/restaurado, Inicio y lanzador simulados; se descarta usar el Inicio real, credenciales reales o Telegram durante la validación.
 - **Revisión vigente:** Hades `/review-spec` APROBADO, 9,25/10, H-01..H-03 resueltos y sin hallazgos nuevos; reporte en `docs/review/spec_reviews/T-ADV-0024-spec-review.md`.
 - **Interrupción del cierre:** tras la aprobación, el lanzador informó de dos rechazos consecutivos y ordenó commitear y terminar sin cambiar estados, para que el bucle suba dificultad y relance. Se conserva `blocked` con `pendiente_de: especificador` por esa orden, sin hallazgo de especificación pendiente ni recurso humano necesario. No se declara completado el paso; corresponde al bucle reevaluar la aprobación vigente y reanudar el cierre.
+
+## Reanudación y cierre del especificador · 2026-10-27
+
+- **DEC-ESP-06:** se conserva íntegra la especificación aprobada en `ba046de` y su reporte vigente de Hades (APROBADO, 9,25/10). No hay delta de escenarios ni hallazgos pendientes; `/review-spec` excluye de nueva revisión los escenarios ya aprobados. Se descarta repetir la revisión sin cambios porque no aporta evidencia nueva.
+- La nueva ejecución de `especificar` reanuda el cierre interrumpido. La orden del lanzador anterior es un antecedente de aquella ejecución, no un bloqueo vigente ni una necesidad de recurso humano. Al cierre se devuelve únicamente T-ADV-0024 a `planned` sin `pendiente_de`; el bucle decidirá el siguiente paso de desarrollo.
+- No se recuperan implementación, pruebas ni diseño de WIP. Los criterios permanecen pendientes y se conserva el triaje; en este paso documental solo se verifica `git diff --check` mediante el verificador del orquestador.
 
 ## Triaje conservado y ajuste para especificar
 
