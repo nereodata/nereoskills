@@ -5,7 +5,8 @@ type: funcional
 weight: 80
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: ["B-ADV-0007"]
 origen: "Petición del usuario: poner el token del bot de Adevv en las variables de sistema para que los proyectos que olviden su .env le avisen allí"
 created_at: 2026-10-26
