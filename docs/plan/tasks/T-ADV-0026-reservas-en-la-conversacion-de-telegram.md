@@ -5,7 +5,8 @@ type: funcional
 weight: 70
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: ["B-ADV-0005"]
 origen: "Petición del usuario: el chat de Telegram usa el modelo definido, pero debe conmutar a reserva si no tiene cuota o no está disponible"
 created_at: 2026-10-26
@@ -24,3 +25,6 @@ La conversación libre de Telegram (`conversar()`, `skills/telegram_gateway/gate
 - [ ] **CA-M-4 (Transparencia):** la firma de la respuesta indica el `harness/model` que respondió; si se usó una reserva, se indica brevemente. Si ninguna configuración está disponible, responde con un mensaje claro (motivo de cada una) en vez de un error genérico.
 - [ ] **CA-M-5 (Métricas):** los agotamientos detectados en la conversación se registran igual que en el bucle, para que `/agentes` y el bucle los tengan en cuenta.
 - [ ] **CA-M-6 (Pruebas y documentación):** pruebas con lanzadores simulados (cuota agotada, arnés ausente, todos caídos, vuelta al titular); documentación en `skills/telegram_gateway/SKILL.md`.
+
+## Bloqueo de especificacion
+Hades /review-spec RECHAZADO: H-01 (alta), H-02 y H-03 (medias), todos para especificador. Ver docs/review/spec_reviews/T-ADV-0026-spec-review.md y docs/review/versions/v1.0-revision.md. Avance conservado en wip/T-ADV-0026, commit f247889. Sin cambios de produccion en release ni tareas dependientes alteradas.
