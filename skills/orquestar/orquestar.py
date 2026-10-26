@@ -264,7 +264,7 @@ def construir_prompt_paso(root, paso, arg):
 
     nota_fuente = ""
     if es_repositorio_fuente_adevv(root):
-        nota_fuente = ' Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.'
+        nota_fuente = ' Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.'
 
     return instruccion_agente + prompt_cuerpo + extra + nota_fuente
 
@@ -292,7 +292,7 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False):
             f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
         )
         if es_repositorio_fuente_adevv(root):
-            cabecera += 'Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.\n\n'
+            cabecera += 'Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.\n\n'
     f_ev = Path(root) / EVIDENCIAS
     if f_ev.exists():
         try:

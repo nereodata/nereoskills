@@ -8,6 +8,13 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 - **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
 
+## [0.6.1] - 2026-10-26
+
+### Corregido
+
+#### General
+- **B-ADV-0008** — La nota del prompt para el repositorio fuente de Adevv se lee como una restricción a skills/, agents/ y workflows/
+
 ## [0.6.0] - 2026-10-26
 
 ### Añadido
