@@ -4,7 +4,7 @@ title: "Con la suite en rojo al cerrar la versión, el bucle se para en vez de r
 type: bug
 weight: 40
 dificultad: media
-version: "v0.7.0"
+version: "v1.0.0"
 status: planned
 depende_de: []
 created_at: 2026-10-26

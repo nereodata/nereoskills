@@ -4,7 +4,7 @@ title: "Un arnés no encontrado en el PATH para el bucle en vez de avisar y conm
 type: bug
 weight: 50
 dificultad: media
-version: "v0.7.0"
+version: "v1.0.0"
 status: planned
 depende_de: []
 created_at: 2026-10-26
