@@ -1,12 +1,15 @@
 import importlib.util
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
+
+from adevv import yaml_lite
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -86,17 +89,6 @@ class OrquestarRegressionTests(unittest.TestCase):
         self.assertFalse(motor.cierre_de_version(('PASO', 'task-dev', 'T1', 'release/v0.1')))
         self.assertFalse(motor.cierre_de_version(('PARAR', 'Falta task_config.yaml en la raíz del proyecto.')))
 
-    def test_red_suite_at_version_close_stops_before_review(self):
-        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
-                                        max_pasos=3, reintentos=2, espera_max=0, cmd=None)
-        with tempfile.TemporaryDirectory() as directory:
-            with (patch.object(motor, 'estado', return_value=('PASO', 'revisar-version', 'v0.1', None)),
-                  patch.object(motor, 'config', return_value={}),
-                  patch.object(motor, 'verificar', return_value=1) as verificar,
-                  patch.object(motor, 'ejecutar') as ejecutar):
-                self.assertEqual(motor.bucle(args, Path(directory)), 2)
-        verificar.assert_called_once()
-        ejecutar.assert_not_called()
 
 
 class RevisionProductoTests(unittest.TestCase):
@@ -1164,3 +1156,290 @@ class ReservaCuotaTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SuiteRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.root = Path(self.tmp)
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
+        self.enterContext(patch.object(motor, 'recargar_version', return_value=False))
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Suite Test')
+        self.git('config', 'user.email', 'suite@example.test')
+        self.git('checkout', '-q', '-b', 'release/v0.1')
+        (self.root / 'task_config.yaml').write_text(
+            'project:\n  prefix: DEM\nlevels:\n  master:\n    path: backlog/\n'
+            '    folders:\n      tasks: tasks/\n      bugs: bugs/\n', encoding='utf-8')
+        for name in ('requirements', 'req_analysis', 'platform_plan', 'platform_review', 'work_plan'):
+            p = self.root / 'docs' / (name + '.md')
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('**Veredicto:** APROBADO', encoding='utf-8')
+        initial = self.root / 'backlog/tasks/T-DEM-0001.md'
+        initial.parent.mkdir(parents=True, exist_ok=True)
+        initial.write_text('---\nid: T-DEM-0001\nstatus: completed\nversion: v0.1.0\ndepende_de: []\n---\n', encoding='utf-8')
+        report = self.root / 'docs/review/code_reviews/T-DEM-0001-code-review.md'
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fixture')
+        self.enterContext(patch.object(motor, 'git', side_effect=lambda *a: self.git(*a)))
+        motor.excluir(self.root)
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def evidence(self, text='format: src/app.js: error', command='suite'):
+        with (self.root / motor.EVIDENCIAS).open('a', encoding='utf-8') as out:
+            out.write(json.dumps({'arbol': 'a' * 40, 'comando': command, 'codigo': 1,
+                                  'salida': text}) + '\n')
+
+    def observe_failure(self, text='format: src/app.js: error', command='suite'):
+        self.evidence(text, command)
+        return motor.registrar_fallo_suite(self.root, 'v0.1', command)
+
+    def complete(self, iid):
+        p = motor.fichero_de(self.root, iid)
+        p.write_text(p.read_text(encoding='utf-8').replace('status: planned', 'status: completed'), encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fix attempt')
+
+    def test_capture_and_green_reuse_keep_return_contract(self):
+        command = f'"{sys.executable}" -c "import sys; print(123); print(456, file=sys.stderr); sys.exit(7)"'
+        self.assertEqual(motor.verificar(self.root, command), 7)
+        row = json.loads((self.root / motor.EVIDENCIAS).read_text(encoding='utf-8').splitlines()[-1])
+        self.assertIn('123', row['salida'])
+        self.assertIn('456', row['salida'])
+        self.assertEqual(row['codigo'], 7)
+        self.assertEqual(row['comando'], command)
+        self.assertEqual(row['arbol'], motor.arbol(self.root))
+        command = f'"{sys.executable}" -c "print(789)"'
+        self.assertEqual(motor.verificar(self.root, command), 0)
+        with patch.object(motor.subprocess, 'run', wraps=motor.subprocess.run) as calls:
+            self.assertEqual(motor.verificar(self.root, command), 0)
+        self.assertFalse(any(c.kwargs.get('shell') for c in calls.call_args_list))
+
+    def test_capture_is_bounded_and_retains_last_error(self):
+        command = f'"{sys.executable}" -c "print(\'x\' * 70000); print(\'last error\'); raise SystemExit(1)"'
+        with patch('builtins.print'):
+            self.assertEqual(motor.verificar(self.root, command), 1)
+        row = json.loads((self.root / motor.EVIDENCIAS).read_text(encoding='utf-8').splitlines()[-1])
+        self.assertLessEqual(len(row['salida']), 32768)
+        self.assertIn('last error', row['salida'])
+
+    def test_registration_uses_configured_path_prefix_and_normal_selection(self):
+        iid, stop = self.observe_failure()
+        self.assertEqual(iid, 'B-DEM-0001')
+        self.assertFalse(stop)
+        p = motor.fichero_de(self.root, iid)
+        self.assertEqual(p.parent, self.root / 'backlog/bugs')
+        fm = motor.frontmatter(p)
+        self.assertEqual(fm['status'], 'planned')
+        self.assertEqual(motor.vkey(fm['version']), (0, 1))
+        self.assertEqual(motor.lista(fm['depende_de']), [])
+        self.assertIn('format: src/app.js: error', p.read_text(encoding='utf-8'))
+        self.assertIn('suite', p.read_text(encoding='utf-8'))
+        self.assertEqual(motor.estado(self.root, 'docs'), ('PASO', 'bug-fix', iid, 'release/v0.1'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+
+    def test_recurrences_reuse_bug_preserve_work_and_promote_after_three(self):
+        iid, _ = self.observe_failure()
+        p = motor.fichero_de(self.root, iid)
+        with p.open('a', encoding='utf-8') as out:
+            out.write('\n## Triaje del arreglo\nTrabajo del desarrollador.\n')
+        for count in range(1, 4):
+            self.complete(iid)
+            same, stop = self.observe_failure(f'new error {count}')
+            self.assertEqual(same, iid)
+            self.assertFalse(stop)
+            fm = motor.frontmatter(p)
+            self.assertEqual(fm['status'], 'planned')
+            self.assertEqual(fm['suite_intentos'], str(count if count < 3 else 0))
+            self.assertEqual(fm['dificultad'], 'media' if count < 3 else 'dificil')
+            self.assertIn('Trabajo del desarrollador.', p.read_text(encoding='utf-8'))
+            self.assertIn(f'new error {count}', p.read_text(encoding='utf-8'))
+        self.assertEqual(len(list(p.parent.glob('*.md'))), 1)
+        rows = motor.leer_metricas(self.root)
+        self.assertEqual(len([r for r in rows if r.get('tipo') == 'promocion']), 1)
+
+    def test_maximum_stops_after_three_failed_fixes_with_last_output(self):
+        iid, _ = self.observe_failure()
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        for count in range(1, 4):
+            self.complete(iid)
+            same, stop = self.observe_failure(f'last failure {count}')
+            self.assertEqual(same, iid)
+            self.assertEqual(bool(stop), count == 3)
+            fm = motor.frontmatter(motor.fichero_de(self.root, iid))
+            self.assertEqual(fm['suite_intentos'], str(count))
+            self.assertEqual(fm['dificultad'], 'dificil')
+            self.assertEqual(fm['status'], 'planned' if count < 3 else 'blocked')
+        self.assertIn(iid, stop)
+        self.assertIn('last failure 3', stop)
+        fm = motor.frontmatter(motor.fichero_de(self.root, iid))
+        self.assertEqual(fm['status'], 'blocked')
+        self.assertEqual(fm['pendiente_de'], 'humano')
+
+    def test_blocked_and_cancelled_are_not_reopened(self):
+        iid, _ = self.observe_failure()
+        p = motor.fichero_de(self.root, iid)
+        for status in ('blocked', 'cancelled'):
+            original = p.read_text(encoding='utf-8')
+            original = original.replace('status: planned', f'status: {status}').replace('status: blocked', f'status: {status}')
+            p.write_text(original, encoding='utf-8')
+            same, stop = self.observe_failure()
+            self.assertEqual(same, iid)
+            self.assertIn(iid, stop)
+            self.assertEqual(p.read_text(encoding='utf-8'), original)
+
+    def test_pending_recheck_does_not_count_another_fix_or_duplicate(self):
+        iid, _ = self.observe_failure()
+        same, stop = self.observe_failure('another observation')
+        self.assertEqual(same, iid)
+        self.assertFalse(stop)
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, iid))['suite_intentos'], '0')
+        previous = motor.fichero_de(self.root, iid).read_bytes()
+        other, _ = self.observe_failure(command='another suite')
+        self.assertNotEqual(other, iid)
+        self.assertEqual(motor.fichero_de(self.root, iid).read_bytes(), previous)
+        self.evidence()
+        other_version, _ = motor.registrar_fallo_suite(self.root, 'v0.2', 'suite')
+        self.assertNotIn(other_version, (iid, other))
+        self.assertEqual(motor.fichero_de(self.root, iid).read_bytes(), previous)
+
+    def test_loop_runs_bug_fix_then_green_suite_then_review(self):
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=3, reintentos=2, espera_max=0, cmd=None)
+        steps = []
+        events = []
+        def verify_suite(root, command):
+            result = 1 if not events else 0
+            events.append('suite roja' if result else 'suite verde')
+            return result
+        def execute(a, root, prompt, **kwargs):
+            steps.append(kwargs['env']['ORQUESTAR_PASO'])
+            if steps[-1] == 'bug-fix':
+                iid = kwargs['env']['ORQUESTAR_ID']
+                self.complete(iid)
+                report = root / f'docs/review/code_reviews/{iid}-code-review.md'
+                report.write_text('APROBADO', encoding='utf-8')
+                self.git('add', '.')
+                self.git('commit', '-qm', 'review')
+                events.append('bug-fix completado')
+            else:
+                events.append('revisar-version')
+                (root / motor.PARADA).write_text('stop', encoding='utf-8')
+            return 0, {}, ''
+        self.evidence()
+        with (patch.object(motor, 'verificar', side_effect=verify_suite) as verify,
+              patch.object(motor, 'ejecutar', side_effect=execute),
+              patch.object(motor, 'avisar')):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+        self.assertEqual(events, ['suite roja', 'bug-fix completado', 'suite verde', 'revisar-version'])
+        self.assertEqual(steps, ['bug-fix', 'revisar-version'])
+        self.assertEqual(verify.call_count, 2)
+
+    def test_loop_at_maximum_notifies_and_never_launches_review(self):
+        iid, _ = self.observe_failure()
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        for _ in range(2):
+            self.complete(iid)
+            self.observe_failure()
+        self.complete(iid)
+        report = self.root / f'docs/review/code_reviews/{iid}-code-review.md'
+        report.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'review')
+        self.evidence('final error src/app.js')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        with (patch.object(motor, 'verificar', return_value=1),
+              patch.object(motor, 'ejecutar') as execute,
+              patch.object(motor, 'avisar') as notify,
+              patch('builtins.print') as output):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+        execute.assert_not_called()
+        self.assertIn(iid, notify.call_args.args[2])
+        self.assertIn('final error src/app.js', notify.call_args.args[2])
+        self.assertTrue(any(iid in str(c) and 'final error' in str(c) for c in output.call_args_list))
+
+    def test_escaped_command_reuses_id_without_pyyaml(self):
+        command = r'"C:\Program Files\Python\python.exe" -c "print(1)"'
+        with patch.object(motor, 'yaml', yaml_lite), patch.dict(sys.modules, {'yaml': None}):
+            iid, _ = self.observe_failure(command=command)
+            for count in (1, 2):
+                self.complete(iid)
+                same, stop = self.observe_failure(f'error {count}', command=command)
+                self.assertEqual(same, iid)
+                self.assertFalse(stop)
+                fm = motor.frontmatter(motor.fichero_de(self.root, iid))
+                self.assertEqual(fm['suite_intentos'], str(count))
+            self.assertEqual(len(list(motor.backlog_dirs(self.root)[1].glob('*.md'))), 1)
+
+    def test_long_stop_output_fits_final_telegram_transport(self):
+        iid, _ = self.observe_failure()
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        for _ in range(2):
+            self.complete(iid)
+            self.observe_failure()
+        self.complete(iid)
+        text = '\U0001f600' * 5000 + '\nlast error src/app.js'
+        _, stop = self.observe_failure(text)
+        with (patch.object(motor, 'telegram', return_value=('fake', ['123'], {'version'})),
+              patch.object(motor, 'enviar', return_value=True) as send,
+              patch('builtins.print')):
+            self.assertEqual(motor.parar(self.root, 'version', stop), 2)
+        message = send.call_args.args[2]
+        self.assertLessEqual(len(message.encode('utf-16-le')) // 2, 4096)
+        self.assertIn(iid, message)
+        self.assertIn('last error src/app.js', message)
+        self.assertIn('Adevv v', message)
+        body = motor.fichero_de(self.root, iid).read_text(encoding='utf-8')
+        captured = '\n'.join(line[4:] for line in body.splitlines() if line.startswith('    '))
+        self.assertEqual(captured, text)
+
+    def check_checkout_before_suite(self, closing):
+        self.git('checkout', '-qb', 'another')
+        self.evidence()
+        events = []
+        def verify(root, command):
+            events.append(('suite', self.git('branch', '--show-current')))
+            return 1
+        def execute(*args, **kwargs):
+            events.append((kwargs['env']['ORQUESTAR_PASO'], self.git('branch', '--show-current')))
+            self.assertEqual(self.git('status', '--porcelain'), '')
+            return 0, {}, ''
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        with (patch.object(motor, 'estado', side_effect=[closing, ('PASO', 'bug-fix', 'B-DEM-0001', 'release/v0.1')]),
+              patch.object(motor, 'firma', side_effect=[0, 1]),
+              patch.object(motor, 'verificar', side_effect=verify),
+              patch.object(motor, 'ejecutar', side_effect=execute),
+              patch.object(motor, 'avisar')):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+        self.assertEqual(events, [('suite', 'release/v0.1'), ('bug-fix', 'release/v0.1')])
+        self.assertIn('B-DEM-0001', self.git('log', '-1', '--format=%s', 'release/v0.1'))
+        self.assertEqual(self.git('log', '-1', '--format=%s', 'another'), 'fixture')
+
+    def test_checkout_precedes_suite_for_review_step(self):
+        self.check_checkout_before_suite(('PASO', 'revisar-version', 'v0.1', 'release/v0.1'))
+
+    def test_checkout_precedes_suite_for_final_stop(self):
+        self.check_checkout_before_suite(('PARAR', 'Versión v0.1 terminada. Revisa'))
+
+    def test_dirty_tree_prevents_checkout_suite_and_bug_registration(self):
+        self.git('checkout', '-qb', 'another')
+        (self.root / 'pending.txt').write_text('pending work', encoding='utf-8')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        for closing in (('PASO', 'revisar-version', 'v0.1', 'release/v0.1'),
+                        ('PARAR', 'Versión v0.1 terminada. Revisa')):
+            with (self.subTest(closing=closing), patch.object(motor, 'estado', return_value=closing),
+                  patch.object(motor, 'verificar') as verify, patch.object(motor, 'ejecutar') as execute,
+                  patch.object(motor, 'registrar_fallo_suite') as register, patch.object(motor, 'avisar')):
+                self.assertEqual(motor.bucle(args, self.root), 2)
+            verify.assert_not_called()
+            execute.assert_not_called()
+            register.assert_not_called()
+            self.assertEqual(self.git('branch', '--show-current'), 'another')

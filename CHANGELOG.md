@@ -10,6 +10,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0006** — Recuperación automática de la suite roja al cerrar la versión: bug reutilizable con salida del fallo, promoción de dificultad y parada tras tres arreglos fallidos en dificil.
 - **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
 
 ## [0.6.1] - 2026-10-26

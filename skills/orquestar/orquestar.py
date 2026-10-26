@@ -7,6 +7,7 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import hashlib
 import importlib.util
 import json
 import math
@@ -1586,13 +1587,90 @@ def verificar(root, cmd):
                          'reutilizada': True, 'codigo': 0, 'id': os.environ.get('ORQUESTAR_ID', '')})
         return 0
     inicio = time.monotonic()
-    codigo = subprocess.run(cmd, shell=True, cwd=root).returncode
+    with tempfile.TemporaryFile() as captura:
+        codigo = subprocess.run(cmd, shell=True, cwd=root, stdout=captura, stderr=subprocess.STDOUT).returncode
+        captura.seek(0, os.SEEK_END)
+        captura.seek(max(0, captura.tell() - 32768))
+        salida = captura.read().decode('utf-8', errors='replace')
+    if salida:
+        print(salida, end='' if salida.endswith('\n') else '\n', flush=True)
     fila = {'fecha': ahora(), 'comando': cmd, 'arbol': clave, 'codigo': codigo,
-            'duracion_s': round(time.monotonic() - inicio)}
+            'salida': salida, 'duracion_s': round(time.monotonic() - inicio)}
     with f.open('a', encoding='utf-8') as out:
         out.write(json.dumps(fila, ensure_ascii=False) + '\n')
     registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **fila})
     return codigo
+
+
+def registrar_fallo_suite(root, version, cmd):
+    """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
+    evidencia = root / EVIDENCIAS
+    filas = [json.loads(l) for l in evidencia.read_text(encoding='utf-8').splitlines() if l.strip()]
+    ultima = next(f for f in reversed(filas) if f['comando'] == cmd and f['codigo'])
+    salida = ultima.get('salida') or '(el comando no produjo salida)'
+    cola_aviso = salida[-1200:]
+    clave_comando = hashlib.sha256(cmd.encode('utf-8')).hexdigest()
+    directorio = backlog_dirs(root)[1]
+    fichero = next((f for f in sorted(directorio.glob('*.md'))
+                    if frontmatter(f).get('suite_cierre', '').lower() == 'true'
+                    and vkey(frontmatter(f).get('version')) == vkey(version)
+                    and frontmatter(f).get('suite_clave') == clave_comando), None)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    if fichero:
+        fm = frontmatter(fichero)
+        iid = fm['id']
+        if fm.get('status') in ('blocked', 'cancelled'):
+            return iid, f'{iid}: el bug de cierre está {fm["status"]}; no se reabre. Cola de la última salida:\n{cola_aviso}'
+        texto = fichero.read_text(encoding='utf-8')
+    else:
+        directorio.mkdir(parents=True, exist_ok=True)
+        iid = siguiente_id(root, 'B')
+        fichero = directorio / f'{iid}-suite-roja-al-cerrar-version.md'
+        titulo = 'La suite falla al cerrar la versión'
+        texto = (f'---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n'
+                 f'type: bug\nweight: 10\ndificultad: media\nversion: {json.dumps(version)}\n'
+                 f'status: planned\ndepende_de: []\ncreated_at: {hoy}\n'
+                 f'suite_cierre: true\nsuite_clave: {clave_comando}\n'
+                 f'---\n\n# {iid}: {titulo}\n\n## Descripción del fallo\n'
+                 'La suite completa de cierre devuelve un código distinto de cero. '
+                 'Debe pasar antes de revisar o cerrar la versión.\n\n'
+                 '## Reproducir\nEjecutar el comando indicado en la evidencia desde la raíz del proyecto.\n')
+        fichero.write_text(texto, encoding='utf-8')
+        fm = frontmatter(fichero)
+    dificultad = dificultad_de(root, iid)
+    intentos = int(fm.get('suite_intentos', '0')) if fm.get('suite_dificultad') == dificultad else 0
+    if fm.get('status') == 'completed':
+        intentos += 1
+    motivo = ''
+    if intentos >= 3:
+        nueva = promover_dificultad(root, iid, motivo=f'{intentos} arreglos tras los que la suite sigue roja')
+        if nueva:
+            dificultad, intentos = nueva, 0
+            texto = fichero.read_text(encoding='utf-8')
+        else:
+            motivo = (f'{iid}: la suite sigue fallando tras 3 intentos en dificil. '
+                      f'Cola de la última salida (completa en el bug):\n{cola_aviso}')
+    cambios = {'status': 'blocked' if motivo else 'planned', 'updated_at': hoy,
+               'suite_dificultad': dificultad, 'suite_intentos': str(intentos)}
+    if motivo:
+        cambios['pendiente_de'] = 'humano'
+    cabecera, cuerpo = texto.split('\n---\n', 1)
+    for clave, valor in cambios.items():
+        if re.search(rf'^{clave}:', cabecera, re.M):
+            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
+        else:
+            cabecera += f'\n{clave}: {valor}'
+    cuerpo = re.sub(r'\n## Último fallo de suite\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
+    detalle = '\n'.join('    ' + linea for linea in salida.splitlines())
+    cuerpo += (f'\n## Último fallo de suite\n- Comando: {json.dumps(cmd, ensure_ascii=False)}\n'
+               f'- Código: {ultima["codigo"]}; árbol: {ultima["arbol"]}; fecha: {ahora()}\n\n{detalle}\n')
+    fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
+    ruta = str(fichero.relative_to(root))
+    subprocess.run(['git', 'add', '--', ruta], cwd=root, capture_output=True, check=True)
+    subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): registrar fallo de suite al cierre',
+                    '--', ruta], cwd=root, capture_output=True, check=True)
+    print(f'[orquestar] {iid}: suite roja registrada para {version} ({intentos} intentos en {dificultad}).', flush=True)
+    return iid, motivo
 
 
 # ---------------------------------------------------------------- ficheros del bucle y métricas
@@ -2113,8 +2191,18 @@ def bucle(a, root):
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
-        if not a.estado and cmd_suite and cierre_de_version(e) and verificar(root, cmd_suite):
-            return parar(root, 'version', f'la versión no tiene más tareas elegibles pero la suite falla ({cmd_suite}).')
+        if not a.estado and cmd_suite and cierre_de_version(e):
+            version = e[2] if e[0] == 'PASO' else re.search(r'\bv\d+\.\d+(?:\.\d+)?', e[1])[0]
+            rama_cierre = e[3] if e[0] == 'PASO' else f'release/{version}'
+            if rama_cierre and git('branch', '--show-current') != rama_cierre:
+                if git('status', '--porcelain'):
+                    return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama_cierre}.')
+                subprocess.run(['git', 'checkout', '-q', rama_cierre], cwd=root, check=True)
+            if verificar(root, cmd_suite):
+                iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
+                if motivo:
+                    return parar(root, 'version', motivo)
+                e = estado(root, a.docs)
         if a.estado:
             return 0 if e[0] in ('FIN', 'PASO') else 2
         if e[0] == 'FIN':

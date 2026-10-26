@@ -100,3 +100,52 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
     Cuando un paso modifica "skills/orquestar/SKILL.md" del árbol de trabajo
     Entonces el paso siguiente del bucle recibe la ruta de la skill "orquestar" de la 0.1.0 instalada
     Y su prompt indica que los cambios se hacen en el árbol de trabajo, en cualquier ruta, y nunca en la copia instalada
+
+  @B-ADV-0006
+  Escenario: Suite roja al cerrar una versión se convierte en un bug elegible
+    Dado una release sin tareas elegibles cuya suite escribe errores en stdout y stderr
+    Cuando falla la suite al cerrar la versión
+    Entonces se conserva su salida y se registra un bug planned en esa versión con el comando y los errores
+    Y el contador de arreglos fallidos es 0
+    Y el siguiente paso es bug-fix sobre ese bug con las revisiones habituales
+    Y la revisión de versión solo continúa cuando la suite pasa
+
+  @B-ADV-0006
+  Esquema del escenario: Recaídas del mismo cierre reutilizan el bug y suben la dificultad
+    Dado un bug de cierre de dificultad <nivel> con <previas> recaídas desde su última promoción
+    Y bug-fix acaba de marcarlo completed
+    Cuando la suite de la misma versión y comando falla con una salida distinta a la anterior
+    Entonces se conserva el ID y se actualiza la salida del bug
+    Y su estado es <estado> y su dificultad es <resultado> con contador <contador>
+    Y el bucle <accion>
+
+    Ejemplos:
+      | nivel   | previas | estado  | resultado | contador | accion                                                     |
+      | media   | 0       | planned | media     | 1        | continúa con bug-fix                                        |
+      | media   | 1       | planned | media     | 2        | continúa con bug-fix                                        |
+      | media   | 2       | planned | dificil   | 0        | continúa con bug-fix con el perfil de dificultad dificil     |
+      | dificil | 0       | planned | dificil   | 1        | continúa con bug-fix                                        |
+      | dificil | 1       | planned | dificil   | 2        | continúa con bug-fix                                        |
+      | dificil | 2       | blocked | dificil   | 3        | para y avisa en consola y Telegram con ID y la última salida |
+
+  @B-ADV-0006
+  Esquema del escenario: Bloqueos y cancelaciones del bug conservan la intervención habitual
+    Dado un bug de cierre en estado <estado>
+    Cuando la suite de la misma versión y comando sigue roja en el cierre
+    Entonces el bug permanece <estado> y el bucle informa del impedimento sin reabrirlo
+
+    Ejemplos:
+      | estado    |
+      | blocked   |
+      | cancelled |
+
+  @B-ADV-0006
+  Esquema del escenario: Un cierre diferente obtiene su propio bug
+    Dado un bug de cierre para la versión v0.1 y el comando suite-a
+    Cuando falla el cierre de la versión <version> con el comando <comando>
+    Entonces se registra otro ID sin modificar el bug anterior
+
+    Ejemplos:
+      | version | comando |
+      | v0.1    | suite-b |
+      | v0.2    | suite-a |
