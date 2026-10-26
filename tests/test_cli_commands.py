@@ -423,7 +423,8 @@ class TestCliCommands(unittest.TestCase):
             # Caso repositorio fuente de Adevv (@CA-F02-10)
             prompt_fuente = motor.construir_prompt_paso(self.repo_root, "ciclo-requisitos", None)
             self.assertIn(expected_skill, prompt_fuente.replace("\\", "/"))
-            self.assertIn('Los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol de trabajo.', prompt_fuente)
+            self.assertIn('Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta', prompt_fuente)
+            self.assertIn('nunca la copia instalada', prompt_fuente)
 
     def test_h02_version_es_consulta_pura_sin_efectos_secundarios(self):
         """H-02: adevv --version no invoca evaluar_comprobacion_actualizacion."""
