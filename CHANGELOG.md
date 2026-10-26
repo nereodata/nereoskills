@@ -2,6 +2,19 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [0.6.0] - 2026-10-26
+
+### Añadido
+
+#### General
+- **T-ADV-0021** — Salto de configuraciones con cuota agotada vigente en agente() y exclusión de rebotes sin cuota en hades_llamadas
+
+### Corregido
+
+#### General
+- **B-ADV-0003** — Aislamiento de iniciar_gateway en tests de bucle, PATH de usuario en subprocesos y colisión 409 en gateway.py
+- **B-ADV-0004** — Fallo de reanudación codex exec resume por flag --sandbox y doble conteo de tokens cacheados en codex
+
 ## [0.5.0] - 2026-10-24
 
 ### A?adido
