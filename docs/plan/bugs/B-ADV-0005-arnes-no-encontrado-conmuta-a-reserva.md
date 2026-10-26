@@ -5,7 +5,8 @@ type: bug
 weight: 50
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
@@ -40,3 +41,10 @@ Fuera de alcance: el modo `--cmd` explícito (sin reservas) puede seguir abortan
 ## 📋 Evidencias
 - `skills/orquestar/orquestar.py:1055` y `:1278` — `sys.exit` dentro del flujo con reservas.
 - `skills/telegram_gateway/gateway.py:163` — mismo patrón en el gateway.
+
+## Bloqueo en modo orquestado (2026-10-26)
+Hades `/review-spec`: RECHAZADO; H-01 y H-02 asignados al especificador.
+Falta cubrir una reserva intermedia ausente con otra posterior disponible en los tres flujos y concretar las m?tricas y el tiempo de recuperaci?n conservado.
+Trabajo preservado en `wip/B-ADV-0005` (`651864f`); release sin cambios de producci?n.
+V?anse `docs/review/spec_reviews/B-ADV-0005-spec-review.md` y `docs/review/versions/v1.0-revision.md`.
+El siguiente paso es `especificar`; no se ha completado el bug.
