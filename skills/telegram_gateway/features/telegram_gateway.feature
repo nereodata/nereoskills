@@ -66,3 +66,65 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Dado un titular con sesión previa y una reserva disponible
     Cuando la reanudación falla y el reintento sin sesión también falla sin cuota ni error de arranque
     Entonces se conserva el tratamiento de error ordinario sin invocar reservas
+
+  @T-ADV-0030 @CA-M-3 @CA-M-4
+  Esquema del escenario: Rechazar cada entrada de escucha con token ambiental antes de cualquier efecto
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha, procesos y PID sin efectos reales
+    Y token local <local>, IDs locales <ids_locales>, token ambiental token-entorno-ficticio e IDs ambientales 222
+    Y que AUSENTE significa variable no definida y VACIO significa cadena vacía
+    Y Telegram habilitado sin gateway ni PID activo
+    Cuando ejecuto <comando> para el proyecto temporal
+    Entonces la entrada termina con código distinto de cero
+    Y muestra el mismo motivo del bucle "token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto"
+    Y no solicita escucha, creación de procesos ni reserva de PID
+    Ejemplos:
+      | comando | local | ids_locales |
+      | adevv telegram | AUSENTE | AUSENTE |
+      | adevv telegram | AUSENTE | 111 |
+      | adevv telegram | VACIO | 111 |
+      | adevv telegram --fondo | AUSENTE | AUSENTE |
+      | adevv telegram --fondo | AUSENTE | 111 |
+      | adevv telegram --fondo | VACIO | 111 |
+      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | AUSENTE |
+      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | 111 |
+      | python skills/telegram_gateway/gateway.py --gestionado | VACIO | 111 |
+
+  @T-ADV-0030 @CA-M-3 @CA-M-4
+  Esquema del escenario: Permitir cada entrada de escucha con token local y destinatario efectivo
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha, procesos y PID sin efectos reales
+    Y token local token-local-ficticio, IDs locales <ids_locales>, token ambiental <ambiental> e IDs ambientales <ids_ambientales>
+    Y que AUSENTE significa variable no definida y Telegram está habilitado sin gateway ni PID activo
+    Cuando ejecuto <comando> para el proyecto temporal con lanzador disponible y exitoso
+    Entonces se permite el arranque y se alcanza la escucha simulada con token token-local-ficticio y usuario <usuario>
+    Y no aparece el diagnóstico de token del entorno solo para avisos
+    Ejemplos:
+      | comando | ids_locales | ambiental | ids_ambientales | usuario |
+      | adevv telegram | 111 | AUSENTE | AUSENTE | 111 |
+      | adevv telegram | 111 | token-entorno-ficticio | 222 | 111 |
+      | adevv telegram | AUSENTE | token-entorno-ficticio | 222 | 222 |
+      | adevv telegram --fondo | 111 | AUSENTE | AUSENTE | 111 |
+      | adevv telegram --fondo | 111 | token-entorno-ficticio | 222 | 111 |
+      | adevv telegram --fondo | AUSENTE | token-entorno-ficticio | 222 | 222 |
+      | python skills/telegram_gateway/gateway.py --gestionado | 111 | AUSENTE | AUSENTE | 111 |
+      | python skills/telegram_gateway/gateway.py --gestionado | 111 | token-entorno-ficticio | 222 | 111 |
+      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | token-entorno-ficticio | 222 | 222 |
+
+  @T-ADV-0030 @CA-M-1 @CA-M-3 @CA-M-4
+  Esquema del escenario: No avisar ni escuchar con credenciales incompletas
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha, procesos y PID sin efectos reales
+    Y token local <local>, IDs locales <ids_locales>, token ambiental AUSENTE e IDs ambientales AUSENTE
+    Y que AUSENTE significa variable no definida y VACIO significa cadena vacía, con Telegram habilitado
+    Cuando solicito un aviso version y un autoarranque y ejecuto <comando> para el proyecto temporal
+    Entonces no se envían avisos ni se solicita escucha, creación de procesos o reserva de PID
+    Y la entrada termina con código distinto de cero y diagnóstico de credenciales incompletas
+    Ejemplos:
+      | comando | local | ids_locales |
+      | adevv telegram | VACIO | 111 |
+      | adevv telegram | token-local-ficticio | AUSENTE |
+      | adevv telegram --fondo | VACIO | 111 |
+      | adevv telegram --fondo | token-local-ficticio | AUSENTE |
+      | python skills/telegram_gateway/gateway.py --gestionado | VACIO | 111 |
+      | python skills/telegram_gateway/gateway.py --gestionado | token-local-ficticio | AUSENTE |

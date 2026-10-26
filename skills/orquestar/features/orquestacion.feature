@@ -76,3 +76,69 @@ Característica: Continuidad con arneses ausentes
     Entonces se ejecuta la reserva y veo el warning de ausencia en consola
     Y no se envía por Telegram el aviso del evento arnes
     Y con la configuración por defecto se solicita el aviso arnes identificando el ejecutable ausente
+
+  @T-ADV-0030 @CA-M-1 @CA-M-4
+  Esquema del escenario: Resolver por separado el token y los destinatarios de Telegram
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha y procesos sin efectos reales
+    Y token local <local>, IDs locales <ids_locales>, token ambiental <ambiental> e IDs ambientales <ids_ambientales>
+    Y que AUSENTE significa variable no definida y VACIO significa cadena vacía
+    Cuando resuelvo las credenciales del proyecto
+    Entonces el token efectivo es <token>, los IDs efectivos son <ids> y el origen del token es <origen>
+    Ejemplos:
+      | local | ids_locales | ambiental | ids_ambientales | token | ids | origen |
+      | token-local-ficticio | 111 | AUSENTE | AUSENTE | token-local-ficticio | 111 | proyecto |
+      | AUSENTE | AUSENTE | token-entorno-ficticio | 222 | token-entorno-ficticio | 222 | entorno |
+      | token-local-ficticio | 111 | token-entorno-ficticio | 222 | token-local-ficticio | 111 | proyecto |
+      | token-local-ficticio | AUSENTE | token-entorno-ficticio | 222 | token-local-ficticio | 222 | proyecto |
+      | AUSENTE | 111 | token-entorno-ficticio | 222 | token-entorno-ficticio | 111 | entorno |
+      | VACIO | 111 | token-entorno-ficticio | 222 | token-entorno-ficticio | 111 | entorno |
+      | token-local-ficticio | VACIO | token-entorno-ficticio | 222 | token-local-ficticio | 222 | proyecto |
+      | VACIO | 111 | AUSENTE | 222 | VACIO | 111 | ninguno |
+      | AUSENTE | AUSENTE | AUSENTE | AUSENTE | VACIO | lista vacía | ninguno |
+
+  @T-ADV-0030 @CA-M-2 @CA-M-4
+  Esquema del escenario: Identificar el proyecto al principio de cada aviso con cualquier fuente válida
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha y procesos sin efectos reales
+    Y token local <local>, IDs locales <ids_locales>, token ambiental <ambiental> e IDs ambientales <ids_ambientales>
+    Y que AUSENTE significa variable no definida y los avisos Telegram están habilitados sin filtro de eventos
+    Cuando solicito un aviso de evento version y texto "Versión terminada"
+    Entonces observo exactamente un envío con token <token> al destinatario <destinatario>
+    Y el mensaje comienza exactamente por "[ProyectoDemo] Versión terminada" y conserva la firma de versión de Adevv
+    Y no hay envíos a otros destinatarios ni escucha ni creación de procesos
+    Ejemplos:
+      | local | ids_locales | ambiental | ids_ambientales | token | destinatario |
+      | token-local-ficticio | 111 | AUSENTE | AUSENTE | token-local-ficticio | 111 |
+      | AUSENTE | AUSENTE | token-entorno-ficticio | 222 | token-entorno-ficticio | 222 |
+      | token-local-ficticio | 111 | token-entorno-ficticio | 222 | token-local-ficticio | 111 |
+      | token-local-ficticio | AUSENTE | token-entorno-ficticio | 222 | token-local-ficticio | 222 |
+      | AUSENTE | 111 | token-entorno-ficticio | 222 | token-entorno-ficticio | 111 |
+
+  @T-ADV-0030 @CA-M-3 @CA-M-4
+  Escenario: Informar una vez por bucle sin arrancar el gateway con el respaldo
+    Dado un proyecto temporal ProyectoDemo con todas las variables TELEGRAM_* heredadas excluidas y restauración al terminar incluso ante fallos
+    Y únicamente token ambiental token-entorno-ficticio e IDs ambientales 222, todos ficticios
+    Y Telegram habilitado, transporte sin red, sin gateway activo y observadores de escucha, procesos y PID sin efectos reales
+    Cuando solicito tres veces el autoarranque en una misma ejecución del bucle
+    Entonces no se solicita escucha ni creación de procesos ni reserva de PID
+    Y aparece exactamente una nota con el motivo "token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto"
+    Cuando inicio otra ejecución del bucle y solicito tres veces el autoarranque
+    Entonces tampoco se solicita escucha ni creación de procesos ni reserva de PID
+    Y la salida de la nueva ejecución contiene exactamente una nota con el mismo motivo
+
+  @T-ADV-0030 @CA-M-3 @CA-M-4
+  Esquema del escenario: Conservar el autoarranque con token del proyecto
+    Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
+    Y credenciales exclusivamente ficticias, transporte sin red y observadores de escucha y procesos sin efectos reales
+    Y token local token-local-ficticio, IDs locales <ids_locales>, token ambiental <ambiental> e IDs ambientales <ids_ambientales>
+    Y que AUSENTE significa variable no definida, Telegram está habilitado y no existe gateway ni PID activo
+    Cuando solicito una vez el autoarranque con el lanzador disponible y exitoso
+    Entonces se solicita exactamente un arranque del gateway del proyecto en segundo plano
+    Y las credenciales destinadas a la escucha tienen token token-local-ficticio y usuario <usuario>
+    Y no aparece el diagnóstico de token del entorno solo para avisos
+    Ejemplos:
+      | ids_locales | ambiental | ids_ambientales | usuario |
+      | 111 | AUSENTE | AUSENTE | 111 |
+      | 111 | token-entorno-ficticio | 222 | 111 |
+      | AUSENTE | token-entorno-ficticio | 222 | 222 |
