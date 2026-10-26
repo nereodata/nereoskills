@@ -211,3 +211,70 @@ Característica: Continuidad de la conversación de Telegram con reservas
       | adevv telegram --fondo | token-local-ficticio | AUSENTE |
       | python skills/telegram_gateway/gateway.py --gestionado | VACIO | 111 |
       | python skills/telegram_gateway/gateway.py --gestionado | token-local-ficticio | AUSENTE |
+
+  @T-ADV-0024 @CA-M-1 @CA-M-2 @CA-M-3
+  Escenario: Registrar una única entrada de Inicio por proyecto con la orden pública
+    Dado Windows con usuario sin privilegios de administrador y carpeta Inicio de usuario simulada vacía
+    Y dos proyectos temporales distintos Proyecto Uno y Proyecto Dos, ambos con Telegram habilitado
+    Y cada proyecto tiene token ficticio en su .env e ID permitido 111 y no tiene gateway activo
+    Y entorno TELEGRAM_* aislado y restaurado al terminar, transporte sin red y lanzador simulado
+    Cuando ejecuto adevv telegram --autoarranque on dos veces desde la raíz de Proyecto Uno y una desde Proyecto Dos
+    Entonces las tres órdenes terminan con código cero e informan autoarranque registrado para su proyecto
+    Y hay exactamente dos entradas distintas, una por proyecto, sin requerir elevación
+    Y cada entrada solicita adevv telegram --fondo desde la raíz de su proyecto sin ventana visible
+    Y ninguna entrada contiene rutas al almacén de versiones de Adevv
+
+  @T-ADV-0024 @CA-M-1
+  Escenario: Consultar y quitar la entrada propia conservando la ajena
+    Dado Windows con carpeta Inicio simulada y entradas registradas para Proyecto Uno y Proyecto Dos
+    Y los proyectos son temporales, los procesos están simulados y no se usa el Inicio real
+    Cuando ejecuto adevv telegram --autoarranque estado desde la raíz de Proyecto Uno
+    Entonces termina con código cero e informa autoarranque registrado para Proyecto Uno sin modificar entradas
+    Cuando ejecuto adevv telegram --autoarranque off desde la raíz de Proyecto Uno
+    Entonces termina con código cero e informa autoarranque no registrado para Proyecto Uno
+    Y la entrada de Proyecto Uno ha desaparecido y la de Proyecto Dos conserva exactamente su contenido
+    Cuando ejecuto adevv telegram --autoarranque estado desde la raíz de Proyecto Uno
+    Entonces termina con código cero e informa autoarranque no registrado para Proyecto Uno sin modificar entradas
+    Cuando ejecuto adevv telegram --autoarranque off otra vez desde la raíz de Proyecto Uno
+    Entonces termina con código cero, sigue informando autoarranque no registrado y conserva intacta la entrada de Proyecto Dos
+
+  @T-ADV-0024 @CA-M-1 @CA-M-2
+  Esquema del escenario: Iniciar el gateway con la sesión del usuario sin administrador
+    Dado Windows con usuario sin privilegios de administrador y carpeta Inicio de usuario simulada vacía
+    Y proyecto temporal Proyecto Uno con Telegram habilitado, sin gateway activo y token local token-local-ficticio
+    Y IDs locales <ids_locales>, IDs ambientales <ids_ambientales> y ningún token ambiental
+    Y AUSENTE significa clave no definida, entorno TELEGRAM_* aislado y restaurado incluso ante fallos
+    Y transporte sin red y lanzador estable adevv simulado disponible y exitoso
+    Cuando ejecuto adevv telegram --autoarranque on desde la raíz de Proyecto Uno
+    Y simulo un inicio de sesión ejecutando su entrada de Inicio
+    Entonces se solicita exactamente una vez adevv telegram --fondo desde la raíz absoluta de Proyecto Uno
+    Y el lanzamiento es sin ventana visible y no requiere elevación ni rutas al almacén de versiones
+    Y la entrada termina con código cero sin programar reintentos
+    Ejemplos:
+      | ids_locales | ids_ambientales |
+      | 111 | AUSENTE |
+      | AUSENTE | 222 |
+
+  @T-ADV-0024 @CA-M-3
+  Esquema del escenario: Terminar un arranque inválido con diagnóstico de su causa
+    Dado Windows y una entrada previamente registrada para el proyecto temporal Proyecto Uno en una carpeta Inicio simulada
+    Y proyecto <proyecto>, token local <local>, token ambiental <ambiental>, IDs locales <ids_locales> e IDs ambientales <ids_ambientales>
+    Y AUSENTE significa clave no definida y el entorno TELEGRAM_* está aislado y se restaura incluso ante fallos
+    Y Telegram está habilitado, sin gateway activo, con procesos simulados y transporte sin red
+    Cuando simulo un inicio de sesión ejecutando su entrada de Inicio una vez
+    Entonces el intento termina con código distinto de cero y deja un diagnóstico observable que identifica <motivo>
+    Y no inicia escucha ni un proceso de gateway ni reserva PID ni programa reintentos
+    Ejemplos:
+      | proyecto | local | ambiental | ids_locales | ids_ambientales | motivo |
+      | eliminado tras registrar | AUSENTE | AUSENTE | AUSENTE | AUSENTE | proyecto inexistente |
+      | existente | AUSENTE | AUSENTE | 111 | AUSENTE | credenciales incompletas |
+      | existente | AUSENTE | token-entorno-ficticio | AUSENTE | 222 | token del entorno solo para avisos; se requiere token en el .env del proyecto |
+      | existente | token-local-ficticio | AUSENTE | AUSENTE | AUSENTE | credenciales incompletas |
+
+  @T-ADV-0024 @CA-M-4
+  Escenario: Rechazar la activación fuera de Windows sin modificar el sistema
+    Dado un sistema no Windows con proyecto temporal y carpeta de arranque simulada con una entrada ajena
+    Y procesos simulados y transporte sin red
+    Cuando ejecuto adevv telegram --autoarranque on desde la raíz del proyecto
+    Entonces termina con código distinto de cero e informa que el autoarranque no está soportado en este sistema
+    Y la carpeta conserva exactamente sus entradas y contenidos y no se solicita ningún proceso ni registro de autoarranque
