@@ -1,4 +1,4 @@
 """Metadatos del paquete adevv."""
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 DEFAULT_ORIGIN_URL = "https://github.com/nereodata/nereoskills.git"

@@ -134,7 +134,7 @@ Escenario: El bucle sobre el repositorio de Adevv no ve el árbol de trabajo
   Y un bucle en marcha sobre el repositorio fuente de Adevv
   Cuando un paso modifica "skills/orquestar/SKILL.md" del árbol de trabajo
   Entonces el paso siguiente del bucle recibe la ruta de la skill "orquestar" de la 0.1.0 instalada
-  Y su prompt indica que los cambios se hacen en "skills/", "agents/" y "workflows/" del árbol
+  Y su prompt indica que los cambios se hacen en el árbol de trabajo, en cualquier ruta, y nunca en la copia instalada
 ```
 
 **Otras verificaciones:** ninguna; todos los RF vigentes tienen CA.
