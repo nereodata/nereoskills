@@ -63,6 +63,11 @@ class TestCliCommands(unittest.TestCase):
     """Pruebas completas de despacho CLI, validaciones y auto-inicialización."""
 
     def setUp(self):
+        isolated_environment = patch.dict(os.environ)
+        isolated_environment.start()
+        self.addCleanup(isolated_environment.stop)
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+        os.environ.pop("TELEGRAM_ALLOWED_USER_IDS", None)
         os.environ.pop("ORQUESTAR_PASO", None)
         os.environ.pop("ADEVV_BOOTSTRAPPED", None)
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -432,6 +437,38 @@ class TestCliCommands(unittest.TestCase):
             code, out, err = self._ejecutar_cli(["--version"], self.root)
             self.assertEqual(code, 0)
             mock_update.assert_not_called()
+
+
+class TestCliEnvironment(unittest.TestCase):
+    """Regresiones del aislamiento de credenciales en el fixture CLI."""
+
+    def test_telegram_environment_is_isolated_and_restored(self):
+        """El fixture y sus hijos omiten Telegram y restauran el entorno al salir."""
+        keys = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USER_IDS")
+        for present in ((), keys[:1], keys[1:], keys):
+            with self.subTest(present=present), patch.dict(os.environ):
+                for key in keys:
+                    os.environ.pop(key, None)
+                for key in present:
+                    os.environ[key] = "dummy-test-value"
+                expected = {key: os.environ.get(key) for key in keys}
+                fixture = TestCliCommands("test_h02_version_es_consulta_pura_sin_efectos_secundarios")
+                try:
+                    fixture.setUp()
+                    self.assertTrue(all(key not in os.environ for key in keys))
+                    child = subprocess.run(
+                        [sys.executable, "-c",
+                         "import os; print(any(k in os.environ for k in "
+                         "('TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USER_IDS')))"],
+                        capture_output=True, text=True, check=True, timeout=10,
+                    )
+                    self.assertEqual(child.stdout.strip(), "False")
+                finally:
+                    try:
+                        fixture.tearDown()
+                    finally:
+                        fixture.doCleanups()
+                self.assertEqual({key: os.environ.get(key) for key in keys}, expected)
 
 
 if __name__ == "__main__":

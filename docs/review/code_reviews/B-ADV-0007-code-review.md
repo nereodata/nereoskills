@@ -1,39 +1,41 @@
-﻿# Revisión de código: B-ADV-0007
+﻿# Revisión de código — B-ADV-0007
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO — código de producción N/A**
+**Revisor:** Hades · `/review-code` · modo orquestado · ID maestro B-ADV-0007
+**Fecha:** 2026-10-26
 
-**Fecha:** 2026-10-26 · **Revisor:** Hades · **Modo:** orquestado
+## Alcance
 
-## Alcance y estado recibido
+QA final del delta completo respecto a HEAD: las cinco líneas de aislamiento en `TestCliCommands.setUp`, la regresión de `TestCliEnvironment`, el triaje del maestro, la sección B-ADV-0007 de la revisión v1.0 y los reportes de pruebas y rojo. No se revisan otros IDs.
 
-Rama `release/v1.0`, HEAD `f990cc066cbc7e171e07999e5cafe282b0e6c51f`. Antes de esta revisión, el único cambio sin commit es el artefacto maestro `docs/plan/bugs/B-ADV-0007-tests-cli-arrancan-gateway-real-con-token-del-entorno.md`: pasa de `planned` a `in_progress` y añade el triaje. No hay cambios en el índice ni delta de implementación o pruebas. No existe código de producción revisable para este bug; el rechazo evalúa el impedimento y la imposibilidad de dar la corrección por terminada, no defectos introducidos por un delta inexistente.
+No hay código de producción, build, CI, configuración ejecutable, manifiestos ni dependencias modificados. El fixture es preparación de pruebas y su evaluación final queda en `docs/review/test_reviews/B-ADV-0007-test-review.md`. No se atribuye a `/review-code` la aprobación técnica de código de producción inexistente.
 
-Se han contrastado el triaje, el código actual de `tests/test_cli_commands.py`, el despacho de `adevv/cli.py`, las credenciales y el autoarranque en `skills/orquestar/orquestar.py`, el antecedente B-ADV-0003 y las decisiones aplicables del plan de plataforma. A y B están omitidas justificadamente: el contrato de aislamiento ya consta en el bug y no requiere un diseño adicional. No se exige crear esos artefactos para desbloquearlo.
+El delta corresponde a C1/C2 del triaje: aislamiento local de las dos variables Telegram y restauración mediante cleanup. A/B SKIP y E SKIP son coherentes con el contrato existente y la ausencia de cambios de producto. Los documentos describen la misma corrección y la evidencia disponible; el maestro continúa `in_progress`, con cierre reservado al paso invocador.
+
+## Reevaluación del rechazo histórico
+
+**HC-01: resuelto.** La decisión humana del maestro y la sección aplicable de `docs/review/versions/v1.0-revision.md` autorizan expresamente `tests/test_cli_commands.py`. El aislamiento y su regresión ya están presentes y verificados. El rechazo previo por alcance y su instrucción de bloqueo quedan sustituidos por este reporte.
+
+**para: especificador · destino: resolver · estado: resuelto.** No se necesita intervención adicional ni recurso externo.
 
 ## Análisis estático y verificación
 
-**N/A para producción:** no hay delta que compilar, tipar, analizar con lint o auditar por dependencias o secretos añadidos. No se han ejecutado pruebas: la lectura basta para confirmar el impedimento y ejecutar la reproducción sin aislamiento podría arrancar un gateway real. No se han leído ni utilizado credenciales reales.
+Reutilizada la evidencia de `orquestar_evidencias.jsonl` del árbol `168aedb935d090c246706b279a44d9f50bd3ca83`, registrada mediante `--verificar`:
 
-Las evidencias históricas de `orquestar_evidencias.jsonl` que incluyen `test_cli_commands.py` pertenecen a árboles anteriores; no acreditan la corrección de B-ADV-0007 ni el aislamiento con variables Telegram presentes. No se declara ninguna verificación nueva en verde.
+- `python -m unittest discover -s tests -p test_cli_commands.py`: código 0; 10 pruebas en 36.724 s según la salida aportada (37 s redondeados en JSONL).
+- `python -m py_compile tests/test_cli_commands.py`: código 0.
+- `git diff --check`: código 0.
+
+Lint y tipado no configurados. Auditoría de dependencias N/A: sin cambios de manifiestos ni dependencias. El delta contiene valores ficticios y nombres de variables, sin secretos añadidos. El rojo previo permanece documentado y la revisión de pruebas incorpora el fixture final y el verde posterior.
+
+No se han relanzado verificaciones, ejecutado suite completa, gateways ni pruebas con credenciales reales.
 
 ## Puntuaciones
 
-Corrección, seguridad, conformidad, calidad, eficiencia y documentación: **N/A**; no hay implementación nueva que puntuar. **Media: N/A**. No procede inventar notas ni aprobar por ausencia de delta.
+Corrección, seguridad, conformidad, calidad, eficiencia y documentación de producción: **N/A**. Media de producción: **N/A**; no hay delta de producción que puntuar. Pruebas, incluido el fixture final: **APROBADO, 9,25/10**, en su reporte específico.
 
-## Hallazgos
+## Hallazgos e impedimentos
 
-### HC-01 — 🟠 ALTA: el alcance autorizado excluye el archivo necesario para corregir el bug
+Sin hallazgos nuevos ni impedimentos reales. HC-01 queda resuelto con el enrutamiento indicado. No hay correcciones pendientes derivadas de esta revisión.
 
-**para: especificador**
-
-- **Evidencia:** C1 y C2 del triaje exigen aislar las credenciales heredadas en `tests/test_cli_commands.py`. El mandato limita los cambios de implementación a `skills/`, `agents/` y `workflows/`; `tests/test_cli_commands.py` queda fuera. Su `setUp` (líneas 65-79) no aísla `TELEGRAM_BOT_TOKEN` ni `TELEGRAM_ALLOWED_USER_IDS`. El despacho CLI ejecuta el motor mediante `subprocess.run` sin un entorno aislado (`adevv/cli.py:301-309`). `credenciales` toma ambas variables del entorno (`skills/orquestar/orquestar.py:1482-1489`) y `iniciar_gateway` lanza el gateway cuando están configuradas (líneas 1935-1944), tanto desde `en_fondo` como desde `bucle` (líneas 1957 y 2094).
-- **Consecuencia:** el fallo sigue sin corregir. Las pruebas pueden arrancar procesos reales con las credenciales heredadas, competir con el gateway legítimo y fallar al limpiar temporales. El triaje reconoce correctamente un impedimento real; no es una justificación suficiente para aprobar o cerrar el bug.
-- **Resolución requerida:** conciliar el contrato de alcance con la corrección localizada exigida en `tests/test_cli_commands.py`, dejando explícita la incompatibilidad con el mandato vigente. El especificador no puede ampliar por su cuenta una restricción de la persona: mientras siga vigente, el bug permanece bloqueado. No procede sustituir el aislamiento por cambios en el motor, desactivar Telegram en producción, mover las pruebas ni inventar otra corrección dentro de las rutas permitidas.
-- **Enrutamiento:** corresponde al especificador por un contrato de ejecución incompatible con la solución requerida. No se asigna al desarrollador mientras ese archivo esté excluido. Tampoco corresponde `para: humano` según la definición de Hades: no faltan cuentas, credenciales, hardware, pagos ni otro recurso externo.
-- **Criterio de resolución:** alcance conciliado y aislamiento implementado en el archivo afectado; después, verificar los casos CLI con y sin ambas variables presentes, sin usar credenciales reales ni acceder a Telegram. La ejecución en verde del comando del triaje por sí sola, con las variables ausentes, no demuestra esa independencia.
-
-## Salida para el paso invocador
-
-**La restricción de alcance debe bloquear B-ADV-0007.** Aplicar la regla 5 del modo orquestado: conservar los cambios de la tarea en `wip/B-ADV-0007`, devolver `release/v1.0` al estado previo a la tarea, registrar el maestro con `status: blocked` y `pendiente_de: especificador`, y anotar HC-01 en la revisión de versión. Las tareas dependientes se dejan en espera sin modificarlas.
-
-Esta revisión entrega el veredicto y su enrutamiento. No modifica código, el estado del bug, ramas ni otros artefactos; esas operaciones corresponden al paso invocador. La única escritura de Hades es este reporte, solicitado expresamente con el ID maestro. No se aprueba la corrección ni se cierra el bug.
+QA final favorable para B-ADV-0007. Este reporte no modifica implementación, maestro ni revisión de versión, ni ejecuta el cierre administrativo del bug.
