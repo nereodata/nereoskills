@@ -21,6 +21,7 @@ import time
 import urllib.parse
 import urllib.error
 import urllib.request
+from datetime import timedelta, timezone
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location(
@@ -152,6 +153,14 @@ def extraer_respuesta(salida, harness):
     return salida.strip()
 
 
+class ModeloIndisponible(RuntimeError):
+    """Señala cuota o fallo de arranque que permite probar una reserva."""
+
+
+class GatewayNoDisponible(RuntimeError):
+    """Conserva los motivos de indisponibilidad para responder al usuario."""
+
+
 def invocar(root, prompt, cfg, sesion=None):
     """Invoca al modelo configurado mediante el motor de orquestación."""
     harness = cfg.get('harness', 'claude')
@@ -162,7 +171,20 @@ def invocar(root, prompt, cfg, sesion=None):
     if not exe:
         raise motor.ArnesAusente(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = motor.con_modelo([exe] + base[1:], harness, cfg)
-    codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
+    try:
+        codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
+    except OSError as error:
+        raise ModeloIndisponible(f'fallo de arranque: {error}') from error
+    fecha = motor.ahora()
+    instante = motor.fecha_estado(fecha)
+    cuota = motor.espera_cuota(salida, ahora=instante.astimezone()) if codigo else None
+    if cuota is not None:
+        motor.registrar(root, {**m, 'tipo': 'gateway', 'fecha': fecha,
+                               'arnes': harness, 'codigo': codigo,
+                               'modelo_cuota': cfg.get('model') or 'predeterminado',
+                               'cuota_espera_s': cuota})
+        hasta = (instante + timedelta(seconds=cuota)).astimezone(timezone.utc)
+        raise ModeloIndisponible(f'cuota hasta {hasta.isoformat()}')
     sesion_id = m.get('sesion')
     if not sesion_id:
         for linea in reversed(salida.splitlines()):
@@ -186,30 +208,44 @@ def conversar(root, usuario, texto):
     cfg_tg = cfg_todo.get('telegram', {}) if isinstance(cfg_todo.get('telegram'), dict) else {}
     cfg = {**cfg_atenea, **cfg_tg}
     prompt = construir_prompt(root, texto)
+    cuotas = motor.consumo_cuotas(root, motor.fecha_estado(motor.ahora()))[1]
+    motivos = []
     for posicion, cfg_actual in enumerate([cfg] + motor.lista_reservas(cfg)):
         harness = cfg_actual.get('harness', 'claude')
-        sesion = obtener_sesion(root, usuario, harness) if posicion == 0 else None
+        modelo = cfg_actual.get('model') or 'predeterminado'
+        perfil = f'{harness}/{modelo}'
+        hasta = cuotas.get((harness, modelo))
+        if hasta:
+            motivos.append(f'{perfil}: cuota hasta {hasta.astimezone(timezone.utc).isoformat()}')
+            continue
+        sesion = obtener_sesion(root, usuario, harness)
         try:
             codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=sesion)
             if sesion and codigo != 0:
                 codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=None)
             if codigo != 0:
                 raise RuntimeError(f'Fallo al invocar al modelo (código {codigo}): {resp}')
-        except motor.ArnesAusente:
+        except motor.ArnesAusente as error:
             motor.registrar_ausencia(root, 'gateway', posicion, cfg_actual)
+            motivos.append(f'{perfil}: arnés ausente: {error}')
+            continue
+        except ModeloIndisponible as error:
+            motivos.append(f'{perfil}: {error}')
             continue
         nueva_sesion, respuesta = s_id, resp
         cfg = cfg_actual
         break
     else:
-        mensaje = 'Gateway: ningún arnés disponible en el principal ni en las reservas.'
+        mensaje = ('Gateway: ningún arnés disponible en el principal ni en las reservas.\n'
+                   + '\n'.join(motivos))
         motor.avisar(root, 'error', mensaje)
-        raise RuntimeError(mensaje)
+        raise GatewayNoDisponible(mensaje)
 
     if nueva_sesion:
         guardar_sesion(root, usuario, harness, nueva_sesion)
     modelo = cfg.get('model') or 'predeterminado'
-    return firmar(respuesta, extra=f'{harness}/{modelo}')
+    extra = f'{harness}/{modelo}' + (' · reserva' if posicion else '')
+    return firmar(respuesta, extra=extra)
 
 
 def resumen_metricas(root, filtro):
@@ -273,7 +309,10 @@ def responder(root, usuario, texto, autorizados):
     elif comando in ('/start', '/ayuda', '/help'):
         resp = AYUDA
     else:
-        return conversar(root, usuario, texto)
+        try:
+            return conversar(root, usuario, texto)
+        except GatewayNoDisponible as error:
+            return firmar(str(error))
     return firmar(resp)
 
 

@@ -5,7 +5,7 @@ type: funcional
 weight: 70
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: ["B-ADV-0005"]
 origen: "Petición del usuario: el chat de Telegram usa el modelo definido, pero debe conmutar a reserva si no tiene cuota o no está disponible"
 created_at: 2026-10-26
@@ -18,12 +18,12 @@ updated_at: 2026-10-26
 La conversación libre de Telegram (`conversar()`, `skills/telegram_gateway/gateway.py:182`) usa solo el modelo de la clave `telegram` (o el de `atenea`). Si ese modelo está sin cuota o su arnés no está disponible, el mensaje falla. Debe seguir respondiendo con el siguiente arnés o modelo de reserva, igual que hacen los pasos del bucle.
 
 ## 📋 Criterios de Aceptación (Nivel Máster)
-- [ ] **CA-M-1 (Configuración):** la clave `telegram` de `orchestration.json` admite `reserva` (objeto o lista ordenada) con la misma semántica que en los roles: hereda los campos no redefinidos. Sin `reserva` propia, se usan las de `atenea` cuando `telegram` las hereda.
-- [ ] **CA-M-2 (Conmutación):** se prueba primero el modelo definido. Se pasa a la siguiente configuración si (a) tiene un agotamiento de cuota vigente registrado (se salta sin lanzarlo, como en T-ADV-0021), (b) su ejecución falla por falta de cuota, o (c) su arnés no se encuentra o no arranca (en coherencia con B-ADV-0005, sin `RuntimeError` que corte la conversación).
-- [ ] **CA-M-3 (Sesiones):** al cambiar de arnés no se intenta reanudar la sesión de otro arnés; la sesión se guarda por usuario y arnés, como hoy. Al volver a estar disponible el titular, los mensajes siguientes vuelven a él.
-- [ ] **CA-M-4 (Transparencia):** la firma de la respuesta indica el `harness/model` que respondió; si se usó una reserva, se indica brevemente. Si ninguna configuración está disponible, responde con un mensaje claro (motivo de cada una) en vez de un error genérico.
-- [ ] **CA-M-5 (Métricas):** los agotamientos detectados en la conversación se registran igual que en el bucle, para que `/agentes` y el bucle los tengan en cuenta.
-- [ ] **CA-M-6 (Pruebas y documentación):** pruebas con lanzadores simulados (cuota agotada, arnés ausente, todos caídos, vuelta al titular); documentación en `skills/telegram_gateway/SKILL.md`.
+- [x] **CA-M-1 (Configuración):** la clave `telegram` de `orchestration.json` admite `reserva` (objeto o lista ordenada) con la misma semántica que en los roles: hereda los campos no redefinidos. Sin `reserva` propia, se usan las de `atenea` cuando `telegram` las hereda.
+- [x] **CA-M-2 (Conmutación):** se prueba primero el modelo definido. Se pasa a la siguiente configuración si (a) tiene un agotamiento de cuota vigente registrado (se salta sin lanzarlo, como en T-ADV-0021), (b) su ejecución falla por falta de cuota, o (c) su arnés no se encuentra o no arranca (en coherencia con B-ADV-0005, sin `RuntimeError` que corte la conversación).
+- [x] **CA-M-3 (Sesiones):** al cambiar de arnés no se intenta reanudar la sesión de otro arnés; la sesión se guarda por usuario y arnés, como hoy. Al volver a estar disponible el titular, los mensajes siguientes vuelven a él.
+- [x] **CA-M-4 (Transparencia):** la firma de la respuesta indica el `harness/model` que respondió; si se usó una reserva, se indica brevemente. Si ninguna configuración está disponible, responde con un mensaje claro (motivo de cada una) en vez de un error genérico.
+- [x] **CA-M-5 (Métricas):** los agotamientos detectados en la conversación se registran igual que en el bucle, para que `/agentes` y el bucle los tengan en cuenta.
+- [x] **CA-M-6 (Pruebas y documentación):** pruebas con lanzadores simulados (cuota agotada, arnés ausente, todos caídos, vuelta al titular); documentación en `skills/telegram_gateway/SKILL.md`.
 
 ## Triaje para la reanudación
 - Subfase A: [EXEC] Contratos de cuota, sesiones, diagnóstico y retorno en `skills/telegram_gateway/features/telegram_gateway.feature`.
@@ -45,3 +45,12 @@ La conversación libre de Telegram (`conversar()`, `skills/telegram_gateway/gate
 - **DEC-ESP-03 (disponibilidad):** a diferencia del motor sin reservas, la conversación no lanza siquiera el único modelo con cuota vigente; responde inmediatamente con diagnóstico. Se mantiene el tratamiento de errores ordinarios y su reintento sin sesión, sin conmutar por autenticación u otros fallos ajenos a cuota/arranque.
 - No se necesitan recursos externos ni intervención humana. Los criterios permanecen pendientes de implementación; este paso solo resuelve la especificación.
 - Hades /review-spec: **APROBADO (9,25/10)**, H-01/H-02/H-03 resueltos y sin hallazgos nuevos. Reporte: `docs/review/spec_reviews/T-ADV-0026-spec-review.md`. Estado planned, sin pendiente_de, para retomar task-dev.
+
+## Ejecución de Artemisa (2026-10-26)
+- Subfase A: especificación aprobada reutilizada sin alterar los seis escenarios; no se repite review-spec porque no hay delta respecto al origen aprobado.
+- Subfase B: diseño adaptado a DEC-ESP-01 en `docs/design/T-ADV-0026-design.md`; no se fusiona el WIP.
+- Subfase C1: siete pruebas simuladas nuevas; rojo de funcionalidad actual en `docs/review/test_reviews/T-ADV-0026-red.txt` (3 fallos, 4 errores). Compilación de pruebas verde mediante --verificar; Hades review-test APROBADO (8,75/10), H-01 medio resuelto verificando modelos m1/m2/m3 y esfuerzo heredado.
+- Subfase C2: implementación mínima en gateway, siete pruebas nuevas verdes y 78 pruebas del triaje verdes (45 + 24 + 9); compilación de los dos Python modificados y git diff --check verdes mediante --verificar. Sin suite completa.
+- Subfase E: SKILL del gateway y changelog actualizados; validación humana pendiente al cierre de versión, sin detener este paso.
+- Subfase D: Hades review-code APROBADO (9,17/10), sin hallazgos; reutiliza evidencia del mismo árbol. Reporte `docs/review/code_reviews/T-ADV-0026-code-review.md`. Sin deuda que registrar.
+- Subfase F: cierre orquestado autorizado; se trasladan los HITL a `docs/review/versions/v1.0-revision.md` y se conserva el WIP histórico sin fusionar.

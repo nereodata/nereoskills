@@ -1,0 +1,129 @@
+adevv : FE.EEFEF
+En línea: 2 Carácter: 1
++ adevv orquestar --verificar "python -m unittest discover -s skills/te ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (FE.EEFEF:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+======================================================================
+ERROR: test_cuota_cruda_arranque_reserva_y_metricas 
+(test_reservas.ReservasTests.test_cuota_cruda_arranque_reserva_y_metricas)
+La cuota en stderr no se pierde al extraer un result vac�o.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 43, in 
+test_cuota_cruda_arranque_reserva_y_metricas
+    texto = gateway.conversar(self.root, '123', 'hola')
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 195, in conversar
+    codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=None)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 165, in invocar
+    codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1202, in 
+_execute_mock_call
+    raise result
+OSError: no arranca
+
+======================================================================
+ERROR: test_herencia_objeto_lista_y_reserva_propia 
+(test_reservas.ReservasTests.test_herencia_objeto_lista_y_reserva_propia) (reserva={'model': 'm4'})
+Reservas heredadas o propias mantienen orden y esfuerzo.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 158, in 
+test_herencia_objeto_lista_y_reserva_propia
+    texto = gateway.conversar(self.root, '123', 'hola')
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 197, in conversar
+    raise RuntimeError(f'Fallo al invocar al modelo (c�digo {codigo}): {resp}')
+RuntimeError: Fallo al invocar al modelo (c�digo 1): usage limit reached
+
+======================================================================
+ERROR: test_herencia_objeto_lista_y_reserva_propia 
+(test_reservas.ReservasTests.test_herencia_objeto_lista_y_reserva_propia) (reserva=[{'model': 'm4'}])
+Reservas heredadas o propias mantienen orden y esfuerzo.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 158, in 
+test_herencia_objeto_lista_y_reserva_propia
+    texto = gateway.conversar(self.root, '123', 'hola')
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 197, in conversar
+    raise RuntimeError(f'Fallo al invocar al modelo (c�digo {codigo}): {resp}')
+RuntimeError: Fallo al invocar al modelo (c�digo 1): usage limit reached
+
+======================================================================
+ERROR: test_todos_indisponibles_diagnostico_al_usuario 
+(test_reservas.ReservasTests.test_todos_indisponibles_diagnostico_al_usuario)
+El usuario ve motivos por perfil, sin lanzar el agotado.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 130, in 
+test_todos_indisponibles_diagnostico_al_usuario
+    texto = gateway.responder(self.root, '123', 'hola', {'123'})
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 276, in responder
+    return conversar(root, usuario, texto)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 193, in conversar
+    codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=sesion)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\gateway.py", line 165, in invocar
+    codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\Iv�n Moreno\AppData\Local\Programs\Python\Python312\Lib\unittest\mock.py", line 1198, in 
+_execute_mock_call
+    raise effect
+PermissionError: denegado
+
+======================================================================
+FAIL: test_aislamiento_otro_usuario (test_reservas.ReservasTests.test_aislamiento_otro_usuario)
+Las reservas y el retorno no reciben sesiones de otro usuario.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 112, in 
+test_aislamiento_otro_usuario
+    self.assertEqual(self.launch.call_args.args[2], 'agy')
+AssertionError: 'codex' != 'agy'
+- codex
++ agy
+
+
+======================================================================
+FAIL: test_salta_cuota_y_vuelve_al_titular (test_reservas.ReservasTests.test_salta_cuota_y_vuelve_al_titular)
+Cada mensaje reconsidera prioridad y mantiene sesiones por arn�s.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 79, in 
+test_salta_cuota_y_vuelve_al_titular
+    self.assertIn('reserva', gateway.conversar(self.root, '12345', 'hola'))
+AssertionError: 'reserva' not found in 'respuesta\n\n� Adevv v1.0.0 � codex/m1'
+
+======================================================================
+FAIL: test_unico_agotado_no_se_lanza (test_reservas.ReservasTests.test_unico_agotado_no_se_lanza)
+Sin reservas tampoco se ejecuta un perfil con cuota vigente.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\Iv�n Moreno\SW\Adevv\skills\telegram_gateway\test_reservas.py", line 148, in 
+test_unico_agotado_no_se_lanza
+    self.assertIn('cuota', texto)
+AssertionError: 'cuota' not found in 'respuesta\n\n� Adevv v1.0.0 � codex/m1'
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.079s
+
+FAILED (failures=3, errors=4)

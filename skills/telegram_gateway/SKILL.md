@@ -28,7 +28,11 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 
 **Nunca escribe en el backlog con el bucle en marcha.** Deja la petición en el buzón (`orquestar_buzon.jsonl`, excluido de git) y el bucle la registra entre pasos, con un commit que solo lleva esos ficheros, y te avisa del ID. Sin bucle, la registra y la commitea en el momento, en la rama actual.
 
-Cuando falta el ejecutable de conversación, el gateway recorre las reservas heredadas de Atenea o declaradas en `telegram.reserva`. Cada ausencia deja warning, métrica de consumo cero y aviso filtrable `arnes`; al cambiar de arnés se inicia una sesión nueva y se persiste la sesión del que responde. Si no queda ningún arnés disponible, informa del error y solicita un aviso `error`. Este recorrido se aplica a ejecutables ausentes; conserva el tratamiento existente de los demás errores.
+La conversación prueba primero el titular y después las reservas de `telegram.reserva` (objeto o lista ordenada), que heredan los campos no redefinidos (`harness`, `model`, `effort`). Sin reserva propia, conserva las heredadas de Atenea. Salta sin ejecutar cualquier modelo con cuota vigente registrada, incluso si es el único. Si detecta cuota durante la ejecución, falta el ejecutable o falla el arranque, pasa inmediatamente a la siguiente reserva; los errores ordinarios conservan el reintento sin sesión y su tratamiento de error, sin conmutar.
+
+Cada intento reanuda exclusivamente la sesión del mismo usuario y arnés, también en reservas; sin sesión propia inicia una nueva. Guarda la sesión del respondedor sin reemplazar las de otros arneses. Cada mensaje reconsidera al titular, que vuelve a tener prioridad cuando vence su cuota. La firma identifica `harness/model` y añade `reserva` cuando corresponde. Si todos están indisponibles, devuelve un diagnóstico firmado por configuración, con cuota y recuperación (ISO UTC), ausencia o fallo de arranque, sin esperar.
+
+Los agotamientos detectados se registran en las métricas compartidas, con su recuperación exacta, para `/agentes` y el bucle. Cada ejecutable ausente conserva warning, métrica de consumo cero y aviso filtrable `arnes`; las ausencias y fallos de arranque no generan cuota. Si no queda ninguna configuración disponible, se solicita también el aviso `error`.
 
 ## 🛠️ Uso
 Desde la raíz del proyecto:

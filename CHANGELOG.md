@@ -4,6 +4,10 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ## [1.0.0] - 2026-10-26
 
+### Añadido
+
+- **T-ADV-0026** — Reservas conversacionales de Telegram por cuota o fallo de arranque, continuidad de sesiones propias, retorno al titular y diagnóstico por modelo con cuotas compartidas.
+
 ### Corregido
 
 - **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
