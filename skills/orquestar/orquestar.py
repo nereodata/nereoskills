@@ -1480,14 +1480,32 @@ def leer_env(ruta):
     return valores
 
 
+class CredencialesTelegram:
+    """Credenciales efectivas y procedencia del token de Telegram."""
+
+    def __init__(self, token, usuarios, origen):
+        self.token = token
+        self.usuarios = usuarios
+        self.origen = origen
+
+    def __iter__(self):
+        """Conserva el desempaquetado histórico de token y usuarios."""
+        yield self.token
+        yield self.usuarios
+
+
 def credenciales(root=None):
-    """(token, usuarios autorizados) de .env (en root o CWD) o del entorno de ejecución."""
+    """Devuelve las credenciales efectivas y el origen del token."""
     base = Path(root) if root else Path.cwd()
     env = leer_env(base / '.env')
-    token = env.get('TELEGRAM_BOT_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    raw_usr = env.get('TELEGRAM_ALLOWED_USER_IDS') or os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '')
+    token_local = env.get('TELEGRAM_BOT_TOKEN', '').strip()
+    token_entorno = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+    token = token_local or token_entorno
+    origen = 'proyecto' if token_local else 'entorno' if token_entorno else 'ninguno'
+    ids_locales = env.get('TELEGRAM_ALLOWED_USER_IDS', '').strip()
+    raw_usr = ids_locales or os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '').strip()
     usuarios = [u.strip() for u in str(raw_usr).split(',') if u.strip()]
-    return token.strip(), usuarios
+    return CredencialesTelegram(token, usuarios, origen)
 
 
 def telegram(root):
@@ -2010,10 +2028,21 @@ def parte(root, docs='docs/requirements'):
     return '\n'.join(lineas)
 
 
-def iniciar_gateway(root):
+_gateway_aviso_entorno = set()
+_GATEWAY_SOLO_AVISOS = 'token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto'
+
+
+def iniciar_gateway(root, informar=True):
     """Solicita el gateway opcional sin abortar el bucle si falla su lanzador."""
     try:
-        if not telegram(root):
+        cfg = telegram(root)
+        if not cfg:
+            return
+        if credenciales(root).origen == 'entorno':
+            clave = str(Path(root).resolve())
+            if informar and clave not in _gateway_aviso_entorno:
+                _gateway_aviso_entorno.add(clave)
+                print(f'[orquestar] {_GATEWAY_SOLO_AVISOS}', flush=True)
             return
         resultado = subprocess.run(
             [sys.executable, str(SKILL.parent.parent / 'telegram_gateway' / 'gateway.py'),
@@ -2032,7 +2061,7 @@ def en_fondo(root, argumentos=None):
         sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
                  f'Si no es así, borra {PID}.')
     excluir(root)
-    iniciar_gateway(root)
+    iniciar_gateway(root, informar=False)
     args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
     opciones = {'start_new_session': True}
     if os.name == 'nt':
@@ -2181,6 +2210,7 @@ def cierre_de_version(e):
 
 
 def bucle(a, root):
+    _gateway_aviso_entorno.discard(str(Path(root).resolve()))
     if not a.estado:
         iniciar_gateway(root)
     if a.idea and not (root / a.docs / 'requirements.md').exists():

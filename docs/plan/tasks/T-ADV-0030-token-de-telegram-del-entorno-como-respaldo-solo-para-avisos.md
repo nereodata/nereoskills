@@ -5,11 +5,11 @@ type: funcional
 weight: 80
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: ["B-ADV-0007"]
 origen: "Petición del usuario: poner el token del bot de Adevv en las variables de sistema para que los proyectos que olviden su .env le avisen allí"
 created_at: 2026-10-26
-updated_at: 2026-10-26
+updated_at: 2026-10-27
 ---
 
 # T-ADV-0030: El token de Telegram del entorno sirve de respaldo solo para avisos, sin arrancar gateway
@@ -39,3 +39,14 @@ Se resuelven H-01..H-05 del reporte conservado en `wip/T-ADV-0030:docs/review/sp
 - **Especificar**: `/review-spec` aislado sobre los escenarios nuevos y los CA/DEC de esta tarea; `adevv orquestar --verificar "git diff --check"` para el delta documental. No hay implementación nueva que acreditar ni pruebas nuevas ejecutables en este paso.
 - **Desarrollo posterior (C1/QA)**: mantener el comando del triaje original `adevv orquestar --verificar "python -m unittest tests.test_orquestar tests.test_telegram_gateway skills.telegram_gateway.test_gateway_fondo"`, con credenciales ambientales eliminadas, datos ficticios y sin red; compilación de ambos módulos y `git diff --check`. Automatizar los ejemplos nuevos y demostrar rojo por origen ausente/escucha ambiental permitida contra el estado previo; las aserciones de precedencia/prefijo son conservación del contrato. No escribir tests en especificar. La suite completa corresponde al bucle al cerrar versión.
 - **Documentación posterior**: actualizar `skills/orquestar/SKILL.md` y `skills/telegram_gateway/SKILL.md` cuando se implemente la política, sin presentar ahora el comportamiento pendiente como disponible.
+
+## Triaje de desarrollo (Artemisa, modo orquestado)
+
+- **A · Definición [SKIP]**: los escenarios del delta ya están en `skills/orquestar/features/orquestacion.feature` y `skills/telegram_gateway/features/telegram_gateway.feature`; Hades los aprobó en `docs/review/spec_reviews/T-ADV-0030-spec-review.md`. No modificar ni duplicar escenarios.
+- **B · Diseño [EXEC]**: documentar la procedencia del token y el mapa de impacto de `credenciales()` y sus dos consumidores (avisos y gateway).
+- **C1 · Pruebas [EXEC]**: extender `skills/telegram_gateway/test_gateway_fondo.py` para las fuentes de credenciales, avisos ambientales, deduplicación del autoarranque y rechazo/permiso de escucha; usar credenciales ficticias y sustituir transporte y procesos. Conservar el rojo del estado previo en `docs/review/test_reviews/T-ADV-0030-red.md`.
+- **C2 · Implementación [EXEC]**: resolver token e IDs por separado con `.env` primero; exponer la procedencia del token conservando el desempaquetado histórico de dos valores; mantener avisos con respaldo ambiental y prohibir el gateway cuando el token efectivo venga del entorno.
+- **D · QA [EXEC]**: Hades revisa el delta completo de pruebas y después el de producción; corregir y repetir si asigna hallazgos al desarrollador.
+- **E · Documentación [EXEC]**: actualizar `skills/orquestar/SKILL.md` y `skills/telegram_gateway/SKILL.md` con la precedencia y el alcance de avisos frente a escucha.
+- **F · Cierre [EXEC]**: actualizar estado, añadir la entrada de revisión de versión y crear commit semántico.
+- **Verificación al cierre**: `python -m unittest tests.test_orquestar tests.test_telegram_gateway skills.telegram_gateway.test_gateway_fondo`; cubre regresiones del motor, precedencia de credenciales y entradas del gateway. Verificar también compilación de ambos módulos y `git diff --check`, sin suite completa.

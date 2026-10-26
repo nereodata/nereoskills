@@ -482,9 +482,13 @@ def main():
         return 0
     if a.parar:
         return parar(root)
-    token, autorizados = motor.credenciales(root)
+    credenciales = motor.credenciales(root)
+    token, autorizados = credenciales
+    origen = getattr(credenciales, 'origen', 'proyecto')
     if not token or not autorizados:
         sys.exit('Faltan TELEGRAM_BOT_TOKEN o TELEGRAM_ALLOWED_USER_IDS (en .env o en el entorno).')
+    if origen == 'entorno':
+        sys.exit(f'[gateway] {motor._GATEWAY_SOLO_AVISOS}')
     if a.fondo:
         if pid_vivo(root):
             print('[gateway] ya está en marcha', flush=True)

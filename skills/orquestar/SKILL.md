@@ -118,6 +118,8 @@ Antes de lanzar un rol o un paso con reservas, se omiten las configuraciones cuy
 
 Al arrancar el bucle en primer o segundo plano, esas credenciales también activan el gateway automáticamente en segundo plano. Se conserva un `telegram.pid` vivo y se recuperan marcas obsoletas; si falla el arranque se informa y el bucle continúa. `"telegram": false` desactiva avisos y autoarranque. Las consultas (`--estado`, métricas, verificaciones y revisiones) no lo arrancan. `adevv telegram --fondo` permite iniciarlo manualmente y `adevv telegram --parar` solicita su parada al acabar la operación actual. PID, salida y señal quedan en `telegram.pid`, `telegram.log` y `telegram.parar`, excluidos de git. El gateway sigue escuchando después de parar o terminar el bucle.
 
+El `.env` del proyecto tiene precedencia independiente para el token y los IDs, y los valores ausentes o vacíos usan el entorno de ejecución como respaldo. Si el token efectivo procede del entorno, `avisar()` lo usa para enviar avisos con el nombre del proyecto delante, pero el gateway no se autoarranca: el bucle informa una vez por ejecución con `token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto`. Para conversar mediante el gateway, define el token en el `.env` del proyecto. Los IDs pueden seguir viniendo del entorno.
+
 | Evento | Cuándo |
 |---|---|
 | `version` | La versión no tiene más tareas elegibles (terminada, con bloqueos o con la suite en rojo) y FIN del producto |
