@@ -53,6 +53,27 @@ Las llamadas de Hades excluyen registros con `cuota_espera_s` o `sin_cuota` acti
 
 Un `coste_usd` positivo prevalece sobre la estimación; sin él se estima por modelo, respetando también un coste positivo propio del modelo. Las tarifas son referencias ilustrativas fijas en USD por millón de tokens de entrada/caché/salida, no precios vigentes: Opus 5/0.5/25; Sonnet 3/0.3/15; Haiku 1/0.1/5; Gemini Argon/Pro 2/0.2/12; Flash 0.5/0.05/3; GPT/Codex y desconocidos 2.5/0.25/10. Razonamiento no se factura de nuevo. Se trata de una comparación aproximada, sin reconstruir cambios históricos de dificultad ni reinterpretar los contadores de los arneses. Un JSONL corrupto produce un error con número de línea y no exporta resultados parciales.
 
+### Calidad del delta en cada tarea
+
+`adevv orquestar --calidad --base <SHA>` comprueba formato y lint sin escritura ni arranque del bucle. `--aplicar` añade antes la escritura disponible (solo desarrollador). La base, registrada como `base_calidad` antes de comenzar la tarea, se conserva entre commits y reintentos. Incluye ficheros confirmados desde esa base, preparados, pendientes y nuevos no ignorados; excluye eliminados y duplicados. Base inexistente es error.
+
+En `task_config.yaml` se pueden declarar cadenas no vacías `validation.formato`, `validation.lint` y opcionalmente `validation.formato_escritura`. Ejemplo:
+
+```yaml
+validation:
+  formato: "ruff format --check {ficheros}"
+  formato_escritura: "ruff format {ficheros}"
+  lint: "ruff check {ficheros}"
+```
+
+`{ficheros}` es un argumento completo (se admite entre comillas): se expande en argumentos independientes sin shell, preservando espacios y caracteres especiales; usa rutas con barras `/` en comandos explícitos. No combines operadores shell con este marcador. Sin marcador se conserva exactamente el comando y su alcance shell declarado, con aviso; no se le añaden nombres. Un valor inválido es error sin deducción alternativa. Los comandos explícitos reciben todos los ficheros existentes del delta: su compatibilidad la controla el proyecto. Sin objetivos, la etapa se omite con motivo incluso si el comando explícito es global.
+
+Sin declaración por etapa se deducen únicamente los scripts npm simples `format:check: prettier --check .` y `lint: eslint .`; se reemplaza el punto por objetivos compatibles del delta. Sin script reconocido de esa etapa, `[tool.ruff]` en `pyproject.toml` permite `ruff format --check` / `ruff check`. Prettier ofrece escritura `prettier --write` y ruff `ruff format`. No se adivina escritura de comandos explícitos. Scripts compuestos, wrappers y herramientas desconocidas se omiten con motivo; no se instala nada. Los binarios npm locales se ejecutan con node cuando están disponibles; un ejecutable resuelto ausente o que falla produce rojo.
+
+Compatibilidad deducida: ruff `.py`/`.pyi`; ESLint `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`; Prettier esas extensiones más `.json`, `.css`, `.scss`, `.html`, `.md`, `.yaml`, `.yml`. Sin objetivos compatibles, omisión visible.
+
+Ambas comprobaciones usan internamente el mismo mecanismo que `--verificar`, con base y objetivos en el comando de evidencia, sobre el contenido posterior a la escritura. Se comprueban ambas aunque una falle. Cualquier fallo impide completar task-dev/bug-fix; tras cualquier cambio posterior se requiere nueva evidencia. Hades invoca el mismo comando sin escritura y devuelve los fallos al desarrollador. La suite completa sigue reservada al cierre de versión.
+
 ## 🧭 Estado
 
 Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefactos, nunca de lo que el modelo diga que ha hecho (`<docs>` = `docs/requirements` por defecto):

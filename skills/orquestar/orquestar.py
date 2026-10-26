@@ -2073,11 +2073,24 @@ def main():
     ap.add_argument('--prompt-file', type=Path, help='mandato para --agente (si no, por la entrada estándar)')
     ap.add_argument('--verificar', nargs='?', const='suite', metavar='CMD',
                     help='ejecuta la suite (o CMD) o reutiliza su resultado en verde para el mismo árbol')
+    ap.add_argument('--calidad', action='store_true', help='comprueba formato y lint del delta de una tarea')
+    ap.add_argument('--base', help='base Git estable de la tarea para --calidad')
+    ap.add_argument('--aplicar', action='store_true', help='aplica formato en escritura antes de --calidad')
     ap.add_argument('--aviso-prueba', action='store_true', help=f'envía un aviso de prueba a Telegram ({CONFIG})')
     a = ap.parse_args()
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+
+    if a.calidad:
+        if not a.base:
+            ap.error('--calidad requiere --base con la base Git estable de la tarea')
+        spec = importlib.util.spec_from_file_location('adevv_calidad', SKILL.with_name('calidad.py'))
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        return modulo.ejecutar(root, a.base, a.aplicar, verificar)
+    if a.base is not None or a.aplicar:
+        ap.error('--base y --aplicar requieren --calidad')
 
     if a.agentes:
         print(informe_agentes(root, a.docs))

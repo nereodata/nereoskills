@@ -36,6 +36,7 @@ Playbook para el desarrollo de tareas.
 - **Cargar Metadatos**: Cargar la tarea y sus hijas, si las tiene. Si no declara `dificultad`, asume `media` por defecto.
 - **Coherencia**: Validar que la versión en la tarea coincide con la de la rama activa.
 - **Estado**: Cambiar `status` a `in_progress` en la tarea y sus hijas.
+- **Base de calidad**: Antes de tocar ficheros, registra el SHA de `git rev-parse HEAD` como `base_calidad` en el triaje. Conserva esa base durante commits intermedios y reintentos; no uses solo el diff pendiente.
 
 ## 2. Triaje de Alcance (inline)
 **Filosofía Delta-First**: Inspecciona qué existe ya antes de construir. Si la tarea combina distintas naturalezas de trabajo (lógica, datos/contenido, configuración, documentación), no apliques todas las subfases a todo: decide qué subfases aportan valor real y **a qué parte concreta de la tarea** aplica cada una.
@@ -75,6 +76,7 @@ Anota el triaje en el fichero de la tarea marcando `[EXEC]` (indicando sobre qu�
 1. Construcción mínima del cambio (docstrings sí, inline comments no).
 2. En cada corrección, solo lo que falla; al terminar, la verificación anotada en el triaje en verde.
 3. Lint, tipado y chequeos de seguridad del proyecto (secretos, `git diff --check`, y auditoría de dependencias si cambian manifiestos) limpios sobre todo el delta, registrados con `--verificar`.
+4. Ejecuta `adevv orquestar --calidad --base <base_calidad> --aplicar`: aplica escritura disponible y comprueba formato y lint mediante el verificador de evidencia, según `/orquestar`. Si cambia contenido, repite las pruebas afectadas del triaje; cualquier rojo de calidad impide `completed`.
 
 ### Subfase D: QA [EXEC/SKIP]
 1. `Hades /review-code` (aislado), una sola vez sobre el delta completo de la tarea.
@@ -85,5 +87,5 @@ Anota el triaje en el fichero de la tarea marcando `[EXEC]` (indicando sobre qu�
 
 ### Subfase F: Cierre [EXEC]
 1. **Deuda**: según el destino que marque Hades en cada 🟡/🔵: `resolver` se corrige; `registrar` → `/bug-add` como deuda registrada (sin versión, `origen` = este ID y su reporte); `descartar` no se hace nada.
-2. Cierre: `status: completed` en la tarea y sus hijas (inline).
+2. Tras todos los cambios de código, documentación y reportes, repite `adevv orquestar --calidad --base <base_calidad> --aplicar`. Usa el mismo comando sin escritura para acreditar el árbol final con evidencia vigente vía `--verificar`. Si el formato modifica contenido, repite las pruebas afectadas del triaje. Solo en verde: `status: completed` en la tarea y sus hijas (inline), comprueba la calidad de ese último cambio y commitea; cualquier fallo devuelve el estado a `in_progress`.
 3. `/commit`: Commit semántico (inline).

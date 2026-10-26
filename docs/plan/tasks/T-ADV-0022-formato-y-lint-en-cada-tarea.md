@@ -5,7 +5,7 @@ type: funcional
 weight: 60
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: in_progress
 depende_de: []
 origen: "B-ADV-0006: la suite llega en rojo al cierre por formato (Prettier) acumulado tarea a tarea"
 created_at: 2026-10-26
@@ -46,3 +46,23 @@ Los hallazgos H-01/H-02/H-03 se resuelven en [calidad_delta.feature](../../../sk
 ## Cierre del paso especificar
 
 Hades /review-spec APROBADO (9,25/10), ratificado mediante el lanzador con veredicto final inequívoco. H-01/H-02/H-03 resueltos, sin hallazgos pendientes. El siguiente paso corresponde al desarrollo; no se declara completada la funcionalidad.
+
+## Triaje de desarrollo (Artemisa)
+
+- Base estable: `0da8307` (commit de especificación); no se incorpora implementación del WIP, conforme al cierre del especificador.
+- `base_calidad: 0da8307` (se conserva al reanudar).
+- Subfase A: [SKIP] contrato aprobado en `calidad_delta.feature`, sin modificar escenarios; no requiere nueva review-spec.
+- Subfase B: [EXEC] helper de calidad, delta Git, resolución conservadora y frontera de evidencia; diseño en `docs/design/T-ADV-0022-design.md`.
+- Subfase C1: [EXEC] pruebas unitarias y repositorios temporales en `skills/orquestar/test_calidad.py`; aislamiento de comandos y evidencia.
+- Subfase C2: [EXEC] helper y opción CLI de calidad; instrucciones de task-dev, bug-fix y Hades.
+- Subfase D: [EXEC] Hades review-code sobre todo el delta de producción e instrucciones.
+- Subfase E: [EXEC] documentación de configuración/uso en las skills afectadas; sin cambios de manifiestos ni dependencias.
+- Subfase F: [EXEC] revisión de versión, estado completed al final y commit semántico.
+- Verificación al cierre: `python -m unittest discover -s skills/orquestar -p test_calidad.py` y `python -m unittest tests.test_orquestar tests.test_package_and_instructions tests.test_instructions_cleanliness`; ejercitan resolución/ejecución y regresiones del motor/distribución. Solo estas pruebas, vía `adevv orquestar --verificar`.
+- Análisis estático: compilación de los Python del delta y `git diff --check` vía `--verificar`; no hay lint/tipado configurados ni dependencias nuevas. Inspección de secretos sobre el diff, sin credenciales ni acceso a servicios.
+
+## Avance interrumpido por orden del bucle
+
+Hades review-test: primer informe con tres hallazgos para desarrollador; corregidos y segunda revisión APROBADO (9/10), sin pendientes. El lanzador de esa segunda revisión emitió aun así `[orquestar] Hades ha rechazado T-ADV-0022 2 veces seguidas: no sigas corrigiendo. Commitea lo que tengas ... termina el paso sin cambiar estados`. Se obedece sin marcar completed ni lanzar review-code.
+
+Antes de recibir esa orden ya se había implementado el helper y lanzado su verificación: `python -m unittest discover -s skills/orquestar -p test_calidad.py`, vía `adevv orquestar --verificar`: 19 tests OK. Salida en `.git/T-ADV-0022-green.log`. La compilación de las pruebas también pasó vía --verificar. No se ejecutó suite completa. Pendientes para el siguiente intento: regresiones del triaje, análisis estático del delta completo, Hades review-code y cierre funcional. La evidencia de este verde corresponde al árbol anterior a esta nota de interrupción; no se atribuye al árbol final del commit.

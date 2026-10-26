@@ -44,6 +44,7 @@ Preguntar al usuario si el bug es urgente (hotfix) o no (release):
 ## 1. Inicialización (inline)
 - Cargar metadatos del bug y sus hijos, si los tiene. Si no declara `dificultad`, asume `media` por defecto.
 - Cambiar `status` a `in_progress` en el bug y sus hijos.
+- Antes de tocar ficheros, registra el SHA de `git rev-parse HEAD` como `base_calidad` en el triaje. Conserva esa base durante commits y reintentos del bug.
 - Si es deuda registrada (`origen`), lee el reporte de origen para entender el hallazgo.
 
 ## 2. Triaje de Alcance (inline)
@@ -84,6 +85,7 @@ Anota el triaje en el fichero del bug marcando `[EXEC]` (indicando sobre qué pa
 1. Corrección mínima (docstrings sí, inline comments no).
 2. En cada corrección, solo lo que falla; al terminar, la verificación anotada en el triaje en verde.
 3. Lint, tipado y chequeos de seguridad del proyecto (secretos, `git diff --check`, y auditoría de dependencias si cambian manifiestos) limpios sobre todo el delta, registrados con `--verificar`.
+4. Ejecuta `adevv orquestar --calidad --base <base_calidad> --aplicar`: escritura disponible y comprobaciones de formato y lint mediante el verificador de evidencia de `/orquestar`. Tras cambios de formato, repite las pruebas afectadas del triaje. Ningún rojo de calidad permite `completed`.
 
 ### Subfase D: QA [EXEC/SKIP]
 1. `Hades /review-code` (aislado), una sola vez sobre el delta completo del bug.
@@ -94,5 +96,5 @@ Anota el triaje en el fichero del bug marcando `[EXEC]` (indicando sobre qué pa
 
 ### Subfase F: Cierre [EXEC]
 1. **Deuda**: según el destino que marque Hades en cada 🟡/🔵: `resolver` se corrige; `registrar` → `/bug-add` como deuda registrada (sin versión, `origen` = este ID y su reporte); `descartar` no se hace nada.
-2. Cierre: `status: completed` en el bug y sus hijos (inline).
+2. Tras todos los cambios de código, documentación y reportes, repite `adevv orquestar --calidad --base <base_calidad> --aplicar`; acredita el árbol final con el mismo comando sin escritura vía `--verificar`. Si el formato cambia contenido, repite las pruebas afectadas del triaje. Solo en verde: `status: completed` en el bug y sus hijos (inline), comprueba la calidad de ese último cambio y commitea; cualquier fallo devuelve el estado a `in_progress`.
 3. `/commit`: Commit semántico `fix([ID])` (inline).
