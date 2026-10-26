@@ -1,55 +1,56 @@
 # Revisión de especificación — B-ADV-0005
 
-**Veredicto: RECHAZADO**  
-**Enrutado para: especificador**  
-**Fecha:** 2026-10-26  
-**Modo:** orquestado, sin preguntas.
+**Veredicto: APROBADO**
+**Fecha:** 2026-10-26
+**Modo:** orquestado, paso especificar.
+**ID maestro:** B-ADV-0005.
 
 ## Alcance y criterio
 
-Revisión exclusiva de `skills/orquestar/features/orquestacion.feature` frente al contrato de `docs/plan/bugs/B-ADV-0005-arnes-no-encontrado-conmuta-a-reserva.md`, siguiendo Hades y `/review-spec` de la versión 0.6.0. No se han revisado código, pruebas ni diseño, ni ejecutado suites. Las referencias técnicas del contrato no se han utilizado para inferir comportamiento de la implementación.
+Reevaluación exclusiva del delta de `skills/orquestar/features/orquestacion.feature` frente al contrato y las decisiones de `docs/plan/bugs/B-ADV-0005-arnes-no-encontrado-conmuta-a-reserva.md`, conforme al rol Hades y la skill `/review-spec` de la versión 0.6.0. Se revisan las correcciones de H-01 y H-02 y sus efectos sobre la especificación.
 
-El feature figura como archivo nuevo sin seguimiento; se revisa completo como delta. No se ha recibido un informe anterior para reevaluación.
+La propuesta anterior se contrasta con `wip/B-ADV-0005:skills/orquestar/features/orquestacion.feature`, atendiendo al significado de sus escenarios pese a los caracteres dañados. La recuperación conserva sus comportamientos y añade la cadena de tres configuraciones, la atribución concreta de métricas y la recuperación con instante fijo. No se han inspeccionado implementación, diseño ni pruebas, ni ejecutado suites. El WIP no se considera evidencia verde del árbol actual.
 
 ## Obligatorias
 
 | Regla | Resultado | Motivo |
 |---|---|---|
-| No regresión | ✅ | El archivo es nuevo y no presenta eliminación o alteración de escenarios preexistentes en el delta examinado. |
-| Coherencia | ✅ | Los resultados descritos son compatibles con el contrato: ausencia recuperable, sesión separada al cambiar de arnés, aviso `arnes`, ausencia sin cuota y conservación de una cuota previa. Las lagunas de cobertura se detallan abajo. |
-| Trazabilidad | ✅ | No hay etiquetas `@CA-*` que remitan a criterios inexistentes. Los escenarios corresponden al comportamiento esperado y a la decisión de cuota documentada en el bug. |
-| Delta real | ✅ | Describe el cambio ante ejecutables ausentes y límites relevantes; no se observan escenarios duplicados en el artefacto. |
+| No regresión | ✅ | Se conservan los comportamientos de los cuatro escenarios anteriores: reserva disponible en los tres flujos, agotamiento total de arneses, conservación de cuota en paso o agente y fallo por autenticación. La concreción de métricas y la expansión de cuota a dos ejemplos no reducen su alcance. |
+| Coherencia | ✅ | La ampliación cumple el contrato y las decisiones del especificador: salta principal y reserva ausentes, llega a la segunda reserva, separa sesiones entre arneses, exige avisos por cada ausencia y no transforma ausencia en cuota ni sustituye la recuperación previa. |
+| Trazabilidad | ✅ | No hay etiquetas `@CA-*`. La cadena en los tres consumidores corresponde a H-01; la atribución, el consumo cero y el instante fijo corresponden a H-02 y a DEC-ESP-02 del bug. |
+| Delta real | ✅ | La cadena con reserva intermedia ausente discrimina un fallo que el salto directo no cubría. La ampliación de métricas y recuperación concreta resultados existentes sin introducir escenarios duplicados. |
 
 ## Puntuaciones
 
 | Criterio | Puntuación | Justificación |
 |---|---:|---|
-| Claridad | 8/10 | Flujos y efectos comprensibles; algunas comprobaciones carecen de datos concretos. |
-| Completitud | 6/10 | Falta la continuidad a través de una reserva ausente cuando otra posterior está disponible. |
-| Testeabilidad | 7/10 | Los efectos son observables, pero las métricas y el tiempo de recuperación no tienen valores de referencia. |
-| Estructura | 10/10 | Feature ubicado en la funcionalidad de orquestación, sin organización por tarea, fase o versión. |
+| Claridad | 9/10 | Configuraciones ordenadas, flujos y efectos por ausencia explícitos; distingue ausencia de agotamiento de cuota. |
+| Completitud | 9/10 | Cubre la continuidad a través de dos ausencias en los tres consumidores y mantiene los límites relevantes de la propuesta anterior. |
+| Testeabilidad | 9/10 | Identifica flujo, posición, arnés y modelo de los intentos ausentes; fija todos los contadores indicados y el coste en cero, y exige conservar un instante de recuperación exacto. |
+| Estructura | 10/10 | Escenarios en el feature de orquestación, organizados por comportamiento y con ejemplos por consumidor. |
 
-**Media: 7,75/10.** No alcanza el umbral superior a 8 y existe un hallazgo de severidad alta.
+**Media: 9,25/10.** Supera el umbral estricto de 8 y no existen hallazgos críticos ni altos pendientes.
 
-## Hallazgos
+## Reevaluación de hallazgos anteriores
 
-### H-01 — 🟠 ALTA: no se especifica saltar una reserva ausente y alcanzar otra posterior
+### H-01 — 🟠 ALTA — Resuelto
 
-- **Evidencia:** el esquema «Saltar configuraciones cuyo arnés no está instalado» parte únicamente de un principal ausente y una reserva disponible. «Ningún ejecutable disponible» solo cubre el agotamiento total. Ninguno exige continuar después de encontrar una reserva ausente.
-- **Contrato:** la descripción incluye expresamente el perfil principal o reserva; el comportamiento esperado exige pasar a la siguiente reserva y permite el fallo por ausencia únicamente cuando ninguna configuración dispone de arnés.
-- **Consecuencia:** la especificación permite que pase desapercibido un comportamiento que conmuta desde el principal pero se detiene ante una reserva ausente, dejando sin intentar otra posterior disponible. Es una variante directa del fallo que se pretende resolver.
+- **Evidencia:** «Continuar tras una reserva intermedia ausente» establece principal `codex / principal-a` ausente, primera reserva `claude / reserva-b` ausente y segunda reserva `agy / reserva-c` disponible, en ese orden.
+- **Resolución:** los ejemplos incluyen paso del bucle, agente Hades y conversación del gateway. En cada uno se exige que `agy / reserva-c` reciba la petición sin reutilizar sesiones de los otros arneses, sin fallo prematuro por ausencia ni espera de cuota. Exige warning, métrica separada y aviso del evento filtrable `arnes` por cada configuración ausente.
 - **Para:** especificador.
-- **Destino:** resolver en la especificación de B-ADV-0005 antes de aprobarla.
-- **Corrección necesaria:** añadir cobertura con una cadena ordenada y concreta —principal ausente, primera reserva ausente, segunda reserva disponible— para los tres consumidores del esquema. Exigir que la última reciba la petición y que cada intento ausente produzca los efectos de warning, métrica sin cuota y evento `arnes` ya comprometidos. El resultado debe distinguir la continuación correcta de un fallo prematuro por ausencia.
+- **Destino:** resolver en B-ADV-0005; satisfecho en la especificación revisada.
 
-### H-02 — 🟡 MEDIA: faltan referencias concretas para métricas y recuperación de cuota
+### H-02 — 🟡 MEDIA — Resuelto
 
-- **Evidencia:** «queda una métrica del intento ausente sin consumo ni señal de cuota» no fija cómo identificar ese intento; «conserva la señal y el tiempo de recuperación de cuota del principal» no aporta un tiempo inicial contrastable.
-- **Consecuencia:** las comprobaciones pueden limitarse a constatar la existencia de cualquier métrica o cualquier tiempo de recuperación, sin discriminar una atribución equivocada o un tiempo sustituido.
+- **Evidencia:** los escenarios de salto directo, cadena intermedia y cuota previa identifican los intentos ausentes por flujo, posición, arnés y modelo. Exigen cero tokens de entrada, caché leída, caché escrita, salida y razonamiento, y coste cero, sin agotamiento ni recuperación de cuota atribuibles a esos intentos.
+- **Resolución:** el escenario de cuota previa fija la recuperación del principal en `2026-10-26T18:00:00Z` y exige conservar exactamente ese instante y su señal de cuota después de la última reserva ausente, tanto en paso como en agente. Los resultados permiten discriminar atribución equivocada, consumo indebido y sustitución del instante sin imponer nombres internos de campos.
 - **Para:** especificador.
-- **Destino:** resolver en el mismo feature.
-- **Corrección necesaria:** identificar el arnés/configuración ausente en la salida observable de métricas, concretar el consumo nulo y la ausencia de señal de cuota, y proporcionar un instante de recuperación inicial que deba permanecer idéntico tras la reserva ausente. No requiere prescribir nombres internos de campos ni mecanismos de implementación.
+- **Destino:** resolver en el mismo feature; satisfecho en la especificación revisada.
+
+## Hallazgos nuevos
+
+Ninguno.
 
 ## Salida de la revisión
 
-Devolver al especificador para resolver H-01 y H-02 y solicitar una nueva revisión del delta. No se derivan hallazgos a código o diseño ni se propone deuda fuera de B-ADV-0005. Esta revisión solo crea este informe; no corrige los artefactos ni realiza commits.
+Especificación aprobada. H-01 y H-02 quedan resueltos en esta revisión. El veredicto se limita a la especificación; no acredita implementación ni pruebas. Solo se actualiza este informe, sin cambiar el estado del bug ni otros artefactos y sin realizar commits.
