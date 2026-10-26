@@ -2,12 +2,14 @@
 
 **Veredicto: APROBADO**
 **Fecha:** 2026-10-26
-**Modo:** orquestado, paso especificar.
+**Modo:** orquestado, sin preguntas; nuevo intento tras especificar.
 **ID maestro:** B-ADV-0005.
 
 ## Alcance y criterio
 
 Reevaluación exclusiva del delta de `skills/orquestar/features/orquestacion.feature` frente al contrato y las decisiones de `docs/plan/bugs/B-ADV-0005-arnes-no-encontrado-conmuta-a-reserva.md`, conforme al rol Hades y la skill `/review-spec` de la versión 0.6.0. Se revisan las correcciones de H-01 y H-02 y sus efectos sobre la especificación.
+
+Este intento se evalúa de nuevo sobre el feature actual y las decisiones H-01, H-02, DEC-ESP-01 y DEC-ESP-02 del bug. Se reutiliza el informe previo del árbol y se recuperan los hallazgos originales del informe de `199ae66`. El feature actual coincide con la especificación incorporada en `1bf74f4`; no presenta cambios de trabajo pendientes.
 
 La propuesta anterior se contrasta con `wip/B-ADV-0005:skills/orquestar/features/orquestacion.feature`, atendiendo al significado de sus escenarios pese a los caracteres dañados. La recuperación conserva sus comportamientos y añade la cadena de tres configuraciones, la atribución concreta de métricas y la recuperación con instante fijo. No se han inspeccionado implementación, diseño ni pruebas, ni ejecutado suites. El WIP no se considera evidencia verde del árbol actual.
 
@@ -53,4 +55,4 @@ Ninguno.
 
 ## Salida de la revisión
 
-Especificación aprobada. H-01 y H-02 quedan resueltos en esta revisión. El veredicto se limita a la especificación; no acredita implementación ni pruebas. Solo se actualiza este informe, sin cambiar el estado del bug ni otros artefactos y sin realizar commits.
+Especificación aprobada en este nuevo intento. H-01 y H-02 quedan resueltos; no hay hallazgos pendientes ni nuevos. El veredicto se limita a la especificación; no acredita implementación ni pruebas. Solo se actualiza este informe, sin cambiar el estado del bug ni otros artefactos y sin realizar commits.

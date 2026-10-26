@@ -5,7 +5,7 @@ type: bug
 weight: 50
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: in_progress
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
