@@ -29,6 +29,7 @@ class ArnesAusenteTests(unittest.TestCase):
         self.root = Path(tmp.name)
         self.cfg = {'harness': 'claude', 'model': 'principal',
                     'reserva': [{'harness': 'codex', 'model': 'reserva'}]}
+        self.config_real = motor.config
         self.enterContext(patch.dict(motor.os.environ, {}, clear=True))
         self.enterContext(patch.object(motor, 'config', side_effect=lambda root: {
             'hades': self.cfg, 'artemisa': self.cfg, 'atenea': self.cfg}))
@@ -76,6 +77,7 @@ class ArnesAusenteTests(unittest.TestCase):
         for campo in ('entrada', 'cache_leida', 'cache_escrita', 'salida', 'razonamiento', 'coste_usd'):
             self.assertEqual(ausente[0][campo], 0)
         self.assertNotIn('cuota_espera_s', ausente[0])
+        self.assertNotIn('espera_s', ausente[0])
         self.assertFalse(ausente[0].get('sin_cuota'))
         self.assertEqual(len([c for c in self.aviso.call_args_list
                               if c.args[1] == 'arnes' and '"claude"' in c.args[2]]), 1)
@@ -88,6 +90,7 @@ class ArnesAusenteTests(unittest.TestCase):
         self.lanzar.assert_called_once()
         self.assertEqual(self.lanzar.call_args.args[2], 'codex')
         self.assertNotIn('resume', self.lanzar.call_args.args[0])
+        self.assertTrue(all('anterior' not in str(a) for a in self.lanzar.call_args.args[0]))
         self.comprobar_ausente('agente')
 
     def test_paso_salta_ausente_sin_espera(self):
@@ -98,6 +101,7 @@ class ArnesAusenteTests(unittest.TestCase):
         self.lanzar.assert_called_once()
         self.assertEqual(self.lanzar.call_args.args[2], 'codex')
         self.assertNotIn('resume', self.lanzar.call_args.args[0])
+        self.assertTrue(all('anterior' not in str(a) for a in self.lanzar.call_args.args[0]))
         self.comprobar_ausente('paso')
 
     def test_gateway_salta_ausente_y_guarda_sesion_reserva(self):
@@ -107,6 +111,7 @@ class ArnesAusenteTests(unittest.TestCase):
         self.assertIn('codex/reserva', respuesta)
         self.guardar.assert_called_once_with(self.root, '123', 'codex', 'nueva')
         self.assertNotIn('resume', self.lanzar.call_args.args[0])
+        self.assertTrue(all('anterior' not in str(a) for a in self.lanzar.call_args.args[0]))
         self.comprobar_ausente('gateway')
 
     def test_todos_ausentes_fallo_claro_sin_cuota(self):
@@ -115,6 +120,10 @@ class ArnesAusenteTests(unittest.TestCase):
         for flujo in ('agente', 'paso', 'gateway'):
             with self.subTest(flujo=flujo):
                 self.aviso.reset_mock()
+                self.consola.reset_mock()
+                ruta = self.root / motor.METRICAS
+                if ruta.exists():
+                    ruta.unlink()
                 if flujo == 'agente':
                     self.assertNotEqual(motor.agente(self.root, 'hades', 'revisa'), 0)
                 elif flujo == 'paso':
@@ -126,6 +135,22 @@ class ArnesAusenteTests(unittest.TestCase):
                         gateway.conversar(self.root, '123', 'hola')
                 self.assertTrue(any(c.args[1] == 'error' and 'disponible' in c.args[2]
                                     for c in self.aviso.call_args_list))
+                filas = motor.leer_metricas(self.root)
+                self.assertEqual([(f['tipo'], f['posicion'], f['arnes'], f['modelo']) for f in filas],
+                                 [(flujo, 0, 'claude', 'principal'), (flujo, 1, 'codex', 'reserva')])
+                for fila in filas:
+                    self.assertTrue(fila['arnes_ausente'])
+                    self.assertEqual(fila['modelos'], {})
+                    for campo in ('entrada', 'cache_leida', 'cache_escrita', 'salida', 'razonamiento', 'coste_usd'):
+                        self.assertEqual(fila[campo], 0)
+                    self.assertFalse(fila.get('sin_cuota'))
+                    self.assertNotIn('cuota_espera_s', fila)
+                    self.assertNotIn('espera_s', fila)
+                    arnes = fila['arnes']
+                    self.assertEqual(len([c for c in self.aviso.call_args_list
+                                          if c.args[1] == 'arnes' and f'"{arnes}"' in c.args[2]]), 1)
+                    self.assertTrue(any(arnes in str(c) and 'conmutando a reserva' in str(c)
+                                        for c in self.consola.call_args_list))
         self.lanzar.assert_not_called()
         self.assertFalse(any(f.get('sin_cuota') for f in motor.leer_metricas(self.root)))
 
@@ -155,6 +180,7 @@ class ArnesAusenteTests(unittest.TestCase):
                 self.lanzar.assert_called_once()
                 self.assertEqual(self.lanzar.call_args.args[2], 'agy')
                 self.assertNotIn('--resume', self.lanzar.call_args.args[0])
+                self.assertTrue(all('anterior' not in str(a) for a in self.lanzar.call_args.args[0]))
                 filas = [f for f in motor.leer_metricas(self.root) if f.get('arnes_ausente')]
                 self.assertEqual([(f['tipo'], f['posicion'], f['arnes'], f['modelo']) for f in filas],
                     [(flujo, 0, 'codex', 'principal-a'), (flujo, 1, 'claude', 'reserva-b')])
@@ -172,22 +198,24 @@ class ArnesAusenteTests(unittest.TestCase):
                                         for c in self.consola.call_args_list))
 
     def test_cuota_se_conserva_si_ultima_reserva_ausente(self):
-        """La recuperaci?n del principal sigue exactamente a las 18:00 UTC."""
+        """La recuperación del principal sigue exactamente a las 18:00 UTC."""
         self.buscar.side_effect = lambda exe: None if exe == 'codex' else exe
         self.lanzar.return_value = (1, {}, 'out of credits')
         with patch.object(motor, 'espera_cuota', return_value=3600):
             self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
+            filas_agente = motor.leer_metricas(self.root)
+            (self.root / motor.METRICAS).unlink()
             codigo, esperar = self.bucle()
         self.assertNotEqual(codigo, 0)
         esperar.assert_called_once_with(self.root, 3600)
-        filas = motor.leer_metricas(self.root)
+        filas = filas_agente + motor.leer_metricas(self.root)
         for tipo in ('agente', 'paso'):
             agotadas = [f for f in filas if f.get('tipo') == tipo and f.get('sin_cuota')]
             self.assertTrue(agotadas)
             self.assertTrue(all(f['arnes'] == 'claude' for f in agotadas))
             self.assertTrue(any(f.get('espera_s') == 3600 for f in agotadas))
         _, cuotas = motor.consumo_cuotas(self.root, motor.fecha_estado('2026-10-26T17:01:00Z'))
-        self.assertEqual(cuotas[('claude', 'principal')].isoformat(), '2026-10-26T18:00:00+00:00')
+        self.assertEqual(cuotas[('claude', 'principal')], motor.fecha_estado('2026-10-26T18:00:00Z'))
         ausentes = [f for f in filas if f.get('arnes_ausente')]
         self.assertEqual([(f['tipo'], f['posicion'], f['arnes'], f['modelo']) for f in ausentes],
                          [('agente', 1, 'codex', 'reserva'), ('paso', 1, 'codex', 'reserva')])
@@ -198,6 +226,41 @@ class ArnesAusenteTests(unittest.TestCase):
             self.assertFalse(fila.get('sin_cuota'))
             self.assertNotIn('cuota_espera_s', fila)
             self.assertNotIn('espera_s', fila)
+
+    def test_cuota_vigente_y_reserva_ausente_conservan_espera(self):
+        """El relanzamiento espera el saldo restante sin volver a ejecutar al agotado."""
+        self.buscar.side_effect = lambda exe: None if exe == 'codex' else exe
+        with patch.object(motor, 'ahora', return_value='2026-10-26T17:15:00Z'):
+            for flujo in ('agente', 'paso'):
+                with self.subTest(flujo=flujo):
+                    ruta = self.root / motor.METRICAS
+                    if ruta.exists():
+                        ruta.unlink()
+                    motor.registrar(self.root, {'tipo': 'agente', 'fecha': '2026-10-26T17:00:00Z',
+                                                'arnes': 'claude', 'modelo_cuota': 'principal',
+                                                'cuota_espera_s': 3600, 'modelos': {}})
+                    self.aviso.reset_mock()
+                    if flujo == 'agente':
+                        self.assertNotEqual(motor.agente(self.root, 'hades', 'revisa'), 0)
+                    else:
+                        codigo, esperar = self.bucle(progreso=False)
+                        self.assertNotEqual(codigo, 0)
+                        esperar.assert_called_once_with(self.root, 2700)
+                    filas = motor.leer_metricas(self.root)
+                    senales = [f for f in filas if f.get('tipo') == flujo and f.get('sin_cuota')]
+                    self.assertEqual(len(senales), 1)
+                    self.assertEqual(senales[0]['espera_s'], 2700)
+                    self.assertEqual(senales[0].get('modelos'), {})
+                    self.assertFalse(any(c.args[1] == 'error' for c in self.aviso.call_args_list))
+                    _, cuotas = motor.consumo_cuotas(self.root, motor.fecha_estado('2026-10-26T17:16:00Z'))
+                    self.assertEqual(cuotas[('claude', 'principal')], motor.fecha_estado('2026-10-26T18:00:00Z'))
+                    self.assertNotIn(('codex', 'reserva'), cuotas)
+                    ausentes = [f for f in filas if f.get('arnes_ausente')]
+                    self.assertEqual(len(ausentes), 1)
+                    self.assertEqual(ausentes[0]['arnes'], 'codex')
+                    self.assertNotIn('cuota_espera_s', ausentes[0])
+                    self.assertNotIn('espera_s', ausentes[0])
+        self.lanzar.assert_not_called()
 
     def test_errores_operacionales_no_prueban_reservas(self):
         """Autenticación fallida no se confunde con ejecutable ausente."""
@@ -227,6 +290,13 @@ class ArnesAusenteTests(unittest.TestCase):
             self.assertFalse(self.avisar_real(self.root, 'arnes', 'ausente'))
             enviar.assert_not_called()
         with (patch.object(motor, 'telegram', return_value=('token', ['123'], {'arnes'})),
+              patch.object(motor, 'enviar', return_value=True) as enviar):
+            self.assertTrue(self.avisar_real(self.root, 'arnes', 'ausente'))
+            enviar.assert_called_once()
+        (self.root / 'orchestration.json').write_text('{}', encoding='utf-8')
+        with (patch.dict(motor.os.environ, {'TELEGRAM_BOT_TOKEN': 'prueba-sin-red',
+                                           'TELEGRAM_ALLOWED_USER_IDS': '123'}),
+              patch.object(motor, 'config', self.config_real),
               patch.object(motor, 'enviar', return_value=True) as enviar):
             self.assertTrue(self.avisar_real(self.root, 'arnes', 'ausente'))
             enviar.assert_called_once()

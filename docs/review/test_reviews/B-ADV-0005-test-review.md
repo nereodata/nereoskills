@@ -1,52 +1,48 @@
-# Revisión de pruebas — B-ADV-0005
+# Revisión de pruebas: B-ADV-0005 (reevaluación 3: regresión HC-01)
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO**
 
-**Para:** desarrollador.
-
-**Fecha:** 2026-10-26.
-
-**Modo:** orquestado, sin preguntas.
+**Fecha:** 2026-10-26 · **Modo:** orquestado, sin preguntas · **Revisor:** Hades
 
 ## Alcance y evidencia
 
-Se revisa únicamente `skills/orquestar/test_arnes_ausente.py`, incluida su preparación de estados, frente a `skills/orquestar/features/orquestacion.feature` y el triaje y las decisiones del bug B-ADV-0005. Se aplican Hades y `/review-test` del almacén activo 0.6.0, ignorando el modelo del frontmatter. No se inspeccionan producción, diseño ni otras pruebas.
+Se revisa solo lo que se ha añadido a `skills/orquestar/test_arnes_ausente.py`: `test_cuota_vigente_y_reserva_ausente_conservan_espera`, la regresión que pidió la revisión de código (HC-01). Se contrasta con el feature, con el bug y con la DEC del triaje («ausencia no equivale a cuota; se conserva la señal de cuota aunque la última reserva falte»). No se han leído ni la producción ni el diseño. Las ocho pruebas anteriores ya estaban aprobadas (reevaluación 2) y no han cambiado.
 
-Se reutilizan `docs/review/test_reviews/B-ADV-0005-red.md` y las entradas de `orquestar_evidencias.jsonl`: para el árbol `0fc0a0f64da0461559faad519433f55dd0d39f08` constan `py_compile` verde y ejecución del test nuevo con código 1, a las 18:03:12 y 18:03:13 respectivamente. El informe rojo declara ocho pruebas, dos fallos y nueve errores por ausencias no recuperadas y evento inexistente. El registro confirma el código de salida, aunque no conserva los detalles de cada fallo. No se repiten esas verificaciones ni se ejecuta la suite completa. No hay linter ni tipado configurados, según la invocación.
+Se reutiliza la evidencia y no se repite:
+- Compilación del test: en verde.
+- Rojo final en `docs/review/test_reviews/B-ADV-0005-red.md`, «Regresión HC-01», con `--verificar` y antes de corregir HC-01: 9 pruebas y 2 fallos. El agente no registra ninguna señal `sin_cuota` (0 frente a 1) y el paso no llama a `esperar(root, 2700)`. El resto está en verde.
 
-El fixture del error operacional del paso utiliza `bucle(progreso=False)`: mantiene la firma sin cambios y evita simular progreso cuando la ejecución falla. No se objeta esa corrección.
+Los dos fallos son justo el defecto de HC-01, no la sintaxis ni un fixture. No se ha ejecutado la suite completa. No hay linter ni tipado configurados.
+
+## Regresión HC-01
+
+- **Preparación:** cada flujo empieza con el registro vacío y una sola fila previa de cuota de `claude/principal`: `fecha 17:00Z`, `cuota_espera_s 3600`, `modelos: {}`. El reloj está fijado a `17:15Z` y `codex` (la reserva) está ausente. Es el caso de relanzar el bucle, o de invocar a Hades por segunda vez, con la cuota ya vigente.
+- **Agente:** devuelve un código distinto de cero y registra exactamente una señal `sin_cuota` con `espera_s == 2700` y `modelos == {}`. No hay aviso `error`.
+- **Paso:** devuelve un código distinto de cero, llama a `esperar(root, 2700)` una sola vez y no hay aviso `error`. Así no puede pasar ni un `parar('error', …)` ni una espera de 3600 recalculada.
+- **Común a los dos:** la recuperación de `claude/principal` sigue siendo exactamente las `18:00Z` y no aparece cuota para `codex/reserva`. Hay una sola fila de ausencia, la de `codex`, sin `cuota_espera_s` ni `espera_s`. `lanzar` no se llama nunca, así que el principal agotado no se vuelve a ejecutar.
+
+La prueba discrimina: una implementación que siga diciendo «ningún arnés disponible», o que reejecute al principal, o que atribuya cuota a la ausencia, falla.
 
 ## Puntuaciones
 
-| Criterio | Puntuación | Justificación |
+| Criterio | Nota | Justificación |
 |---|---:|---|
-| Cobertura | 7/10 | Cubre los tres consumidores, salto directo, cadena intermedia, agotamiento total, cuota previa, autenticación y filtrado. Falta exigir las métricas de ausencia comprometidas para el caso de cuota previa. |
-| Aserciones | 7/10 | Hay comprobaciones concretas de reservas, sesiones, consumo y recuperación. El bucle sobre métricas ausentes del caso de cuota puede no comprobar ninguna fila; los avisos de la cadena solo se cuentan. |
-| Rojo correcto | 9/10 | La evidencia suministrada atribuye el rojo a los comportamientos que se pretenden corregir; sintaxis verificada y fixture operacional ajustado. El rojo previo no acredita las aserciones posteriores a las excepciones. |
-| Estabilidad | 9/10 | Directorio temporal por prueba, entorno aislado, instante fijado y procesos, esperas y red simulados. |
+| Cobertura | 9 | Toda la spec, más la regresión HC-01 en agente y paso. El gateway queda fuera porque no gestiona cuota (diseño de T-ADV-0026). |
+| Aserciones | 9 | La espera restante es exacta, la señal es única y sin modelo, no hay error, la recuperación original se conserva y no hay lanzamientos. |
+| Rojo correcto | 9 | Los dos fallos previos a la corrección son el defecto de HC-01. |
+| Estabilidad | 9 | Instantes fijados con zona horaria, métricas reiniciadas en cada flujo, y procesos, esperas y avisos simulados. |
 
-**Media: 8/10.** No supera el umbral estricto de 8 y existe un hallazgo alto.
+**Media: 9.** No hay hallazgos 🔴 ni 🟠.
 
 ## Hallazgos
 
-### HT-01 — 🟠 ALTA — El caso de cuota previa no exige evidencia de la reserva ausente
+### HT-09: 🔵 BAJA. La fila de ausencia de la regresión no comprueba posición ni consumo cero
+- **Evidencia:** solo se comprueba `arnes == 'codex'` y que no tenga `cuota_espera_s` ni `espera_s`.
+- **Consecuencia:** la posición y el consumo nulo ya los exigen otras pruebas en el mismo camino de registro. Además, la posición tras el filtrado por cuota no la fija el contrato.
+- **Destino:** `descartar`.
 
-- **Evidencia:** `skills/orquestar/test_arnes_ausente.py:171-191`. Se comprueban las filas de cuota de agente y paso y la recuperación agregada del principal. Después, solo se valida `sin_cuota` y la ausencia de `cuota_espera_s` dentro de un `if fila.get('arnes_ausente')`. No se exige que exista ninguna fila de ausencia, ni se comprueban su flujo, posición, arnés, modelo o consumo cero.
-- **Contrato:** el esquema «Cuota en un arnés disponible y última reserva ausente» exige identificar ese intento y registrar cero en todos sus contadores y coste. H-02 y DEC-ESP-02 rechazan expresamente métricas sin atribución suficiente.
-- **Consecuencia:** una corrección que conserve la cuota del principal pero omita por completo las métricas de la reserva ausente en este camino pasaría el caso. También podrían pasar filas atribuidas al flujo o modelo equivocado, o con consumo indebido. Los casos sin cuota previa no discriminan esta omisión específica.
-- **Para:** desarrollador.
-- **Destino:** resolver en las pruebas de B-ADV-0005 antes de aprobarlas.
-- **Corrección necesaria:** exigir, para agente y paso, las filas de ausencia de la última reserva con identidad completa y consumo cero, y comprobar en ellas la ausencia de cuota y recuperación. Las comprobaciones deben fallar si faltan esas filas. Puede mantenerse la configuración de arneses equivalente que usa la prueba; no es necesario copiar literalmente los nombres del feature.
-
-### HT-02 — 🟡 MEDIA — Dos avisos no garantizan uno por cada configuración ausente
-
-- **Evidencia:** `skills/orquestar/test_arnes_ausente.py:166` exige dos llamadas del evento `arnes`, pero no examina su mensaje. El helper `comprobar_ausente`, en el salto directo, también comprueba únicamente la existencia del evento. La identificación del arnés solo se verifica en consola.
-- **Contrato:** H-01 exige un aviso propio por cada configuración ausente; el feature requiere uno por codex y otro por claude en la cadena y que el aviso del salto directo identifique el arnés.
-- **Consecuencia:** dos avisos que identifiquen ambos codex, o mensajes genéricos sin identificación, satisfacen las aserciones aunque la notificación incumpla el contrato.
-- **Para:** desarrollador.
-- **Destino:** resolver en el mismo archivo de pruebas.
-- **Corrección necesaria:** comprobar el contenido de los avisos `arnes`: cada ausencia debe corresponder a su arnés en el flujo probado, sin duplicar uno y omitir otro. Verificar también la identificación en el salto directo; no hace falta fijar toda la redacción del mensaje.
+Los hallazgos anteriores (HT-03, HT-06 y HT-07) siguen resueltos, y HT-05 y HT-08 siguen descartados.
 
 ## Salida
 
-Devolver al desarrollador para resolver HT-01 y HT-02 y solicitar nueva revisión. No se requiere intervención humana ni cambio de especificación. Esta revisión solo crea el informe; no modifica pruebas, producción, estados ni realiza commits.
+Las pruebas quedan aprobadas, incluida la regresión HC-01, y la corrección del código puede seguir. Esta revisión solo actualiza el informe: no modifica pruebas ni estados, y no hace commits.

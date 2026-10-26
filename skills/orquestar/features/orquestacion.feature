@@ -41,9 +41,11 @@ Característica: Continuidad con arneses ausentes
       | conversación del gateway |
 
   Escenario: Ningún ejecutable disponible
-    Dado que faltan los arneses del principal y de todas las reservas
+    Dado que pruebo por separado paso del bucle, agente Hades y conversación del gateway
+    Y faltan los arneses del principal y de todas las reservas
     Cuando solicito ejecutar el trabajo
     Entonces falla con un mensaje que indica que no hay arneses disponibles
+    Y cada configuración ausente deja su warning, métrica de consumo cero y aviso arnes identificando su arnés
     Y se solicita un aviso Telegram de error
     Y no espera recuperación de cuota
 
@@ -62,6 +64,15 @@ Característica: Continuidad con arneses ausentes
       | agente Hades |
 
   Escenario: Un error distinto de ausencia no habilita reservas
-    Dado un arnés disponible que falla por autenticación
+    Dado que pruebo por separado paso del bucle, agente Hades y conversación del gateway
+    Y el principal claude disponible falla por autenticación y tiene reserva codex disponible
     Cuando solicito ejecutar el trabajo
-    Entonces se conserva el fallo sin probar reservas por ausencia
+    Entonces se conserva el código de fallo en paso y agente y se informa del error de autenticación en el gateway
+    Y codex no recibe ninguna petición y no hay métricas de arnés ausente
+
+  Escenario: Filtrar las notificaciones de ausencia
+    Dado que telegram.eventos contiene solo error y el principal ausente tiene una reserva disponible
+    Cuando solicito ejecutar el trabajo
+    Entonces se ejecuta la reserva y veo el warning de ausencia en consola
+    Y no se envía por Telegram el aviso del evento arnes
+    Y con la configuración por defecto se solicita el aviso arnes identificando el ejecutable ausente

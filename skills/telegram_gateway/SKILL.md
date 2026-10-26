@@ -28,6 +28,8 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 
 **Nunca escribe en el backlog con el bucle en marcha.** Deja la petición en el buzón (`orquestar_buzon.jsonl`, excluido de git) y el bucle la registra entre pasos, con un commit que solo lleva esos ficheros, y te avisa del ID. Sin bucle, la registra y la commitea en el momento, en la rama actual.
 
+Cuando falta el ejecutable de conversación, el gateway recorre las reservas heredadas de Atenea o declaradas en `telegram.reserva`. Cada ausencia deja warning, métrica de consumo cero y aviso filtrable `arnes`; al cambiar de arnés se inicia una sesión nueva y se persiste la sesión del que responde. Si no queda ningún arnés disponible, informa del error y solicita un aviso `error`. Este recorrido se aplica a ejecutables ausentes; conserva el tratamiento existente de los demás errores.
+
 ## 🛠️ Uso
 Desde la raíz del proyecto:
 ```bash

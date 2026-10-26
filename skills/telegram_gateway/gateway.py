@@ -160,7 +160,7 @@ def invocar(root, prompt, cfg, sesion=None):
         raise RuntimeError(f'Arnés no soportado: {harness}')
     exe = getattr(motor, 'buscar_ejecutable', shutil.which)(base[0])
     if not exe:
-        raise RuntimeError(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+        raise motor.ArnesAusente(f'No se encuentra el arnés "{base[0]}" en el PATH.')
     cmd = motor.con_modelo([exe] + base[1:], harness, cfg)
     codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=prompt)
     sesion_id = m.get('sesion')
@@ -185,22 +185,26 @@ def conversar(root, usuario, texto):
     cfg_atenea = cfg_todo.get('atenea', {}) if isinstance(cfg_todo.get('atenea'), dict) else {}
     cfg_tg = cfg_todo.get('telegram', {}) if isinstance(cfg_todo.get('telegram'), dict) else {}
     cfg = {**cfg_atenea, **cfg_tg}
-    harness = cfg.get('harness', 'claude')
-    sesion = obtener_sesion(root, usuario, harness)
     prompt = construir_prompt(root, texto)
-
-    if sesion:
-        codigo, s_id, resp = invocar(root, prompt, cfg, sesion=sesion)
-        if codigo != 0:
-            codigo, s_id, resp = invocar(root, prompt, cfg, sesion=None)
+    for posicion, cfg_actual in enumerate([cfg] + motor.lista_reservas(cfg)):
+        harness = cfg_actual.get('harness', 'claude')
+        sesion = obtener_sesion(root, usuario, harness) if posicion == 0 else None
+        try:
+            codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=sesion)
+            if sesion and codigo != 0:
+                codigo, s_id, resp = invocar(root, prompt, cfg_actual, sesion=None)
             if codigo != 0:
                 raise RuntimeError(f'Fallo al invocar al modelo (código {codigo}): {resp}')
+        except motor.ArnesAusente:
+            motor.registrar_ausencia(root, 'gateway', posicion, cfg_actual)
+            continue
         nueva_sesion, respuesta = s_id, resp
+        cfg = cfg_actual
+        break
     else:
-        codigo, s_id, resp = invocar(root, prompt, cfg, sesion=None)
-        if codigo != 0:
-            raise RuntimeError(f'Fallo al invocar al modelo (código {codigo}): {resp}')
-        nueva_sesion, respuesta = s_id, resp
+        mensaje = 'Gateway: ningún arnés disponible en el principal ni en las reservas.'
+        motor.avisar(root, 'error', mensaje)
+        raise RuntimeError(mensaje)
 
     if nueva_sesion:
         guardar_sesion(root, usuario, harness, nueva_sesion)

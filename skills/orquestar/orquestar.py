@@ -915,6 +915,23 @@ def configuraciones_con_cuota(root, configuraciones):
     return disponibles or configuraciones[-1:]
 
 
+def cuota_descartada(root, configuraciones, seleccionadas):
+    """Recupera la espera restante de perfiles omitidos con ejecutable disponible."""
+    omitidas = [cfg for cfg in configuraciones if cfg not in seleccionadas]
+    if not omitidas:
+        return None, None
+    instante = fecha_estado(ahora())
+    cuotas = consumo_cuotas(root, instante)[1]
+    pendientes = []
+    for cfg in omitidas:
+        harness = cfg.get('harness', 'claude')
+        hasta = cuotas.get((harness, cfg.get('model') or 'predeterminado'))
+        plantilla = HARNESS.get(harness)
+        if hasta and plantilla and buscar_ejecutable(plantilla[0]):
+            pendientes.append(((hasta - instante).total_seconds(), cfg))
+    return min(pendientes, key=lambda par: par[0]) if pendientes else (None, None)
+
+
 def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
     n = 0
@@ -1045,6 +1062,24 @@ def arnes(a, rol):
     return None if a.cmd else a.harness or rol.get('harness', 'claude')
 
 
+class ArnesAusente(RuntimeError):
+    """Señala un ejecutable ausente que permite probar otra configuración."""
+
+
+def registrar_ausencia(root, tipo, posicion, cfg, **contexto):
+    """Registra y avisa una omisión sin atribuir ejecución ni cuota."""
+    harness = cfg.get('harness', 'claude')
+    texto = f'[orquestar] no se encuentra el arnés "{harness}"; conmutando a reserva...'
+    print(texto, flush=True)
+    registrar(root, {'tipo': tipo, 'fecha': ahora(), **contexto,
+                     'posicion': posicion, 'arnes': harness,
+                     'modelo': cfg.get('model') or 'predeterminado',
+                     'arnes_ausente': True, 'codigo': 127, 'modelos': {},
+                     'entrada': 0, 'cache_leida': 0, 'cache_escrita': 0,
+                     'salida': 0, 'razonamiento': 0, 'coste_usd': 0})
+    avisar(root, 'arnes', texto)
+
+
 def comando(a, prompt, root=None, rol=None, sesion=None):
     rol = rol if rol is not None else rol_de(root or Path.cwd(), 'task-dev')[1]
     harness = arnes(a, rol)
@@ -1052,7 +1087,9 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
     plantilla = [p.strip('"\'') for p in plantilla]
     exe = buscar_ejecutable(plantilla[0])
     if not exe:
-        sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
+        if a.cmd:
+            sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
+        raise ArnesAusente(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
     if sesion and not a.cmd:
         if harness == 'claude':
             cmd = [exe, '--resume', sesion] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
@@ -1260,8 +1297,10 @@ def agente(root, rol, prompt):
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
 
     reservas = lista_reservas(cfg)
-    configs_a_probar = configuraciones_con_cuota(root, [cfg] + reservas)
+    configs_originales = [cfg] + reservas
+    configs_a_probar = configuraciones_con_cuota(root, configs_originales)
     cuotas_acumuladas = []
+    ultima_cuota = None
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
 
     for idx_cfg, cfg_actual in enumerate(configs_a_probar):
@@ -1275,7 +1314,9 @@ def agente(root, rol, prompt):
             sys.exit(f'Arnés no soportado para roles: {harness}')
         exe = buscar_ejecutable(base[0])
         if not exe:
-            sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+            posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
+            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid)
+            continue
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
         if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
@@ -1289,6 +1330,8 @@ def agente(root, rol, prompt):
             m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota)
             cuotas_acumuladas.append(cuota)
             if hay_mas_reservas:
+                ultima_cuota = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
+                                'paso': paso, 'id': iid, 'arnes': harness, 'codigo': codigo}
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                                  'arnes': harness, 'codigo': codigo,
                                  **({'escalado': True} if escalado else {}), **m})
@@ -1316,7 +1359,24 @@ def agente(root, rol, prompt):
             print(tope_de_rechazos(root, iid), flush=True)
         return codigo
 
-    return codigo
+    if ultima_cuota is not None:
+        registrar(root, {**ultima_cuota, 'modelos': {}, 'sin_cuota': True,
+                         **({'escalado': True} if escalado else {}),
+                         'espera_s': min(cuotas_acumuladas)})
+        print(f'[orquestar] {rol} sin cuota; se conserva la espera del arnés disponible.', flush=True)
+        return ultima_cuota['codigo']
+    espera, cfg_omitida = cuota_descartada(root, [cfg] + reservas, configs_a_probar)
+    if espera is not None:
+        registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                         'arnes': cfg_omitida.get('harness', 'claude'), 'codigo': 1,
+                         'modelos': {}, 'sin_cuota': True, 'espera_s': espera,
+                         **({'escalado': True} if escalado else {})})
+        print(f'[orquestar] {rol} sin cuota; se conserva la recuperación vigente.', flush=True)
+        return 1
+    mensaje = f'{rol}: ningún arnés disponible en el principal ni en las reservas.'
+    print(f'[orquestar] {mensaje}', flush=True)
+    avisar(root, 'error', mensaje)
+    return 1
 
 
 def tope_de_rechazos(root, iid):
@@ -1395,7 +1455,7 @@ def esperar(root, segundos):
 
 # ---------------------------------------------------------------- avisos por Telegram
 
-EVENTOS = ('version', 'cuota', 'respuesta', 'error')  # fin de versión/producto, sin cuota, te toca, fallo
+EVENTOS = ('version', 'cuota', 'respuesta', 'error', 'arnes')
 
 
 def leer_env(ruta):
@@ -2087,7 +2147,8 @@ def bucle(a, root):
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
         reservas = lista_reservas(cfg_rol)
-        configs_a_probar = [cfg_rol] + reservas
+        configs_originales = [cfg_rol] + reservas
+        configs_a_probar = configs_originales
         if not a.cmd and not a.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
         cuotas_paso = []
@@ -2098,9 +2159,10 @@ def bucle(a, root):
         salida = ''
         cuota = None
         cfg_usada = cfg_rol
+        hubo_ejecucion = False
+        pendiente_cuota = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-            cfg_usada = cfg_actual
             f_met = root / METRICAS
             n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
             arnes_paso = a.cmd or arnes(a, cfg_actual)
@@ -2112,10 +2174,20 @@ def bucle(a, root):
             else:
                 sesion_paso = None
 
-            if sesion_paso:
-                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
-            else:
-                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+            try:
+                if sesion_paso:
+                    resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+                else:
+                    resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+            except ArnesAusente:
+                posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
+                registrar_ausencia(root, 'paso', posicion,
+                                   {**cfg_actual, 'harness': arnes_paso}, rol=rol, paso=paso, id=arg)
+                continue
+            codigo, m, salida = resultado
+            hubo_ejecucion = True
+            pendiente_cuota = False
+            cfg_usada = cfg_actual
 
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
@@ -2133,6 +2205,7 @@ def bucle(a, root):
                           f'conmutando a reserva...', flush=True)
                     arnes_anterior = arnes_paso
                     sesion_anterior = m.get('sesion')
+                    pendiente_cuota = True
                     continue
                 else:
                     cuota = min(cuotas_paso)
@@ -2144,10 +2217,19 @@ def bucle(a, root):
                                   if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
                 break
 
+        if not hubo_ejecucion:
+            cuota, cfg_omitida = cuota_descartada(root, [cfg_rol] + reservas, configs_a_probar)
+            if cuota is None:
+                return parar(root, 'error', f'{paso}: ningún arnés disponible en el principal ni en las reservas.')
+            cfg_usada = cfg_omitida
+            m = {'modelos': {}}
+        if pendiente_cuota:
+            cuota = min(cuotas_paso)
+            m = {}
         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                          'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada), 'codigo': codigo, **m,
                          **({'escalado': True} if escalado else {}),
-                         **({'sin_cuota': True} if cuota else {})})
+                         **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
             avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '

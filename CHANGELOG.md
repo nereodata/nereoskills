@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.0.0] - 2026-10-26
+
+### Corregido
+
+- **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
+
 ## [0.6.0] - 2026-10-26
 
 ### Añadido

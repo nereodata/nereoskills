@@ -3,9 +3,9 @@ id: B-ADV-0005
 title: "Un arnés no encontrado en el PATH para el bucle en vez de avisar y conmutar a la siguiente reserva"
 type: bug
 weight: 50
-dificultad: media
+dificultad: dificil
 version: "v1.0.0"
-status: in_progress
+status: completed
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
@@ -58,3 +58,10 @@ Fuera de alcance: el modo `--cmd` explícito (sin reservas) puede seguir abortan
 - DEC-ESP-01: recuperar solo la propuesta BDD de `wip/B-ADV-0005` (`651864f`) y ampliarla sin reducir escenarios. Se descarta integrar las pruebas o producción durante este paso: pertenecen a Artemisa. El WIP y su reproducción roja se conservan para retomar bug-fix; no constituyen evidencia verde del árbol actual.
 - DEC-ESP-02: ausencia no equivale a cuota. Se concreta el evento filtrable `arnes`, con un aviso por configuración ausente, y el consumo nulo observable sin imponer nombres internos de campos. Se descarta una métrica genérica sin atribución porque no discrimina H-02.
 - Especificación: `skills/orquestar/features/orquestacion.feature`. No se necesita recurso externo ni respuesta humana.
+
+## Resolución de Artemisa (2026-10-26)
+
+- Señal recuperable `ArnesAusente`, registro común de ausencias y evento filtrable `arnes`. Paso, agente y gateway recorren reservas sin cruzar sesiones ni atribuir consumo o cuota a ejecutables ausentes.
+- Conservada la cuota de la última ejecución disponible, también al relanzar con agotamiento ya registrado (HC-01); espera restante calculada desde la recuperación original. Error propio del agente sin anunciar parada del bucle (HC-02) y señales agregadas con `escalado` (HC-03).
+- Triaje ampliado dentro de C1 con regresión de HC-01 para paso y agente; mismo archivo y comando de cierre. Verificación conjunta equivalente: `python -m unittest skills/orquestar/test_arnes_ausente.py skills/orquestar/test_cuota_vigente.py tests/test_orquestar.py tests/test_telegram_gateway.py`, 98 pruebas OK mediante `adevv orquestar --verificar`. Compilación y `git diff --check` verdes; sin suite completa.
+- Hades: especificación APROBADO (8,75), pruebas APROBADO (9), código APROBADO (9). Hallazgos bajos restantes descartados por su destino; sin deuda nueva ni bloqueos pendientes. Documentación de skills, changelog y revisión humana de v1.0 actualizados.

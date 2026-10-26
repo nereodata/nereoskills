@@ -101,6 +101,7 @@ Al arrancar el bucle en primer o segundo plano, esas credenciales también activ
 | `cuota` | Empieza una espera por falta de cuota, o el bucle para porque la espera supera `--espera-max` |
 | `respuesta` | Cualquier otra parada que necesita al humano: requisitos con preguntas, plataforma rechazada, dependencias inválidas, decisiones de producto pendientes |
 | `error` | Fallo del arnés, paso sin progreso, cambios sin commitear o `--max-pasos` |
+| `arnes` | Ejecutable ausente en una configuración: warning y salto a la siguiente reserva |
 
 ```json
 "telegram": {"eventos": ["version", "cuota", "respuesta"]}
@@ -109,6 +110,8 @@ Al arrancar el bucle en primer o segundo plano, esas credenciales también activ
 `adevv orquestar --aviso-prueba` envía un mensaje de prueba. Un aviso que no se puede enviar se anota en el log y el bucle sigue. Parar con `adevv orquestar --parar` no avisa. Todos los avisos enviados a Telegram por el bucle añaden al pie la firma con la versión de Adevv en ejecución (`— Adevv vX.Y.Z`).
 
 **Buzón.** Las tareas y bugs pedidos por Telegram con el bucle en marcha esperan en `orquestar_buzon.jsonl`. Al empezar cada paso, el bucle los registra sin versión (`status: backlog`), los commitea solos (`docs(plan): altas desde Telegram (…)`) y avisa del ID. No entran en la versión en curso: les pones versión tú, o `revisar-deuda` si son bugs.
+
+**Arnés ausente.** Los pasos y los roles omiten cada configuración cuyo ejecutable no se encuentra, emiten un warning, registran flujo, posición, arnés y modelo con consumo cero, y solicitan el aviso filtrable `arnes` (activo por defecto). Continúan con la siguiente reserva y usan una sesión nueva al cambiar de arnés. La ausencia no genera cuota ni espera; si un intento disponible agotó cuota antes de las ausencias, se conserva su recuperación original. Si no hay ningún arnés disponible, falla con un mensaje claro y aviso `error`. Los errores de autenticación o red conservan su tratamiento; `--cmd` explícito conserva su aborto.
 
 ## ⚙️ Modo orquestado
 
