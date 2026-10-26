@@ -170,6 +170,11 @@ El `.env` del proyecto tiene precedencia independiente para el token y los IDs, 
 ## 👤 Revisión de versión
 
 Cuando el bucle para con «Versión vX.Y terminada»:
+
+El aviso de Telegram adjunta un resumen de tareas, bloqueos y validaciones de `vX.Y-revision.md`. Desde el gateway, `/cerrar vX.Y` permite consultarlo y `/cerrar vX.Y confirmo` autoriza el cierre de esa release y su continuación. Exige revisión final sin trabajo ni decisiones de producto pendientes, sin PID ni señal de parada manual, árbol limpio, manifiestos y changelog correctos y preflight satisfactorio. Publica main y etiqueta anotada mediante push atómico; un fallo previo conserva el estado original. Tras publicar elimina release y relanza si queda otra versión, o informa FIN. Un fallo de arranque posterior conserva la publicación y se reintenta con `/lanzar`. Las comprobaciones de CI y smoke posteriores siguen siendo humanas.
+
+El cierre por Telegram limita cada comando de preflight a 600 segundos, configurable con `task_config.yaml::release.preflight_timeout` (número positivo y finito, en segundos); cada operación Git tiene un límite independiente de 120 segundos.
+
 0. **Suite en rojo tras agotar los intentos automáticos**: revisa el bug de cierre citado en el aviso y su última salida. Resuelve el impedimento y ponlo en `planned`, o ajusta su dificultad y contador `suite_intentos`, y relanza; el bucle repasa la suite al volver al cierre.
 1. Lee `docs/review/versions/vX.Y-revision.md` (y `vX.Y-arquitectura.md` y `vX.Y-deuda.md`) y prueba el producto siguiendo sus pasos de validación.
    **Propuestas de producto** (si hay `vX.Y-producto.md`): la tabla trae el destino recomendado de cada propuesta. Cambia lo que no te convenza (versión, `backlog` o `rechazar`), edita o añade filas, marca `**Decisión:** APLICAR` y relanza; el bucle crea las tareas sin preguntar. Puedes hacerlo editando el archivo o diciéndoselo a `/orquestar` en la conversación. Mientras siga `PENDIENTE`, el bucle no abre la siguiente versión.

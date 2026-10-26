@@ -1541,12 +1541,24 @@ def enviar(token, chat, texto, markdown=False):
     return False
 
 
+def cargar_cierre_version():
+    """Carga el soporte de cierre solo al atender el comando o su aviso final."""
+    spec = importlib.util.spec_from_file_location(
+        'cierre_version', Path(__file__).resolve().parents[1] / 'telegram_gateway/cierre_version.py')
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
 def avisar(root, evento, texto):
     """Envía el aviso a los usuarios autorizados si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
     cfg = telegram(root)
     if not cfg or (evento and evento not in cfg[2]):
         return False
     token, usuarios, _ = cfg
+    version_final = re.search(r'Versión (v\d+\.\d+) terminada\.', texto)
+    if evento == 'version' and version_final:
+        texto += '\n' + cargar_cierre_version().resumen(root, version_final[1])
     texto_firmado = firmar(f'[{root.name}] {texto}')
     return all([enviar(token, u, texto_firmado) for u in usuarios])
 

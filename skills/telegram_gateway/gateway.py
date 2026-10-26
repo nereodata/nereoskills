@@ -43,6 +43,7 @@ AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
          '/agentes (o /agents) — roles, modelos y porcentaje de cuota consumida\n'
          '/lanzar (o /run) — lanza el bucle en segundo plano\n'
          '/parar (o /stop) — para al terminar el paso en curso\n'
+         '/cerrar vX.Y [confirmo] — revisa y cierra una versión\n'
          '/metricas [filtro] (o /metrics) — consumo por tarea; por defecto ultima\n'
          '/tarea <título> — nueva tarea en el backlog, sin versión\n'
          '/bug <título> — nuevo bug, sin versión\n'
@@ -274,6 +275,8 @@ def responder(root, usuario, texto, autorizados):
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
         resp = motor.parte(root)
+    elif comando == '/cerrar':
+        resp = motor.cargar_cierre_version().cerrar(root, argumento, motor)
     elif comando in ('/agentes', '/agents'):
         resp = motor.informe_agentes(root)
     elif comando in ('/parar', '/stop'):
