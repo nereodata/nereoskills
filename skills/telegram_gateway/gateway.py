@@ -434,7 +434,8 @@ def escuchar(root, token, autorizados, vueltas=None, desde=None):
                 respuesta = responder(root, m.get('from', {}).get('id', ''), m.get('text') or '', autorizados)
             except Exception as ex:
                 print(f'[gateway] error con el mensaje {u["update_id"]}: {ex!r}', flush=True)
-                respuesta = firmar('No he podido procesarlo; mira el log del gateway.')
+                motivo = f'{type(ex).__name__}: {ex}'.replace('\n', ' ')[:120]
+                respuesta = firmar(f'No he podido procesarlo ({motivo}); mira el log del gateway.')
             if respuesta and m.get('chat', {}).get('id'):
                 motor.enviar(token, m['chat']['id'], respuesta, markdown=True)
 

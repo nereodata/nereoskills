@@ -214,11 +214,25 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
         env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos)}
         argumentos = list(sys.argv[1:])
         if etiqueta == 'gateway':
-            argumentos += ['--root', str(root)]
+            sin_root = []
+            saltar = False
+            for a in argumentos:
+                if saltar:
+                    saltar = False
+                elif a == '--root':
+                    saltar = True
+                elif not a.startswith('--root='):
+                    sin_root.append(a)
+            argumentos = [*sin_root, '--root', str(root)]
         opciones = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-        hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env, **opciones)
+        registro = root / ('telegram.log' if etiqueta == 'gateway' else LOG)
+        with registro.open('a', encoding='utf-8') as log:
+            hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **opciones)
         temporal.write_text(str(hijo.pid), encoding='utf-8')
         os.replace(temporal, pid)
+        with registro.open('a', encoding='utf-8') as log:
+            log.write(f'[{etiqueta}] recargado a versión {version}\n')
     except OSError as error:
         if hijo is not None:
             hijo.terminate()
@@ -226,7 +240,6 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
         temporal.unlink(missing_ok=True)
         print(f'[{etiqueta}] no se pudo recargar: {error}', flush=True)
         return False
-    print(f'[{etiqueta}] recargado a versión {version}', flush=True)
     return True
 
 

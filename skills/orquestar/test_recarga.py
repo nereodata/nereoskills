@@ -65,7 +65,8 @@ class RecargaTests(unittest.TestCase):
              'perfiles': [{'harness': 'codex', 'model': 'base'}]}]}
         with patch.object(motor, '__file__', str(self.actual)), patch.object(motor.sys, 'argv', ['viejo', '--max-pasos', '8']), patch.object(motor.subprocess, 'Popen', return_value=hijo) as lanzar, patch('builtins.print') as imprimir:
             self.assertTrue(motor.recargar_version(self.actual, self.root, motor.PID, estado, 'orquestar'))
-        imprimir.assert_called_once_with('[orquestar] recargado a versión 0.6.0', flush=True)
+        imprimir.assert_not_called()
+        self.assertEqual((self.root / motor.LOG).read_text(encoding='utf-8'), '[orquestar] recargado a versión 0.6.0\n')
         args, opciones = lanzar.call_args
         self.assertEqual(args[0], [motor.sys.executable, '-u', str(self.nuevo), '--max-pasos', '8'])
         self.assertEqual(opciones['cwd'], self.root)
@@ -75,6 +76,16 @@ class RecargaTests(unittest.TestCase):
         with patch.dict(os.environ, opciones['env']), patch.object(motor.os, 'getpid', return_value=9876):
             self.assertEqual(motor.recibir_recarga(self.root, motor.PID, self.nuevo), estado)
             self.assertNotIn('ADEVV_RECARGA', os.environ)
+
+    def test_sucesor_escribe_en_su_log_y_no_repite_root(self):
+        for etiqueta, log in (('orquestar', motor.LOG), ('gateway', 'telegram.log')):
+            (self.root / motor.PID).write_text(str(os.getpid()))
+            with patch.object(motor.sys, 'argv', ['viejo', '--root', str(self.root)]), patch.object(motor.subprocess, 'Popen', return_value=Mock(pid=9876)) as lanzar, patch('builtins.print'):
+                self.assertTrue(motor.recargar_version(self.actual, self.root, motor.PID, {}, etiqueta))
+            args, opciones = lanzar.call_args
+            self.assertEqual(args[0].count('--root'), 1)
+            self.assertEqual(Path(opciones['stdout'].name), self.root / log)
+            self.assertEqual(opciones['stderr'], subprocess.STDOUT)
 
     def test_fallo_lanzamiento_conserva_pid(self):
         (self.root / motor.PID).write_text(str(os.getpid()))
