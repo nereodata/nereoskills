@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Revisión humana de los puntos de parada de orquestar.py (2026-10-27): para sin necesitar al humano"
 created_at: 2026-10-27
@@ -50,3 +50,13 @@ Intento preservado en `wip/B-ADV-0012`, commit `be865c1`; release restaurada al 
 - E [EXEC]: actualizar el contrato operativo de la skill orquestar.
 - F [EXEC]: cierre y commit.
 - Pruebas del triaje original: `python -m unittest tests.test_orquestar.BloqueoSinProgresoTests tests.test_orquestar.SuiteRecoveryTests tests.test_orquestar.DificultadTests`, mediante `adevv orquestar --verificar`; `git diff --check`. La clase BloqueoSinProgresoTests está solo en WIP: recuperarla y revisarla corresponde al desarrollador. En este paso se verifican únicamente las dos clases existentes del triaje, sin crear pruebas ni ejecutar la suite completa.
+
+## Triaje de desarrollo actual
+A [EXEC]: reevaluación aislada de los dos escenarios aprobados, sin cambios nuevos.
+B [EXEC]: persistir bloqueo local antes de continuar el selector.
+C1 [EXEC]: recuperar y revisar BloqueoSinProgresoTests desde be865c1.
+C2 [EXEC]: bloqueo de task-dev/bug-fix sin progreso tras agotar promoción.
+D [EXEC]: revisión Hades del delta completo.
+E [EXEC]: contrato operativo de orquestar; README/CHANGELOG si afectados.
+F [EXEC]: cierre y commit.
+Verificación: `python -m unittest tests.test_orquestar.BloqueoSinProgresoTests tests.test_orquestar.SuiteRecoveryTests tests.test_orquestar.DificultadTests`; regresión de selector, promoción y excepción de suite. Estáticos: compilación de los dos Python modificados, escaneo de secretos del delta y `git diff --check`, todos mediante --verificar. No hay lint/tipado configurados ni dependencias nuevas.

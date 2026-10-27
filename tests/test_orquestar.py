@@ -1449,3 +1449,110 @@ class SuiteRecoveryTests(unittest.TestCase):
             execute.assert_not_called()
             register.assert_not_called()
             self.assertEqual(self.git('branch', '--show-current'), 'another')
+
+
+class BloqueoSinProgresoTests(unittest.TestCase):
+    """Aísla una tarea atascada usando Git, selector y persistencia reales."""
+    def setUp(self):
+        self.tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.root = Path(self.tmp)
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
+        self.enterContext(patch.object(motor, 'recargar_version', return_value=False))
+        self.git('init', '-q')
+        self.git('config', 'user.name', 'Suite Test')
+        self.git('config', 'user.email', 'suite@example.test')
+        self.git('checkout', '-q', '-b', 'release/v0.1')
+        (self.root / 'task_config.yaml').write_text(
+            'project:\n  prefix: DEM\nlevels:\n  master:\n    path: backlog/\n'
+            '    folders:\n      tasks: tasks/\n      bugs: bugs/\n', encoding='utf-8')
+        for name in ('requirements', 'req_analysis', 'platform_plan', 'platform_review', 'work_plan'):
+            p = self.root / 'docs' / (name + '.md')
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text('**Veredicto:** APROBADO', encoding='utf-8')
+        initial = self.root / 'backlog/tasks/T-DEM-0001.md'
+        initial.parent.mkdir(parents=True, exist_ok=True)
+        initial.write_text('---\nid: T-DEM-0001\nstatus: completed\nversion: v0.1.0\ndepende_de: []\n---\n', encoding='utf-8')
+        report = self.root / 'docs/review/code_reviews/T-DEM-0001-code-review.md'
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fixture')
+        self.enterContext(patch.object(motor, 'git', side_effect=lambda *a: self.git(*a)))
+        motor.excluir(self.root)
+
+    def git(self, *args):
+        return subprocess.run(['git', *args], cwd=self.root, check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+
+    def test_bloquea_solo_atascada_y_completa_independiente(self):
+        """Ambos pasos aíslan el bloqueo; media promociona antes de bloquear."""
+        for paso, nivel in [('task-dev', 'dificil'), ('bug-fix', 'dificil'), ('task-dev', 'media')]:
+            with self.subTest(paso=paso, dificultad=nivel):
+                self.ejercitar_bloqueo(paso, nivel)
+
+    def ejercitar_bloqueo(self, paso, nivel):
+        """Observa las llamadas del arnés y el resultado persistido del bucle."""
+        for carpeta in ('backlog/tasks', 'backlog/bugs'):
+            for p in (self.root / carpeta).glob('*.md'):
+                p.unlink()
+        iid = 'T-DEM-0001' if paso == 'task-dev' else 'B-DEM-0001'
+        carpeta = 'tasks' if paso == 'task-dev' else 'bugs'
+        atascada = self.root / f'backlog/{carpeta}/{iid}.md'
+        atascada.parent.mkdir(parents=True, exist_ok=True)
+        atascada.write_text(f'---\nid: {iid}\nstatus: in_progress\ndificultad: {nivel}\n'
+                            'version: v0.1.0\ndepende_de: []\n---\n\nTrabajo previo.\n', encoding='utf-8')
+        for otro, dependencia in [('T-DEM-0002', '[]'), ('T-DEM-0003', f'[{iid}]')]:
+            (self.root / f'backlog/tasks/{otro}.md').write_text(
+                f'---\nid: {otro}\nstatus: planned\nversion: v0.1.0\ndepende_de: {dependencia}\n---\n', encoding='utf-8')
+        revision = self.root / 'docs/review/versions/v0.1-revision.md'
+        revision.parent.mkdir(parents=True, exist_ok=True)
+        revision.write_text('Contenido previo.\n', encoding='utf-8')
+        (revision.parent / 'v0.1-arquitectura.md').write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'preparar tareas')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness='claude',
+            estado=False, max_pasos=8, reintentos=2, espera_max=0, cmd=None)
+        llamadas = []
+        cola = 'Z' * 1989 + 'FIN RECHAZO'
+        def ejecutar(a, root, prompt, **kwargs):
+            actual = kwargs['env']['ORQUESTAR_ID']
+            llamadas.append((actual, motor.dificultad_de(root, actual)))
+            if actual != iid:
+                self.assertEqual(actual, 'T-DEM-0002')
+                self.assertEqual(self.git('status', '--porcelain'), '')
+                p = motor.fichero_de(root, actual)
+                p.write_text(p.read_text(encoding='utf-8').replace('status: planned', 'status: completed'), encoding='utf-8')
+                (root / f'docs/review/code_reviews/{actual}-code-review.md').write_text('APROBADO', encoding='utf-8')
+                self.git('add', '.')
+                self.git('commit', '-qm', 'completar independiente')
+            return 0, {}, 'DESCARTAR' * 500 + cola
+        with (patch.object(motor, 'ejecutar', side_effect=ejecutar),
+              patch.object(motor, 'construir_prompt_paso', return_value='prompt'),
+              patch.object(motor, 'comprobar_promocion', return_value=(False, '')),
+              patch.object(motor, 'avisar') as aviso, patch('builtins.print')):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+        fm = motor.frontmatter(atascada)
+        self.assertEqual(fm['status'], 'blocked')
+        self.assertEqual(fm['pendiente_de'], 'humano')
+        self.assertEqual(fm['dificultad'], 'dificil')
+        texto = atascada.read_text(encoding='utf-8').split('---', 2)[2]
+        for fragmento in ('Trabajo previo.', '2 intentos', 'dificil', cola):
+            self.assertIn(fragmento, texto)
+        self.assertNotIn('DESCARTAR', texto)
+        informe = revision.read_text(encoding='utf-8')
+        self.assertIn('Contenido previo.', informe)
+        self.assertIn(iid, informe)
+        self.assertIn(cola, informe)
+        self.assertIn('2 intentos', informe)
+        self.assertIn('dificil', informe)
+        self.assertTrue(any(iid in c.args[2] and cola in c.args[2] for c in aviso.call_args_list))
+        self.assertEqual(llamadas, [(iid, 'media')] * 2 + [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')]
+                         if nivel == 'media' else [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')])
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0002'))['status'], 'completed')
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0003'))['status'], 'planned')
+        estado = motor.estado(self.root, 'docs')
+        self.assertEqual(estado[0], 'PARAR')
+        self.assertTrue(estado[1].startswith(motor.FIN_VERSION[0]))
+        self.assertIn(iid, estado[1])
+        self.assertEqual(self.git('status', '--porcelain'), '')

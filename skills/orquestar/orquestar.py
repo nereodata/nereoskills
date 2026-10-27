@@ -1723,6 +1723,39 @@ def verificar(root, cmd):
     return codigo
 
 
+def bloquear_sin_progreso(root, iid, intentos, salida):
+    """Bloquea para el humano una tarea que no avanza en dificil y deja el motivo en la tarea y en la revisión de versión."""
+    fichero = fichero_de(root, iid)
+    version = vkey(frontmatter(fichero).get('version'))
+    dificultad = dificultad_de(root, iid)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    cola = (salida or '(el arnés no produjo salida)')[-2000:]
+    detalle = '\n'.join('    ' + linea for linea in cola.splitlines())
+    motivo = (f'- {iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}; fecha: {ahora()}\n'
+              f'- Cola de la última salida:\n\n{detalle}\n')
+    cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', fichero.read_text(encoding='utf-8'), maxsplit=1)
+    for clave, valor in {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy}.items():
+        if re.search(rf'^{clave}:', cabecera, re.M):
+            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
+        else:
+            cabecera += f'\n{clave}: {valor}'
+    cuerpo = re.sub(r'\n## Bloqueo sin progreso\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
+    fichero.write_text(cabecera + '\n---\n' + cuerpo.rstrip('\n') + '\n\n## Bloqueo sin progreso\n' + motivo,
+                       encoding='utf-8')
+    rutas = [str(fichero.relative_to(root))]
+    if version:
+        revision = root / f'docs/review/versions/v{version[0]}.{version[1]}-revision.md'
+        revision.parent.mkdir(parents=True, exist_ok=True)
+        previo = revision.read_text(encoding='utf-8') if revision.exists() else ''
+        revision.write_text(previo.rstrip('\n') + f'\n\n## {iid} · Bloqueo sin progreso\n' + motivo, encoding='utf-8')
+        rutas.append(str(revision.relative_to(root)))
+    subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True, check=True)
+    subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): bloquear tarea sin progreso', '--', *rutas],
+                   cwd=root, capture_output=True, check=True)
+    avisar(root, 'respuesta', f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; '
+                              f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
+
+
 def registrar_fallo_suite(root, version, cmd):
     """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
     evidencia = root / EVIDENCIAS
@@ -2540,6 +2573,9 @@ def bucle(a, root):
                         if nueva_dif:
                             sin_progreso = 0
                             continue
+                    bloquear_sin_progreso(root, arg, sin_progreso, salida)
+                    sin_progreso = 0
+                    continue
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
