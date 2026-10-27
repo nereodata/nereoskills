@@ -5,7 +5,8 @@ type: bug
 weight: 25
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "Revisión humana de los puntos de parada de orquestar.py (2026-10-27): para sin necesitar al humano"
 created_at: 2026-10-27
@@ -28,3 +29,8 @@ updated_at: 2026-10-27
 
 ## 🔓 Alcance (decisión humana, 2026-10-27)
 El usuario ha pedido este cambio expresamente: el bucle solo debe pararse cuando haga falta una decisión humana. Si hay que cambiar requisitos o escenarios del bucle (orquestar), forma parte del alcance de este bug. Se puede tocar cualquier ruta necesaria.
+
+## Bloqueo de especificaci?n (2026-10-27)
+Hades /review-spec RECHAZADO (7,5/10), con H-01/H-02 altos y H-03 medio asignados al especificador. Resolver la secuencia observable de perfiles, ?xito con reserva, aislamiento por paso/argumento, reinicio por progreso y conservaci?n en recarga; parametrizar pasos locales, tarea independiente y l?mite de intentos.
+
+Intento conservado en `wip/B-ADV-0013` (6b43e5c). Informe: `docs/review/spec_reviews/B-ADV-0013-spec-review.md`. Detalle de enrutado en `docs/review/versions/v1.0-revision.md`. Sin cambios de producci?n en release.
