@@ -13,6 +13,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0020** — Comprobación de cuotas supuestas al relanzar y por intervalo, aviso de créditos por episodio y `--cuota-reset` sin borrar histórico, con recuperación de esperas y origen visible en estado/agentes.
+
 - **B-ADV-0013** — Recuperación por perfil de los análisis sin progreso, aislamiento por paso y argumento, continuidad local y conservación de intentos en recarga.
 
 - **B-ADV-0012** — Bloqueo local de tareas sin progreso tras agotar promociones, con diagnóstico persistido, aviso y continuidad de tareas independientes.

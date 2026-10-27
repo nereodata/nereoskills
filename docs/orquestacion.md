@@ -135,6 +135,10 @@ Lo determinista (lint, tipado, rojo de la suite) se ejecuta antes de llamar a Ha
 
 ## Recuperación de errores del arnés en pasos
 
+Las marcas con hora real de reinicio conservan su plazo. Las respuestas sin hora y los errores de créditos generan marcas supuestas: el trabajo pendiente sirve de comprobación al relanzar y cada `cuota_reintento_s` segundos (300 por defecto, valor positivo finito en `orchestration.json`). Los errores de créditos avisan una vez por episodio; una respuesta satisfactoria o un reset permite avisar de nuevo si vuelven a faltar créditos.
+
+`adevv orquestar --cuota-reset codex/m1` recupera un modelo; `--cuota-reset codex`, todo el arnés; `--cuota-reset`, todas las marcas. Se añaden eventos de recuperación sin borrar histórico ni tokens. Un bucle esperando cuota continúa en su siguiente comprobación, como máximo 30 segundos, y respeta `--parar`. Las consultas `--estado` y `--agentes` muestran la certeza (real/supuesto) y el origen de las marcas vigentes. El reset es una orden independiente que no arranca el bucle ni el gateway.
+
 `adevv orquestar --reintentos-arnes 3` permite tres reintentos adicionales por perfil ante errores ajenos a cuota, con esperas de 60, 300 y 900 segundos. Para límites mayores se repite la espera de 900 segundos. El límite debe ser entero no negativo; cero pasa a la reserva sin esperar. Al agotarlo se prueba la siguiente reserva en orden y con sesión nueva. No consume pasos ni intentos por falta de progreso. Las esperas respetan `--parar`.
 
 Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se agotan todos los perfiles; consola y aviso incluyen los últimos 2000 caracteres de la salida del último arnés ejecutado. Un paso completado y commiteado no se repite por un retorno erróneo. La cuota mantiene su circuito, incluida su recuperación si otra reserva falla por red. Esta recuperación corresponde a pasos del bucle; no cambia el tratamiento de errores operacionales de los roles ni de la conversación del gateway.

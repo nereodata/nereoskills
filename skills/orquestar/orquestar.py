@@ -1039,13 +1039,19 @@ def diagnostico_analisis(recuperacion, limite):
 
 
 def configuraciones_con_cuota(root, configuraciones):
-    """Omite agotamientos vigentes con reservas, conservando la última si todos agotaron."""
-    if len(configuraciones) < 2:
-        return configuraciones
-    cuotas = consumo_cuotas(root, fecha_estado(ahora()))[1]
+    """Respeta reinicios reales y permite sondeos supuestos al relanzar o vencer el intervalo."""
+    instante = fecha_estado(ahora())
+    filas = leer_metricas(root)
+    cuotas = consumo_cuotas(root, instante, filas)[1]
+    marcas = marcas_cuota(root, instante, filas)
+    for clave in list(cuotas):
+        if marcas[clave]['tipo'] == 'supuesta':
+            sondeo = SONDEOS_CUOTA.get((str(root.resolve()), clave))
+            if sondeo is None or (instante - sondeo).total_seconds() >= intervalo_cuota(root):
+                cuotas.pop(clave)
     disponibles = [cfg for cfg in configuraciones
                    if (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado') not in cuotas]
-    return disponibles or configuraciones[-1:]
+    return disponibles
 
 
 def cuota_descartada(root, configuraciones, seleccionadas, incluir_recuperadas=False):
@@ -1460,7 +1466,9 @@ def agente(root, rol, prompt):
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
-            m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota)
+            datos = fallo_cuota(root, harness, cfg_actual.get('model') or 'predeterminado', salida)
+            m.update(datos)
+            cuota = datos['cuota_espera_s']
             cuotas_acumuladas.append(cuota)
             if hay_mas_reservas:
                 ultima_cuota = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
@@ -1483,6 +1491,8 @@ def agente(root, rol, prompt):
                       'el bucle esperará la cuota y reintentará.', flush=True)
                 return codigo
 
+        if not codigo:
+            recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
         veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
         registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                          'arnes': harness, 'codigo': codigo,
@@ -1543,8 +1553,85 @@ def tope_de_rechazos(root, iid):
 CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
                    r'|\b429\b|resource_exhausted|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
 
+CREDITOS = re.compile(r'out of credits|credit balance|billing_hard_limit', re.I)
+SONDEOS_CUOTA = {}
 
-def espera_cuota(salida, ahora=None):
+
+def intervalo_cuota(root):
+    """Intervalo positivo finito de las comprobaciones de cuota supuesta."""
+    valor = config(root).get('cuota_reintento_s')
+    return valor if numero_cuota(valor) and valor > 0 else 300
+
+
+def marcas_cuota(root, instante, filas=None):
+    """Pliega agotamientos y recuperaciones sin reescribir el histórico ni los tokens."""
+    marcas = {}
+    for fila in leer_metricas(root) if filas is None else filas:
+        fecha = fecha_estado(fila.get('fecha'))
+        if fecha is None or fecha > instante:
+            continue
+        arnes = fila.get('arnes') or 'desconocido'
+        modelo = fila.get('modelo_cuota')
+        if fila.get('tipo') == 'cuota_recuperada':
+            marcas.pop((arnes, modelo), None)
+            continue
+        segundos = fila.get('cuota_espera_s')
+        if segundos is None and fila.get('sin_cuota'):
+            segundos = fila.get('espera_s')
+            modelos = fila.get('modelos') or {}
+            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
+        if not modelo or not numero_cuota(segundos) or segundos < 0:
+            continue
+        try:
+            hasta = fecha + timedelta(seconds=segundos)
+        except OverflowError:
+            continue
+        tipo = fila.get('cuota_tipo') or ('supuesta' if segundos == 1800 else 'real')
+        origen = fila.get('cuota_origen') or ('sin hora en la respuesta' if tipo == 'supuesta'
+                                             else 'recuperación histórica registrada')
+        clave = (arnes, modelo)
+        anterior = marcas.get(clave)
+        if anterior and anterior['tipo'] == tipo == 'real' and anterior['hasta'] > hasta:
+            continue
+        marcas[clave] = dict(hasta=hasta, tipo=tipo, origen=origen)
+    return marcas
+
+
+def recuperar_cuota(root, harness, modelo):
+    """Añade una recuperación para un par conocido, conservando el consumo histórico."""
+    if (harness, modelo) in marcas_cuota(root, fecha_estado(ahora())):
+        registrar(root, dict(tipo='cuota_recuperada', fecha=ahora(), arnes=harness, modelo_cuota=modelo))
+    SONDEOS_CUOTA.pop((str(root.resolve()), (harness, modelo)), None)
+
+
+def reset_cuotas(root, selector=''):
+    """Recupera únicamente los pares del selector arnés/modelo, arnés o global."""
+    pares = marcas_cuota(root, fecha_estado(ahora()))
+    seleccionados = [par for par in pares if not selector or selector == par[0]
+                     or selector == '/'.join(par)]
+    for harness, modelo in seleccionados:
+        recuperar_cuota(root, harness, modelo)
+    return len(seleccionados)
+
+
+def fallo_cuota(root, harness, modelo, salida):
+    """Clasifica el fallo, limita los sondeos y avisa de créditos una vez por episodio."""
+    creditos = bool(CREDITOS.search(salida))
+    segundos = espera_cuota(salida, sin_hora=None)
+    tipo = 'supuesta' if creditos or segundos is None else 'real'
+    origen = 'sin créditos' if creditos else ('hora en la respuesta' if tipo == 'real'
+                                            else 'sin hora en la respuesta')
+    if creditos:
+        anterior = marcas_cuota(root, fecha_estado(ahora())).get((harness, modelo))
+        if not anterior or anterior['origen'] != 'sin créditos':
+            avisar(root, 'cuota', f'Sin créditos en {harness}: recarga y el bucle lo reintentará')
+    if tipo == 'supuesta':
+        segundos = intervalo_cuota(root)
+        SONDEOS_CUOTA[(str(root.resolve()), (harness, modelo))] = fecha_estado(ahora())
+    return dict(modelo_cuota=modelo, cuota_espera_s=segundos, cuota_tipo=tipo, cuota_origen=origen)
+
+
+def espera_cuota(salida, ahora=None, sin_hora=1800):
     """Segundos hasta poder reintentar si la salida indica falta de cuota; None si es otro error.
 
     Reconoce la hora de recuperación en los formatos habituales (marca de tiempo tras «|»,
@@ -1570,18 +1657,31 @@ def espera_cuota(salida, ahora=None):
         if objetivo <= ahora:
             objetivo += timedelta(days=1)
         return int((objetivo - ahora).total_seconds()) + margen
-    return 1800
+    return sin_hora
 
 
-def esperar(root, segundos, motivo='sin cuota'):
+def esperar(root, segundos, motivo='sin cuota', cuotas_esperadas=None):
     """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
     hasta = datetime.now() + timedelta(seconds=segundos)
+    pendientes = set(marcas_cuota(root, fecha_estado(ahora()))) if motivo == 'sin cuota' else set()
     (root / ESPERA).write_text(hasta.isoformat(timespec='minutes'), encoding='utf-8')
     print(f'[orquestar] {motivo}: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
     try:
         while datetime.now() < hasta:
             if (root / PARADA).exists():
                 return False
+            if motivo == 'sin cuota':
+                filas = leer_metricas(root)
+                if cuotas_esperadas is not None:
+                    nuevas = filas[cuotas_esperadas['desde']:]
+                    pares = set(cuotas_esperadas['pares']) | {
+                        (f.get('arnes'), f['modelo_cuota']) for f in nuevas
+                        if f.get('modelo_cuota') and f.get('cuota_espera_s') is not None}
+                    if any(f.get('tipo') == 'cuota_recuperada'
+                           and (f.get('arnes'), f.get('modelo_cuota')) in pares for f in nuevas):
+                        return True
+                if pendientes and pendientes - set(marcas_cuota(root, fecha_estado(ahora()), filas)):
+                    return True
             time.sleep(min(30, max((hasta - datetime.now()).total_seconds(), 0)))
         return True
     finally:
@@ -2026,10 +2126,15 @@ def cuota_codex(instante):
     return ultima
 
 
-def consumo_cuotas(root, instante):
+def consumo_cuotas(root, instante, filas=None):
     """Suma la ventana de tokens y conserva todo agotamiento todavía vigente."""
-    uso, cuotas = {}, {}
-    for fila in leer_metricas(root):
+    uso = {}
+    filas = leer_metricas(root) if filas is None else filas
+    marcas = marcas_cuota(root, instante, filas)
+    cuotas = {clave: marca['hasta'] for clave, marca in marcas.items() if marca['hasta'] > instante}
+    for clave in cuotas:
+        uso[clave] = 0
+    for fila in filas:
         fecha = fecha_estado(fila.get('fecha'))
         if fecha is None or fecha > instante:
             continue
@@ -2040,21 +2145,16 @@ def consumo_cuotas(root, instante):
                 clave = (arnes, modelo)
                 uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
                                                      ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
-        segundos = fila.get('cuota_espera_s')
-        modelo = fila.get('modelo_cuota')
-        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
-            segundos = fila['espera_s']
-            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
-        if modelo and numero_cuota(segundos) and segundos >= 0:
-            try:
-                hasta = fecha + timedelta(seconds=segundos)
-            except OverflowError:
-                continue
-            if hasta > instante:
-                clave = (arnes, modelo)
-                uso.setdefault(clave, 0)
-                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
     return uso, cuotas
+
+
+def detalle_marca(marca, instante):
+    """Texto compartido de agotamiento, certeza y origen para estado y agentes."""
+    hasta = marca['hasta']
+    minutos = math.ceil((hasta - instante).total_seconds() / 60)
+    etiqueta = 'supuesto' if marca['tipo'] == 'supuesta' else 'real'
+    return (f'100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min)'
+            f' · {etiqueta}: {marca["origen"]}')
 
 
 def informe_agentes(root, docs='docs/requirements'):
@@ -2082,15 +2182,16 @@ def informe_agentes(root, docs='docs/requirements'):
         clave = (perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado')
         limite = limite_cuota(perfil)
         limites[clave] = min(limites.get(clave, limite), limite)
-    uso, cuotas = consumo_cuotas(root, instante)
+    filas = leer_metricas(root)
+    uso, cuotas = consumo_cuotas(root, instante, filas)
+    marcas = marcas_cuota(root, instante, filas)
     nativo = cuota_codex(instante) if any(h == 'codex' for h, _ in limites) else None
     lineas.append('Cuota por modelo (referencia local cuando no hay dato nativo):')
     for clave, limite in sorted(limites.items()):
         tokens = uso.get(clave, 0)
         hasta = cuotas.get(clave)
         if hasta:
-            minutos = math.ceil((hasta - instante).total_seconds() / 60)
-            detalle = f'100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min)'
+            detalle = detalle_marca(marcas[clave], instante)
         elif clave[0] == 'codex' and nativo:
             detalle = f'{nativo[1]:.1f}% consumido · resetea {nativo[2]:%H:%M %z}'
         else:
@@ -2114,6 +2215,10 @@ def resumen(root):
         print('[orquestar] no hay ningún bucle en marcha')
     if not (root / METRICAS).exists():
         return
+    instante = fecha_estado(ahora())
+    for (harness, modelo), marca in sorted(marcas_cuota(root, instante).items()):
+        if marca['hasta'] > instante:
+            print(f'[orquestar] {harness}/{modelo}: {detalle_marca(marca, instante)}')
     filas = leer_metricas(root)
     tipo = lambda t: [f for f in filas if f.get('tipo', 'paso') == t]
     coste = sum(f.get('coste_usd') or 0 for f in filas)
@@ -2230,6 +2335,8 @@ def main():
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
+    ap.add_argument('--cuota-reset', nargs='?', const='', metavar='ARNES[/MODELO]',
+                    help='recupera marcas de cuota del selector, o todas si se omite')
     ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
                     help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
     ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
@@ -2252,6 +2359,10 @@ def main():
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+
+    if a.cuota_reset is not None:
+        print(f'[orquestar] {reset_cuotas(root, a.cuota_reset)} marcas de cuota recuperadas.')
+        return 0
 
     if a.calidad:
         if not a.base:
@@ -2439,6 +2550,9 @@ def bucle(a, root):
             env['ORQUESTAR_ESCALADA'] = '1'
         reservas = lista_reservas(cfg_rol)
         configs_originales = [cfg_rol] + reservas
+        contexto_cuota = {'desde': len(leer_metricas(root)), 'pares': {
+            (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado')
+            for cfg in configs_originales}}
         configs_a_probar = configs_originales
         if not a.cmd and not a.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
@@ -2529,7 +2643,9 @@ def bucle(a, root):
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
             if codigo and cuota_propia is not None:
-                m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota_propia)
+                datos = fallo_cuota(root, arnes_paso, cfg_actual.get('model') or 'predeterminado', salida)
+                m.update(datos)
+                cuota_propia = datos['cuota_espera_s']
                 cuotas_paso.append(cuota_propia)
                 recuperaciones_paso.append((time.monotonic() + cuota_propia, cfg_actual))
                 if hay_mas_reservas:
@@ -2590,6 +2706,8 @@ def bucle(a, root):
                                          **({'escalado': True} if escalado else {})})
                     cfg_usada = cfg_recuperable
                     m = {'modelos': {}}
+        if not codigo:
+            recuperar_cuota(root, arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
         if not ultimo_registrado or cuota is not None:
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada),
@@ -2604,10 +2722,22 @@ def bucle(a, root):
             continue
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
-            avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
-                                  f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
+            marcas = marcas_cuota(root, fecha_estado(ahora()))
+            clave = (arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
+            causas = [marcas[clave]] if clave in marcas else []
+            nuevas = leer_metricas(root)[contexto_cuota['desde']:]
+            for fila in nuevas:
+                if (fila.get('tipo') == 'agente' and fila.get('cuota_espera_s') is not None
+                        and fila.get('cuota_espera_s') == cuota):
+                    marca = marcas.get((fila.get('arnes'), fila.get('modelo_cuota')))
+                    if marca:
+                        causas.append(marca)
+            if not any(marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())
+                       for marca in causas):
+                avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
+                                      f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
             inicio = time.monotonic()
-            seguir = esperar(root, cuota)
+            seguir = esperar(root, cuota, cuotas_esperadas=contexto_cuota)
             registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
                              'duracion_s': round(time.monotonic() - inicio)})
             if not seguir:

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from tests import aislamiento_telegram
 
 
@@ -145,7 +145,7 @@ class FallosArnesTests(unittest.TestCase):
         self.simular([(1, {}, 'quota'), (1, {}, 'network')])
         self.esperar.return_value = False
         self.assertEqual(self.correr()[0], 2)
-        self.esperar.assert_called_once_with(self.root, 1800)
+        self.esperar.assert_called_once_with(self.root, 300, cuotas_esperadas=ANY)
         filas = motor.leer_metricas(self.root)
         self.assertTrue(any(f.get('sin_cuota') and f['arnes'] == 'claude' for f in filas))
         reservas = [f for f in filas if f.get('tipo') == 'paso' and f['arnes'] == 'codex']
@@ -204,7 +204,7 @@ class FallosArnesTests(unittest.TestCase):
         self.simular([(1, {}, 'quota resets in 1 hour'), (1, {}, 'network')])
         self.esperar.return_value = False
         self.assertEqual(self.correr()[0], 2)
-        self.esperar.assert_called_once_with(self.root, 120)
+        self.esperar.assert_called_once_with(self.root, 120, cuotas_esperadas=ANY)
         self.assertEqual([c.kwargs['rol']['model'] for c in self.ejecutar.call_args_list], ['reserva', 'tercero'])
         final = [f for f in motor.leer_metricas(self.root) if f.get('tipo') == 'paso'][-1]
         self.assertEqual(final['arnes'], 'claude')

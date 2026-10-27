@@ -5,7 +5,7 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Reporte del usuario (2026-10-27): con cuota de Codex disponible, el bucle esperaba hasta las 09:07 o pasaba a Claude"
 created_at: 2026-10-27
@@ -75,3 +75,19 @@ Triaje de este cierre por bloqueo: [EXEC] enrutado documental y `adevv orquestar
 - Triaje de este paso: [EXEC] especificación, revisión aislada de Hades y `adevv orquestar --verificar "git diff --check"`; [SKIP] diseño, implementación y pruebas funcionales hasta el siguiente paso de desarrollo. La suite completa corresponde al bucle al cerrar versión.
 
 - Cierre de especificación: Hades APROBADO, 9/10, ronda 3; H1, H2 y H3 resueltos, sin hallazgos nuevos. Desarrollo funcional pendiente. Véase docs/review/spec_reviews/B-ADV-0020-spec-review.md.
+
+## Reanudación de desarrollo · 2026-10-27
+
+Base estable: `3f53a3c7ecd707733e58cecf5041bf3d25def4b9`. Se reutiliza el BDD aprobado por Hades en ronda 3; no se modifica su contrato. Se mantienen las subfases y verificación funcional del triaje inicial. La revisión de especificación de este intento comprobará el conjunto aprobado sin reabrir el alcance.
+
+La ejecución del triaje detectó otras expectativas del contrato antiguo en `test_estado_agentes` (1800 → 300) y un fixture de `test_arnes_ausente` que mezclaba créditos con una espera real simulada. Se conserva su escenario de recuperación real sustituyendo el fixture por una respuesta explícita de reinicio en 58 minutos; sin eliminar pruebas ni ampliar la selección de módulos. Se incorpora a la revisión de pruebas el delta completo de estos módulos.
+
+DEC-DEV-20-01: el contrato aprobado exige respetar marcas reales e intervalos supuestos también sin reservas disponibles. Se eliminan las antiguas excepciones de perfil único y última reserva agotada; se conservan los escenarios de `test_cuota_vigente` exigiendo espera sin lanzamiento. No cambia el alcance de verificación, que ya incluye ese módulo. Se amplía la compilación a todos los Python modificados.
+
+Hades QA C1/C2/C3 (`para: desarrollador`, `destino: resolver`): regresiones deterministas de reset entre lecturas, reset previo a entrar en espera y créditos históricos ajenos. Rojo: 2 fallos y 2 KeyError; verde tras instantáneas compartidas, contexto de espera desde selección y supresión acotada. No se amplía el conjunto de módulos del triaje. El test de reanudación avanza el reloj durante su espera simulada; la API de espera añade contexto opcional, conservando la llamada anterior.
+
+## Cierre de desarrollo · 2026-10-27
+
+- Hades: especificación APROBADO 9/10, pruebas APROBADO 9/10 y código APROBADO 8,83/10. T1–T3 y C1–C3 resueltos; sin hallazgos nuevos, deuda ni bloqueo pendiente.
+- Verificación del triaje: 136 pruebas verdes (19 cuotas, 9 arnés ausente, 14 fallos del arnés, 8 estado, 6 informe y 80 integración), compilación de todos los Python modificados y `git diff --check`, mediante `adevv orquestar --verificar`. Cuotas e integración finales sobre árbol `9b62e379a8a402c89f2f16b8768da49820133d29`; los informes y metadatos de cierre posteriores no cambian el código verificado. Sin suite completa.
+- Validación humana y decisiones en `docs/review/versions/v1.0-revision.md`. Corrección únicamente en el repositorio; instalación versionada intacta.

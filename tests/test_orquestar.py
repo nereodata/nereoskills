@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
@@ -520,7 +520,7 @@ class EscaladaTests(unittest.TestCase):
               patch.object(motor, 'avisar'),
               patch.object(motor, 'excluir')):
             self.assertEqual(motor.bucle(args, self.root), 0)
-        esperar.assert_called_once_with(self.root, 1800)
+        esperar.assert_called_once_with(self.root, 300, cuotas_esperadas=ANY)
 
     def test_agent_prompt_lists_verified_commands_for_current_tree(self):
         clave = 'b' * 40
@@ -648,6 +648,12 @@ class EscaladaTests(unittest.TestCase):
 
     def test_loop_resumes_developer_session_after_quota_wait(self):
         ejecuciones = []
+        instante = [motor.fecha_estado('2026-10-27T12:00:00+00:00')]
+
+        def esperar_cuota(root, segundos, **kwargs):
+            """Simula la espera avanzando también el reloj de la política de cuota."""
+            instante[0] += motor.timedelta(seconds=segundos)
+            return True
 
         def mock_ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
             ejecuciones.append(sesion)
@@ -661,7 +667,8 @@ class EscaladaTests(unittest.TestCase):
                                                         ('PASO', 'task-dev', 'T-ADV-0001', ''),
                                                         ('FIN', 'Cerrado.')]), \
              patch.object(motor, 'ejecutar', side_effect=mock_ejecutar), \
-             patch.object(motor, 'esperar', return_value=True), \
+             patch.object(motor, 'esperar', side_effect=esperar_cuota), \
+             patch.object(motor, 'ahora', side_effect=lambda: instante[0].isoformat()), \
              patch.object(motor, 'firma', side_effect=['a', 'a', 'b']), \
              patch.object(motor, 'git', return_value=''), \
              patch.object(motor, 'ingerir', return_value=[]), \
@@ -1092,8 +1099,8 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertNotIn('sin_cuota', metricas[0])
         self.assertNotIn('sin_cuota', metricas[1])
         self.assertTrue(metricas[2]['sin_cuota'])
-        # Menor cuota de las tres (3720s, 1800s, 7320s) -> 1800s
-        self.assertEqual(metricas[2]['espera_s'], 1800)
+        # Menor cuota de las tres: sondeo supuesto de 300 segundos.
+        self.assertEqual(metricas[2]['espera_s'], 300)
 
     def test_loop_retries_immediately_with_reserva_on_quota_without_waiting(self):
         cfg = {

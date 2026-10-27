@@ -77,6 +77,8 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
+Las cuotas con hora de recuperación se respetan; las respuestas sin hora y los errores de créditos permiten comprobar el trabajo pendiente al relanzar y cada 300 segundos (`cuota_reintento_s` en `orchestration.json`). `adevv orquestar --cuota-reset [arnés[/modelo]]` recupera las marcas seleccionadas, o todas sin selector, conservando el histórico. Un bucle esperando cuota lo detecta en un máximo de 30 segundos. `--estado` y `--agentes` muestran si la marca es real o supuesta y su origen; los créditos generan un aviso específico una vez por episodio.
+
 Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de Atenea, Artemisa, Hades, Clío y Cronos) se configuran en `orchestration.json`. Por Telegram, el bucle avisa de fin de versión, falta de cuota y paradas que necesitan respuesta, y el gateway ([`skills/telegram_gateway`](skills/telegram_gateway/SKILL.md)) responde a `/estado` y registra tareas y bugs sin versión.
 
 ---

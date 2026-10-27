@@ -3,7 +3,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from tests import aislamiento_telegram
 
 
@@ -201,14 +201,14 @@ class ArnesAusenteTests(unittest.TestCase):
     def test_cuota_se_conserva_si_ultima_reserva_ausente(self):
         """La recuperación del principal sigue exactamente a las 18:00 UTC."""
         self.buscar.side_effect = lambda exe: None if exe == 'codex' else exe
-        self.lanzar.return_value = (1, {}, 'out of credits')
-        with patch.object(motor, 'espera_cuota', return_value=3600):
+        self.lanzar.return_value = (1, {}, 'usage limit resets in 58 minutes')
+        with patch.object(motor.time, 'monotonic', return_value=0):
             self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
             filas_agente = motor.leer_metricas(self.root)
             (self.root / motor.METRICAS).unlink()
             codigo, esperar = self.bucle()
         self.assertNotEqual(codigo, 0)
-        esperar.assert_called_once_with(self.root, 3600)
+        esperar.assert_called_once_with(self.root, 3600, cuotas_esperadas=ANY)
         filas = filas_agente + motor.leer_metricas(self.root)
         for tipo in ('agente', 'paso'):
             agotadas = [f for f in filas if f.get('tipo') == tipo and f.get('sin_cuota')]
@@ -246,7 +246,7 @@ class ArnesAusenteTests(unittest.TestCase):
                     else:
                         codigo, esperar = self.bucle(progreso=False)
                         self.assertNotEqual(codigo, 0)
-                        esperar.assert_called_once_with(self.root, 2700)
+                        esperar.assert_called_once_with(self.root, 2700, cuotas_esperadas=ANY)
                     filas = motor.leer_metricas(self.root)
                     senales = [f for f in filas if f.get('tipo') == flujo and f.get('sin_cuota')]
                     self.assertEqual(len(senales), 1)

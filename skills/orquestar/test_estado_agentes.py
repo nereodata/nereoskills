@@ -122,9 +122,9 @@ class EstadoAgentesTests(unittest.TestCase):
             self.assertEqual(motor.agente(self.root, 'hades', 'review'), 1)
         rows = [json.loads(line) for line in (self.root / motor.METRICAS).read_text().splitlines()]
         self.assertEqual([r.get('modelo_cuota') for r in rows], ['first', 'second'])
-        self.assertTrue(all(r.get('cuota_espera_s') == 1800 for r in rows))
+        self.assertTrue(all(r.get('cuota_espera_s') == 300 for r in rows))
         self.assertNotIn('sin_cuota', rows[0])
-        self.assertEqual(rows[1]['espera_s'], 1800)
+        self.assertEqual(rows[1]['espera_s'], 300)
 
     def test_loop_records_each_quota_before_using_reserve(self):
         args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False,
@@ -139,7 +139,7 @@ class EstadoAgentesTests(unittest.TestCase):
             self.assertEqual(motor.bucle(args, self.root), 0)
         rows = [json.loads(line) for line in (self.root / motor.METRICAS).read_text().splitlines()]
         self.assertEqual(rows[0].get('modelo_cuota'), 'first')
-        self.assertEqual(rows[0].get('cuota_espera_s'), 1800)
+        self.assertEqual(rows[0].get('cuota_espera_s'), 300)
         self.assertNotIn('modelo_cuota', rows[1])
 
 
