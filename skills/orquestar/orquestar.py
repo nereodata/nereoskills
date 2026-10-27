@@ -1500,14 +1500,14 @@ def tope_de_rechazos(root, iid):
 # ---------------------------------------------------------------- cuota
 
 CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
-                   r'|\b429\b|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
+                   r'|\b429\b|resource_exhausted|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
 
 
 def espera_cuota(salida, ahora=None):
     """Segundos hasta poder reintentar si la salida indica falta de cuota; None si es otro error.
 
     Reconoce la hora de recuperación en los formatos habituales (marca de tiempo tras «|»,
-    «try again in 2h 13m», «resets at 5pm»); si no la hay, propone 30 minutos.
+    «try again in 2h 13m», «resets in 56h48m9s», «resets at 5pm»); si no la hay, propone 30 minutos.
     """
     if not CUOTA.search(salida):
         return None
@@ -1516,10 +1516,12 @@ def espera_cuota(salida, ahora=None):
     m = re.search(r'\|(\d{10})\b', salida)
     if m:
         return max(int(m[1]) - int(ahora.timestamp()), 0) + margen
-    m = re.search(r'(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*'
-                  r'(?:(\d+)\s*(?:minutes?|mins?|m)\b)?', salida, re.I)
-    if m and (m[1] or m[2]):
-        return int(m[1] or 0) * 3600 + int(m[2] or 0) * 60 + margen
+    m = re.search(r'(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:days?|d)(?![a-z]))?\s*'
+                  r'(?:(\d+)\s*(?:hours?|hrs?|h)(?![a-z]))?\s*(?:(\d+)\s*(?:minutes?|mins?|m)(?![a-z]))?\s*'
+                  r'(?:(\d+)\s*(?:seconds?|secs?|s)(?![a-z]))?', salida, re.I)
+    if m and any(m.groups()):
+        d, h, mi, sg = (int(g or 0) for g in m.groups())
+        return d * 86400 + h * 3600 + mi * 60 + sg + margen
     m = re.search(r'(?:try again|resets?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', salida, re.I)
     if m:
         h = int(m[1]) % 12 + (12 if m[3].lower() == 'pm' else 0)

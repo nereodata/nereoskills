@@ -481,6 +481,21 @@ class EscaladaTests(unittest.TestCase):
             self.assertIn('regla 5', impreso)
             self.assertIn('pendiente_de: especificador', impreso)
 
+    def test_quota_wait_parses_compact_durations(self):
+        casos = {'Individual quota reached. Resets in 56h48m9s.': 56 * 3600 + 48 * 60 + 9 + 120,
+                 'quota exceeded, resets in 2d3h': 2 * 86400 + 3 * 3600 + 120,
+                 'quota: retry in 48m9s': 48 * 60 + 9 + 120,
+                 'quota: retry in 9s': 9 + 120,
+                 'rate limit, try again in 2h 13m': 2 * 3600 + 13 * 60 + 120,
+                 'rate limit, try again in 5 minutes': 300 + 120}
+        for msg, esperado in casos.items():
+            self.assertEqual(motor.espera_cuota(msg), esperado, msg)
+
+    def test_antigravity_resource_exhausted_json_is_quota(self):
+        msg = 'AGY_ERROR: {"status":"RESOURCE_EXHAUSTED","error_code":429}'
+        self.assertEqual(motor.espera_cuota(msg), 1800)
+        self.assertIsNotNone(motor.espera_cuota('RESOURCE_EXHAUSTED'))
+
     def test_subagent_out_of_credits_triggers_quota_wait_in_loop(self):
         msg = '{"type":"error","message":"Your workspace is out of credits. Add credits to continue."}'
         self.assertEqual(motor.espera_cuota(msg), 1800)

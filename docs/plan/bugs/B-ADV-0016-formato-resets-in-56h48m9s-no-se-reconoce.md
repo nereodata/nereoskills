@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Diagnóstico del chat de Telegram (2026-10-27): Antigravity sin cuota durante ~56 h"
 created_at: 2026-10-27
@@ -31,3 +31,14 @@ updated_at: 2026-10-27
 import orquestar as m
 m.espera_cuota('Individual quota reached. Resets in 56h48m9s.')  # 1800; esperado ≈ 204489 + margen
 ```
+
+## Triaje
+- [SKIP] A Definición: sin requisito nuevo.
+- [SKIP] B Diseño: cambio local de una expresión regular.
+- [EXEC] C1 Pruebas: duraciones compactas y JSON `RESOURCE_EXHAUSTED` (`tests/test_orquestar.py`).
+- [EXEC] C2 Corrección: `espera_cuota()` con d/h/m/s sin ``; `resource_exhausted` en `CUOTA`.
+- [EXEC] D QA: Hades `/review-code`.
+- [SKIP] E Documentación: sin manual afectado.
+- [EXEC] F Cierre.
+- Verificación: `python -m unittest tests.test_orquestar` (módulo del motor modificado).
+- `cuota_espera_s` ya se registra desde el valor devuelto por `espera_cuota()` (líneas 1422, 2471).
