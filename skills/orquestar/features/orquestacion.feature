@@ -64,10 +64,10 @@ Característica: Continuidad con arneses ausentes
       | agente Hades |
 
   Escenario: Un error distinto de ausencia no habilita reservas
-    Dado que pruebo por separado paso del bucle, agente Hades y conversación del gateway
+    Dado que pruebo por separado agente Hades y conversación del gateway
     Y el principal claude disponible falla por autenticación y tiene reserva codex disponible
     Cuando solicito ejecutar el trabajo
-    Entonces se conserva el código de fallo en paso y agente y se informa del error de autenticación en el gateway
+    Entonces se conserva el código de fallo en agente y se informa del error de autenticación en el gateway
     Y codex no recibe ninguna petición y no hay métricas de arnés ausente
 
   Escenario: Filtrar las notificaciones de ausencia
@@ -142,3 +142,59 @@ Característica: Continuidad con arneses ausentes
       | 111 | AUSENTE | AUSENTE | 111 |
       | 111 | token-entorno-ficticio | 222 | 111 |
       | AUSENTE | token-entorno-ficticio | 222 | 222 |
+
+  @B-ADV-0011
+  Escenario: Recuperar un fallo transitorio del paso
+    Dado un paso cuyo arnés falla dos veces por red y después responde correctamente
+    Y el límite de reintentos del arnés es 3
+    Cuando ejecuto el paso
+    Entonces espero 60 y 300 segundos antes de repetir el mismo perfil
+    Y completo el paso sin usar reservas ni consumir otros pasos del bucle
+    Y aunque el contador de falta de progreso esté a un intento de su límite, los reintentos no lo incrementan
+    Y cada intento deja su consumo en métricas sin señalar cuota
+
+  @B-ADV-0011
+  Escenario: Agotar perfiles ante un fallo persistente
+    Dado un principal y una reserva que fallan siempre con error de autenticación
+    Y el límite de reintentos del arnés es 1
+    Cuando ejecuto el paso
+    Entonces cada perfil recibe un intento inicial y un reintento tras 60 segundos
+    Y solo después se detiene el bucle
+    Y el aviso incluye la cola de salida del último arnés ejecutado
+
+  @B-ADV-0011
+  Escenario: La reserva recupera un fallo persistente del principal
+    Dado un principal que falla persistentemente por red y una reserva que responde
+    Y el límite de reintentos del arnés es 0
+    Cuando ejecuto el paso
+    Entonces la reserva recibe el paso sin sesión heredada del principal
+    Y el bucle continúa sin esperar ni señalar cuota
+
+  @B-ADV-0011
+  Escenario: Detener durante la espera de recuperación
+    Dado un arnés que falla por red
+    Cuando solicito parar durante la espera de reintento
+    Entonces termina el bucle sin ejecutar nuevos intentos ni reservas
+
+  @B-ADV-0011
+  Escenario: No repetir un paso ya completado en disco
+    Dado un arnés que devuelve un error después de completar y commitear el paso
+    Cuando el bucle comprueba el resultado
+    Entonces continúa sin reintentos ni reservas
+
+  @B-ADV-0011
+  Escenario: Conservar la espera de cuota
+    Dado un principal que agota cuota y una reserva que falla persistentemente por red
+    Cuando ambos perfiles se agotan
+    Entonces conserva la espera de recuperación de cuota del principal
+    Y no atribuye cuota al error de red
+
+  @B-ADV-0011
+  Escenario: Aplicar el límite por defecto y saturar la espera
+    Dado que no configuro el límite de reintentos del arnés
+    Y el principal falla persistentemente
+    Cuando ejecuto el paso
+    Entonces hace 4 intentos separados por esperas de 60, 300 y 900 segundos
+    Y si configuro 4 reintentos la cuarta espera también es de 900 segundos
+    Y un límite negativo o no entero se rechaza antes de arrancar el bucle
+    Y si la salida es un prefijo de 3000 letras A seguido de 1997 letras B y FIN, el fragmento del aviso contiene exactamente las 1997 letras B y FIN del último arnés ejecutado

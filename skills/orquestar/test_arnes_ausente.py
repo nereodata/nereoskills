@@ -266,15 +266,11 @@ class ArnesAusenteTests(unittest.TestCase):
         """Autenticación fallida no se confunde con ejecutable ausente."""
         self.buscar.side_effect = lambda exe: exe
         self.lanzar.return_value = (1, {}, 'authentication failed')
-        for flujo in ('agente', 'paso', 'gateway'):
+        for flujo in ('agente', 'gateway'):
             with self.subTest(flujo=flujo):
                 self.lanzar.reset_mock()
                 if flujo == 'agente':
                     self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
-                elif flujo == 'paso':
-                    codigo, esperar = self.bucle(progreso=False)
-                    self.assertNotEqual(codigo, 0)
-                    esperar.assert_not_called()
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'authentication failed'):
                         gateway.conversar(self.root, '123', 'hola')

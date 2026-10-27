@@ -27,7 +27,7 @@ flowchart LR
 
 ## 1. Bucle general (`orquestar.py`)
 
-Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, suite en rojo al terminar la versión (`--test`), fallo del arnés, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
+Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso sin progreso tras 2 intentos, suite en rojo al terminar la versión (`--test`), fallo persistente de todos los perfiles del arnés tras sus reintentos, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
 
 ```mermaid
 flowchart TD
@@ -131,3 +131,10 @@ flowchart TD
 | `revisar-producto` | Al cerrar la versión, si está activa (`producto` en `orchestration.json`), o a mano | El producto en uso: utilidad, contenido, diseño, usabilidad y accesibilidad frente a recorridos y criterios de éxito | Código, arquitectura ni pruebas |
 
 Lo determinista (lint, tipado, rojo de la suite) se ejecuta antes de llamar a Hades. Cada 🟡/🔵 lleva un destino: `resolver` (por defecto), `registrar` (bug de deuda sin versión, peso > 1000, con su origen) o `descartar`. `revisar-deuda`, al abrir cada versión, decide qué deuda entra.
+
+
+## Recuperación de errores del arnés en pasos
+
+`adevv orquestar --reintentos-arnes 3` permite tres reintentos adicionales por perfil ante errores ajenos a cuota, con esperas de 60, 300 y 900 segundos. Para límites mayores se repite la espera de 900 segundos. El límite debe ser entero no negativo; cero pasa a la reserva sin esperar. Al agotarlo se prueba la siguiente reserva en orden y con sesión nueva. No consume pasos ni intentos por falta de progreso. Las esperas respetan `--parar`.
+
+Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se agotan todos los perfiles; consola y aviso incluyen los últimos 2000 caracteres de la salida del último arnés ejecutado. Un paso completado y commiteado no se repite por un retorno erróneo. La cuota mantiene su circuito, incluida su recuperación si otra reserva falla por red. Esta recuperación corresponde a pasos del bucle; no cambia el tratamiento de errores operacionales de los roles ni de la conversación del gateway.

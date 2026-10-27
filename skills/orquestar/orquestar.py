@@ -1007,8 +1007,8 @@ def configuraciones_con_cuota(root, configuraciones):
     return disponibles or configuraciones[-1:]
 
 
-def cuota_descartada(root, configuraciones, seleccionadas):
-    """Recupera la espera restante de perfiles omitidos con ejecutable disponible."""
+def cuota_descartada(root, configuraciones, seleccionadas, incluir_recuperadas=False):
+    """Recupera la menor espera omitida; opcionalmente incluye perfiles ya recuperados."""
     omitidas = [cfg for cfg in configuraciones if cfg not in seleccionadas]
     if not omitidas:
         return None, None
@@ -1019,8 +1019,8 @@ def cuota_descartada(root, configuraciones, seleccionadas):
         harness = cfg.get('harness', 'claude')
         hasta = cuotas.get((harness, cfg.get('model') or 'predeterminado'))
         plantilla = HARNESS.get(harness)
-        if hasta and plantilla and buscar_ejecutable(plantilla[0]):
-            pendientes.append(((hasta - instante).total_seconds(), cfg))
+        if (hasta or incluir_recuperadas) and plantilla and buscar_ejecutable(plantilla[0]):
+            pendientes.append((max((hasta - instante).total_seconds(), 0) if hasta else 0, cfg))
     return min(pendientes, key=lambda par: par[0]) if pendientes else (None, None)
 
 
@@ -1530,11 +1530,11 @@ def espera_cuota(salida, ahora=None):
     return 1800
 
 
-def esperar(root, segundos):
+def esperar(root, segundos, motivo='sin cuota'):
     """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
     hasta = datetime.now() + timedelta(seconds=segundos)
     (root / ESPERA).write_text(hasta.isoformat(timespec='minutes'), encoding='utf-8')
-    print(f'[orquestar] sin cuota: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
+    print(f'[orquestar] {motivo}: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
     try:
         while datetime.now() < hasta:
             if (root / PARADA).exists():
@@ -2146,6 +2146,8 @@ def main():
     ap.add_argument('--max-pasos', type=int, default=100)
     ap.add_argument('--presupuesto', type=float, help='gasto máximo por paso en USD (solo claude)')
     ap.add_argument('--reintentos', type=int, default=2, help='pasos seguidos sin progreso antes de parar')
+    ap.add_argument('--reintentos-arnes', type=int, default=3,
+                    help='reintentos por perfil ante errores sin cuota (>= 0; esperas 60, 300, 900 segundos)')
     ap.add_argument('--espera-max', type=float, default=12,
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
@@ -2167,6 +2169,8 @@ def main():
     ap.add_argument('--aplicar', action='store_true', help='aplica formato en escritura antes de --calidad')
     ap.add_argument('--aviso-prueba', action='store_true', help=f'envía un aviso de prueba a Telegram ({CONFIG})')
     a = ap.parse_args()
+    if a.reintentos_arnes < 0:
+        ap.error('--reintentos-arnes debe ser un entero no negativo')
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
@@ -2347,6 +2351,7 @@ def bucle(a, root):
         if not a.cmd and not a.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
         cuotas_paso = []
+        recuperaciones_paso = []
         sesion_anterior = None
         arnes_anterior = None
         codigo = 1
@@ -2356,12 +2361,11 @@ def bucle(a, root):
         cfg_usada = cfg_rol
         hubo_ejecucion = False
         pendiente_cuota = False
+        paso_completado = False
+        ultimo_registrado = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-            f_met = root / METRICAS
-            n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
             arnes_paso = a.cmd or arnes(a, cfg_actual)
-
             if idx_cfg == 0:
                 sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
             elif arnes_paso == arnes_anterior:
@@ -2369,31 +2373,74 @@ def bucle(a, root):
             else:
                 sesion_paso = None
 
-            try:
-                if sesion_paso:
-                    resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
-                else:
-                    resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
-            except ArnesAusente:
-                posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
-                registrar_ausencia(root, 'paso', posicion,
-                                   {**cfg_actual, 'harness': arnes_paso}, rol=rol, paso=paso, id=arg)
+            ausente = False
+            for intento in range(getattr(a, 'reintentos_arnes', 3) + 1):
+                if (root / PARADA).exists():
+                    return 2
+                f_met = root / METRICAS
+                n_met = len(f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+                try:
+                    if sesion_paso:
+                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+                    else:
+                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+                except ArnesAusente:
+                    posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
+                    registrar_ausencia(root, 'paso', posicion,
+                                       {**cfg_actual, 'harness': arnes_paso}, rol=rol, paso=paso, id=arg)
+                    ausente = True
+                    break
+                codigo, m, salida = resultado
+                ultimo_registrado = False
+                hubo_ejecucion = True
+                pendiente_cuota = False
+                cfg_usada = cfg_actual
+                cuota = espera_cuota(salida) if codigo else None
+                if cuota is None and f_met.exists():
+                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+                if not codigo or cuota is not None:
+                    break
+                if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                    paso_completado = True
+                    break
+                if intento == getattr(a, 'reintentos_arnes', 3):
+                    break
+                registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'rama': git('branch', '--show-current'), 'rol': rol,
+                                 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m,
+                                 **({'escalado': True} if escalado else {})})
+                demora = (60, 300, 900)[min(intento, 2)]
+                inicio = time.monotonic()
+                seguir = esperar(root, demora, motivo='fallo del arnés')
+                registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'motivo': 'fallo_arnes', 'duracion_s': round(time.monotonic() - inicio)})
+                if not seguir:
+                    print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
+                    return 2
+                sesion_paso = None
+            if ausente:
                 continue
-            codigo, m, salida = resultado
-            hubo_ejecucion = True
-            pendiente_cuota = False
-            cfg_usada = cfg_actual
 
+            if codigo and cuota is None and not paso_completado and idx_cfg == len(configs_a_probar) - 1:
+                restante, recuperada = cuota_descartada(root, configs_originales, configs_a_probar,
+                                                       incluir_recuperadas=True)
+                if restante == 0:
+                    configs_a_probar.append(recuperada)
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
             if codigo and cuota_propia is not None:
                 m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota_propia)
                 cuotas_paso.append(cuota_propia)
+                recuperaciones_paso.append((time.monotonic() + cuota_propia, cfg_actual))
                 if hay_mas_reservas:
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
-                                     'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
+                                     'rol': rol, 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m,
                                      **({'escalado': True} if escalado else {}),
                                      'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
@@ -2405,11 +2452,19 @@ def bucle(a, root):
                 else:
                     cuota = min(cuotas_paso)
                     break
+            elif codigo and cuota is None and not paso_completado and hay_mas_reservas:
+                registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'rama': git('branch', '--show-current'), 'rol': rol,
+                                 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m,
+                                 **({'escalado': True} if escalado else {})})
+                ultimo_registrado = True
+                print(f'[orquestar] fallo persistente en {rol} ({cfg_actual.get("model") or arnes_paso}); '
+                      'conmutando a reserva...', flush=True)
+                arnes_anterior = None
+                sesion_anterior = None
+                continue
             else:
-                if cuota_propia is None and f_met.exists():
-                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
-                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
-                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
                 break
 
         if not hubo_ejecucion:
@@ -2421,10 +2476,35 @@ def bucle(a, root):
         if pendiente_cuota:
             cuota = min(cuotas_paso)
             m = {}
-        registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada), 'codigo': codigo, **m,
-                         **({'escalado': True} if escalado else {}),
-                         **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
+        if codigo and not paso_completado and (cuota is None or cuotas_paso):
+            cuota_omitida, cfg_omitida = cuota_descartada(root, configs_originales, configs_a_probar)
+            pendientes = [(max(hasta - time.monotonic(), 0), cfg) for hasta, cfg in recuperaciones_paso]
+            if cuota_omitida is not None:
+                pendientes.append((cuota_omitida, cfg_omitida))
+            if pendientes:
+                cuota, cfg_recuperable = min(pendientes, key=lambda par: par[0])
+                if cfg_recuperable is not cfg_usada:
+                    if not ultimo_registrado:
+                        registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                         'rama': git('branch', '--show-current'), 'rol': rol,
+                                         'arnes': a.cmd or arnes(a, cfg_usada),
+                                         'modelo': cfg_usada.get('model') or 'predeterminado',
+                                         'codigo': codigo, **m,
+                                         **({'sin_cuota': True} if 'cuota_espera_s' in m else {}),
+                                         **({'escalado': True} if escalado else {})})
+                    cfg_usada = cfg_recuperable
+                    m = {'modelos': {}}
+        if not ultimo_registrado or cuota is not None:
+            registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
+                             'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada),
+                             'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
+                             **({'escalado': True} if escalado else {}),
+                             **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
+        if paso_completado:
+            print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
+            sin_progreso = 0
+            esperado = 0
+            continue
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
             avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
@@ -2445,7 +2525,8 @@ def bucle(a, root):
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             return parar(root, 'cuota' if cuota is not None else 'error',
-                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.')
+                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.'
+                         + (f'\nÚltima salida del arnés:\n{salida[-2000:]}' if cuota is None else ''))
         esperado = 0
 
         if firma(root, a.docs) == antes:

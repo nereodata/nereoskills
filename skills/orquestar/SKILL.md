@@ -110,7 +110,7 @@ Si la suite completa falla al cerrar una versión (`--test`), el bucle registra 
 
 El bucle también para si un paso no avanza tras 2 intentos o al llegar a `--max-pasos`.
 
-**Sin cuota** (Claude, Codex u otro arnés): si un paso o subagente falla y su salida indica límite de uso, el bucle conmuta inmediatamente a la siguiente `reserva` configurada (iniciando sesión nueva si cambia de arnés) y registra cada intento en métricas. Si se agotan el principal y todas las reservas, el bucle no para: espera hasta la hora de recuperación más temprana entre las cuotas reportadas (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Cualquier otro fallo del arnés para el bucle.
+**Sin cuota** (Claude, Codex u otro arnés): si un paso o subagente falla y su salida indica límite de uso, el bucle conmuta inmediatamente a la siguiente `reserva` configurada (iniciando sesión nueva si cambia de arnés) y registra cada intento en métricas. Si se agotan el principal y todas las reservas, el bucle no para: espera hasta la hora de recuperación más temprana entre las cuotas reportadas (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Los fallos ajenos a cuota de los pasos siguen la recuperación de arnés descrita abajo; los roles conservan su tratamiento previo.
 
 Antes de lanzar un rol o un paso con reservas, se omiten las configuraciones cuyo par arnés/modelo conserva un agotamiento vigente en las métricas. Se mantiene el orden de las disponibles; si todas están agotadas se conserva la última para mantener la señal de espera. Sin reservas se sigue usando el titular, y al caducar su agotamiento recupera su prioridad. En pasos con `--harness` o `--cmd` explícitos se conserva la selección anterior porque el comando puede ignorar los modelos del perfil.
 
@@ -136,7 +136,7 @@ El `.env` del proyecto tiene precedencia independiente para el token y los IDs, 
 
 **Buzón.** Las tareas y bugs pedidos por Telegram con el bucle en marcha esperan en `orquestar_buzon.jsonl`. Al empezar cada paso, el bucle los registra sin versión (`status: backlog`), los commitea solos (`docs(plan): altas desde Telegram (…)`) y avisa del ID. No entran en la versión en curso: les pones versión tú, o `revisar-deuda` si son bugs.
 
-**Arnés ausente.** Los pasos y los roles omiten cada configuración cuyo ejecutable no se encuentra, emiten un warning, registran flujo, posición, arnés y modelo con consumo cero, y solicitan el aviso filtrable `arnes` (activo por defecto). Continúan con la siguiente reserva y usan una sesión nueva al cambiar de arnés. La ausencia no genera cuota ni espera; si un intento disponible agotó cuota antes de las ausencias, se conserva su recuperación original. Si no hay ningún arnés disponible, falla con un mensaje claro y aviso `error`. Los errores de autenticación o red conservan su tratamiento; `--cmd` explícito conserva su aborto.
+**Arnés ausente.** Los pasos y los roles omiten cada configuración cuyo ejecutable no se encuentra, emiten un warning, registran flujo, posición, arnés y modelo con consumo cero, y solicitan el aviso filtrable `arnes` (activo por defecto). Continúan con la siguiente reserva y usan una sesión nueva al cambiar de arnés. La ausencia no genera cuota ni espera; si un intento disponible agotó cuota antes de las ausencias, se conserva su recuperación original. Si no hay ningún arnés disponible, falla con un mensaje claro y aviso `error`. Los roles conservan su tratamiento de errores de autenticación o red. En pasos, esos errores siguen la recuperación siguiente; `--cmd` explícito conserva el aborto por ejecutable ausente.
 
 ## ⚙️ Modo orquestado
 
@@ -194,3 +194,10 @@ Formato de cada entrada (una por tarea o bug, la añade `/task-dev` o `/bug-fix`
 - **Validación funcional**: pasos concretos para comprobarlo (comando, URL, datos)
 - **Decisiones sin preguntar**: opciones tomadas por defecto
 ```
+
+
+## Recuperación de errores del arnés en pasos
+
+`adevv orquestar --reintentos-arnes 3` permite tres reintentos adicionales por perfil ante errores ajenos a cuota, con esperas de 60, 300 y 900 segundos. Para límites mayores se repite la espera de 900 segundos. El límite debe ser entero no negativo; cero pasa a la reserva sin esperar. Al agotarlo se prueba la siguiente reserva en orden y con sesión nueva. No consume pasos ni intentos por falta de progreso. Las esperas respetan `--parar`.
+
+Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se agotan todos los perfiles; consola y aviso incluyen los últimos 2000 caracteres de la salida del último arnés ejecutado. Un paso completado y commiteado no se repite por un retorno erróneo. La cuota mantiene su circuito, incluida su recuperación si otra reserva falla por red. Esta recuperación corresponde a pasos del bucle; no cambia el tratamiento de errores operacionales de los roles ni de la conversación del gateway.
