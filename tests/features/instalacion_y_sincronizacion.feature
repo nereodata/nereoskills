@@ -111,3 +111,18 @@ Característica: Instalación y sincronización con los arneses
     Dado Adevv sincronizado en todos los destinos detectados
     Cuando ejecuto "adevv instalar"
     Entonces cada destino informa "sin cambios"
+
+  @RF-F01-11
+  Esquema del escenario: Ninguna copia global pisa un paso vivo
+    Dado destinos sincronizados con 0.1.0 y un bucle en marcha
+    Y la versión activa 0.2.0
+    Y un origen controlado accesible cuya última versión publicada es 0.2.0
+    Cuando ejecuto "<orden>"
+    Entonces los archivos y registros de los destinos siguen en 0.1.0
+    Cuando termina el último bucle y ejecuto "adevv --version"
+    Entonces los destinos quedan sincronizados con 0.2.0
+    Ejemplos:
+      | orden                   |
+      | adevv instalar          |
+      | adevv instalar --forzar |
+      | adevv actualizar        |

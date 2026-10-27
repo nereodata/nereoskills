@@ -14,7 +14,7 @@ La tabla de resultados, su precedencia, sus mensajes y las definiciones (versió
 - **RF-F03-05** Si la configuración de usuario desactiva la actualización automática, entonces el sistema no deberá consultar la red salvo en `adevv actualizar`.
 
 **Bucles en marcha**
-- **RF-F03-06** Mientras haya algún bucle en marcha, el sistema no deberá instalar ninguna versión; deberá guardar la versión nueva como aplazada y nombrar los bucles que lo impiden.
+- **RF-F03-06** Cuando haya una versión nueva elegible, el sistema deberá instalarla aunque haya bucles en marcha, conmutar `active.json` atómicamente y avisar que los motores desde v0.5.0 la tomarán al terminar su paso actual; los anteriores requieren reinicio manual. Solo se aplaza la copia a destinos globales según RF-F01-11. No se guardan nuevos aplazamientos de instalación; los heredados se consumen sin esperar bucles.
 
 **Aplicación**
 - **RF-F03-07** Cuando se aplique una actualización, el sistema deberá instalar desde el origen fijo el commit al que apuntaba la etiqueta en la consulta, comprobar que la versión instalada es la de la etiqueta, sincronizar los destinos (`F-01`) y ejecutar la acción de la orden que la disparó con la versión nueva; si la instalación falla, no termina en ≤ 180 s o la versión no coincide, deberá ejecutar la acción con la versión anterior, intacta, y guardar la versión como fallida.
@@ -23,7 +23,7 @@ La tabla de resultados, su precedencia, sus mensajes y las definiciones (versió
 
 **Orden manual y vuelta atrás**
 - **RF-F03-10** Cuando se ejecute `adevv actualizar`, el sistema deberá hacer la comprobación forzada (sin las filas «auto»), olvidar la versión fallida, reactivar la actualización automática si estaba desactivada (y decirlo) y aplicar la última versión publicada si es mayor que la instalada.
-- **RF-F03-11** `adevv actualizar X.Y.Z` no hace la comprobación de `RF-F03-01`: solo consulta la lista de versiones publicadas para validar X.Y.Z. Cuando X.Y.Z sea una versión publicada distinta de la instalada, el sistema deberá instalarla; si es menor que la última publicada, deberá además desactivar la actualización automática y decirlo: «Actualización automática desactivada; `adevv actualizar` la reactiva.». Con bucles en marcha no deberá instalar nada: «No se puede instalar X.Y.Z con bucles en marcha: <lista>.». Si X.Y.Z es la instalada: «Adevv X.Y.Z ya está instalado.», sin cambios. Si la consulta falla: «No se pudo consultar <origen>: <causa>. Sigues con la X.Y.Z.», sin cambios.
+- **RF-F03-11** `adevv actualizar X.Y.Z` no hace la comprobación de `RF-F03-01`: solo consulta la lista de versiones publicadas para validar X.Y.Z. Cuando X.Y.Z sea una versión publicada distinta de la instalada, el sistema deberá instalarla; si es menor que la última publicada, deberá además desactivar la actualización automática y decirlo: «Actualización automática desactivada; `adevv actualizar` la reactiva.». Con bucles en marcha deberá instalar igualmente, conservar las versiones en uso y avisar de la recarga entre pasos desde v0.5.0 y del reinicio manual de motores anteriores; las copias globales se aplazan según RF-F01-11. Si X.Y.Z es la instalada: «Adevv X.Y.Z ya está instalado.», sin cambios. Si la consulta falla: «No se pudo consultar <origen>: <causa>. Sigues con la X.Y.Z.», sin cambios.
 - **RF-F03-12** Si `X.Y.Z` no es una versión publicada, entonces `adevv actualizar X.Y.Z` deberá terminar sin cambios con «X.Y.Z no es una versión publicada. Publicadas: <las 5 mayores, de mayor a menor>.».
 
 **Avisos**
@@ -42,10 +42,10 @@ Comprobación automática; instalada 0.1.0; publicada 0.2.0 salvo que se diga; s
 | E5 | fallida 0.2.0; última contada lun 10:00 | lun 15:59 | — | `ESPERA` | 5 h 59 min < 24 h |
 | E6 | fallida 0.2.0; última contada lun 10:00 | mar 10:00 | — | `AL_DIA` | 0.2.0 no es mayor que la fallida |
 | E7 | fallida 0.2.0; última contada lun 10:00; publicada 0.2.1 | mar 10:00 | — | `APLICADA` (0.2.1) | 0.2.1 > 0.2.0 fallida |
-| E8 | aplazada 0.2.0; aviso lun 09:00 | lun 12:00 | bucle | `APLAZADA` sin aviso | aviso hace 3 h < 24 h; no consulta la lista |
+| E8 | aplazada 0.2.0; aviso lun 09:00 | lun 12:00 | bucle | `APLICADA` | consume aplazamiento heredado sin esperar bucles |
 | E9 | aplazada 0.2.0; aviso lun 09:00 | lun 12:00 | — | `APLICADA` | aplazada: no espera 24 h |
-| E10 | aplazada 0.2.0; aviso lun 09:00 | mar 09:00 | bucle | `APLAZADA` con aviso | 24 h no es < 24 h |
-| E11 | aplazada 0.2.0 | lun 12:00 | gateway | `APLICADA` + «Reinicia el gateway en <carpeta>.» | los gateways no aplazan |
+| E10 | aplazada 0.2.0; aviso lun 09:00 | mar 09:00 | bucle | `APLICADA` | consume aplazamiento heredado sin esperar bucles |
+| E11 | aplazada 0.2.0 | lun 12:00 | gateway | `APLICADA` + aviso de reinicio manual | gateway 0.1.0: no aplaza y requiere reinicio manual |
 | E12 | aplazada 0.2.0 | lun 12:00, sin red | — | `SIN_RED` | la instalación no puede descargar |
 | E13 | última contada hace 8 días; último `SIN_RED` hace 2 h; último aviso sin red hace 25 h | sin red | — | `SIN_RED` con aviso | 8 días ≥ 7; 25 h ≥ 24 h |
 
@@ -54,7 +54,7 @@ Comprobación automática; instalada 0.1.0; publicada 0.2.0 salvo que se diga; s
 | Caso | Comportamiento |
 |---|---|
 | Un paso del bucle ejecuta `adevv orquestar --verificar` | `DENTRO_DE_ORQUESTACION`: ni consulta ni instala |
-| El gateway lleva días en marcha | No impide la actualización; sigue con su versión durante la instalación y la operación en curso (y hasta reiniciarse en versiones anteriores a `v0.5.0`, o hasta su auto-recarga cooperativa entre vueltas de polling desde `v0.5.0` según `DEC-P10`) y el aviso del instalador pide reiniciarlo |
+| El gateway lleva días en marcha | No impide la actualización; sigue con su versión durante la instalación y la operación en curso (y hasta reiniciarse en versiones anteriores a `v0.5.0`, o hasta su auto-recarga cooperativa entre vueltas de polling desde `v0.5.0` según `DEC-P10`) y el aviso distingue recarga cooperativa desde v0.5.0 y reinicio manual de anteriores |
 | `adevv --version` abierto en otra consola | Tipo `otro`: no aplaza; sigue con su versión |
 | Bucle lanzado desde el antiguo submódulo o la copia congelada | Cuenta como bucle en marcha (su línea de órdenes ejecuta `orquestar.py`) |
 | PID reutilizado por otro programa en `orquestar.pid` | No cuenta: un proceso cuenta por lo que ejecuta, no por el archivo |
@@ -85,7 +85,7 @@ Esquema del escenario: Ventana de comprobación
     | 0.2.0       | fallida 0.2.0, última contada lun 10:00             | lun 15:59 | nada      | ESPERA    |
     | 0.2.0       | fallida 0.2.0, última contada lun 10:00             | mar 10:00 | nada      | AL_DIA    |
     | 0.2.0 0.2.1 | fallida 0.2.0, última contada lun 10:00             | mar 10:00 | nada      | APLICADA  |
-    | 0.2.0       | aplazada 0.2.0, aviso lun 09:00                     | lun 12:00 | bucle     | APLAZADA  |
+    | 0.2.0       | aplazada 0.2.0, aviso lun 09:00                     | lun 12:00 | bucle     | APLICADA  |
     | 0.2.0       | aplazada 0.2.0, aviso lun 09:00                     | lun 12:00 | nada      | APLICADA  |
     | 0.2.0       | aplazada 0.2.0, aviso lun 09:00                     | lun 12:00 | gateway   | APLICADA  |
 
@@ -98,28 +98,31 @@ Escenario: Actualización aplicada al lanzar
   Y "adevv --version" informa 0.2.0 con los destinos sincronizados con la 0.2.0
 
 @CA-F03-03 @RF-F03-06
-Escenario: Aplazada con un bucle en marcha en otro proyecto
-  Dado Adevv 0.1.0 instalado, la 0.2.0 publicada, sin comprobación en 24 h y un bucle en marcha en "C:\SW\Afinn"
+Escenario: Instalar con un bucle en marcha en otro proyecto
+  Dado Adevv 0.5.0 instalado, la 0.6.1 publicada, sin comprobación en 24 h y un bucle de 0.5.0 en marcha en "C:\SW\Afinn"
   Cuando ejecuto "adevv orquestar --estado" en otro proyecto
-  Entonces no se instala nada
-  Y la salida de errores muestra "Adevv 0.2.0 disponible; se aplicará cuando no haya bucles en marcha: bucle en C:\SW\Afinn."
-  Cuando el bucle de Afinn termina y ejecuto otra orden "adevv" con red
-  Entonces se aplica la 0.2.0 sin esperar 24 horas
+  Entonces queda instalada la 0.6.1 y active.json apunta a la 0.6.1
+  Y el aviso indica que los bucles en marcha la tomarán al terminar su paso actual
+  Cuando el bucle de Afinn termina su paso actual
+  Entonces se recarga con la 0.6.1 sin interrumpir el paso y sus archivos anteriores permanecen intactos
+  Y los destinos compartidos no cambian mientras haya bucles
 
 @CA-F03-04 @RF-F03-06
-Escenario: Un bucle anterior a la migración también bloquea
-  Dado un bucle en marcha lanzado con "python .agents/skills/orquestar/orquestar.py" en un proyecto
+Escenario: Un bucle anterior a la migración no impide instalar
+  Dado un bucle anterior a v0.5.0 en marcha lanzado con "python .agents/skills/orquestar/orquestar.py" en un proyecto
   Y la 0.2.0 publicada
   Cuando ejecuto "adevv actualizar"
-  Entonces no se instala nada y el mensaje nombra ese bucle
+  Entonces queda instalada la 0.2.0 sin modificar los archivos del bucle antiguo
+  Y se informa que los motores anteriores a v0.5 requieren reinicio manual
 
 @CA-F03-05 @RF-F03-08
 Escenario: Un gateway abierto no impide actualizar ni se rompe
-  Dado Adevv 0.1.0 instalado, la 0.2.0 publicada y un gateway en marcha en "C:\SW\Adevv"
+  Dado Adevv 0.5.0 instalado, la 0.6.1 publicada y un gateway de 0.5.0 en marcha en "C:\SW\Adevv"
   Cuando ejecuto "adevv actualizar"
-  Entonces queda instalada la 0.2.0
-  Y el gateway sigue respondiendo con la 0.1.0
-  Y el mensaje incluye "Reinicia el gateway en C:\SW\Adevv."
+  Entonces queda instalada la 0.6.1
+  Y el gateway sigue respondiendo con la 0.5.0
+  Y el gateway toma la 0.6.1 entre vueltas de polling sin cortar la respuesta en curso
+  Y el aviso explica la recarga cooperativa y el reinicio manual de motores anteriores a v0.5
 
 @CA-F03-06 @RF-F03-02 @RF-F03-03
 Escenario: Sin red o sin credenciales
@@ -175,9 +178,11 @@ Escenario: Volver atrás y reactivar
 
 @CA-F03-13 @RF-F03-11
 Escenario: Volver atrás con un bucle en marcha
-  Dado Adevv 0.3.0 instalado, publicadas la 0.2.1 y la 0.3.0, y un bucle en marcha en "C:\SW\Afinn"
-  Cuando ejecuto "adevv actualizar 0.2.1"
-  Entonces nada cambia y el mensaje es "No se puede instalar 0.2.1 con bucles en marcha: bucle en C:\SW\Afinn."
+  Dado Adevv 0.6.1 instalado, publicadas la 0.5.0 y la 0.6.1, y un bucle de 0.6.1 en marcha en "C:\SW\Afinn"
+  Cuando ejecuto "adevv actualizar 0.5.0"
+  Entonces queda instalada la 0.5.0 y se desactiva la actualización automática
+  Y el bucle mantiene su paso actual y recarga la 0.5.0 al terminarlo
+  Y los destinos compartidos permanecen intactos
 
 @CA-F03-14 @RF-F03-12
 Escenario: Versión inexistente

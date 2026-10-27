@@ -5,8 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.0.0"
-status: blocked
-pendiente_de: especificador
+status: planned
 depende_de: []
 origen: "Hotfix v0.6.1 (B-ADV-0008): publicada la 0.6.1, no se instaló porque había bucles en marcha, y el bucle de Adevv siguió con la nota de alcance vieja de la 0.6.0"
 created_at: 2026-10-27
@@ -42,13 +41,23 @@ El usuario ha pedido expresamente este cambio de comportamiento. Modificar los r
 3. Ejecutar `adevv actualizar`: responde que se aplicará cuando no haya bucles en marcha, y `adevv --version` y `active.json` siguen en la versión anterior.
 4. El bucle sigue con su versión y nunca se recarga.
 
-## Bloqueo de especificaci?n ? 2026-10-27
+## Resolución del bloqueo de especificación · 2026-10-27
 
-- `/review-spec` de Hades: **RECHAZADO**, hallazgos H1 y H2 cr?ticos y H3 medio, todos `para: especificador`, `destino: resolver`. Se aplica la regla 5 del modo orquestado, sin pedir decisiones humanas.
-- **H1**: los escenarios que exigen recarga deben partir de motores desde v0.5.0; la vuelta atr?s debe elegir tambi?n un destino compatible. Los motores anteriores solo permiten instalar conservando archivos y requieren reinicio manual. Alinear los escenarios de F-03 y sus copias en tests/features.
-- **H2**: eliminar la condici?n ?ning?n bucle en marcha? que todav?a conservan APLICADA/FALLIDA en la tabla normativa; aclarar el papel de la fila 7 y alinear el aviso de gateway con la recarga cooperativa y el reinicio de motores antiguos.
-- **H3**: fijar en el nuevo esquema de sincronizaci?n un origen controlado cuya ?ltima publicada sea 0.2.0 para que instalar/--forzar/actualizar no puedan instalar una superior a la esperada.
-- Trabajo completo del intento en `wip/B-ADV-0009`, commit `cd22e3f`: triaje, escenarios, requisitos, dise?o preliminar, pruebas borrador, reporte de Hades y evidencia roja. No hay cambios de producci?n. El borrador contiene ajustes parciales posteriores al an?lisis inicial; no constituyen aprobaci?n ni resoluci?n de H1?H3.
-- Reporte: `wip/B-ADV-0009:docs/review/spec_reviews/B-ADV-0009-spec-review.md`. Evidencia: `wip/B-ADV-0009:docs/review/test_reviews/B-ADV-0009-red.md`.
-- Verificaci?n realizada: `adevv orquestar --verificar "python -m unittest discover -s tests -p test_updater.py"`: 27 pruebas, 8 fallos funcionales antes de corregir. No se ejecut? suite completa. No se inici? review-test ni correcci?n tras el rechazo; no hay cierre funcional.
-- Verificaci?n de este cierre de bloqueo: `adevv orquestar --verificar "git diff --check"` sobre el delta documental, sin repetir pruebas del WIP.
+- El rechazo inicial y el intento de desarrollo se conservan en `wip/B-ADV-0009` (`cd22e3f`); su diseño y pruebas borrador no se consideran aprobados ni se restauran en este paso.
+- **H1 resuelto**: los escenarios que exigen recarga parten de motores desde v0.5.0 y el rollback elige un destino compatible. El caso antiguo distingue instalación segura de reinicio manual. Las copias de F-03 coinciden.
+- **H2 resuelto**: APLICADA/FALLIDA admiten bucles; fila 7 transversal sin resultado terminal ni interrupción de la precedencia. El aviso distingue copias pendientes, recarga cooperativa y reinicio manual de motores anteriores.
+- **H3 resuelto**: el esquema de copias usa un origen accesible controlado cuya última publicada es 0.2.0.
+- Hades `/review-spec`: **APROBADO, 9/10**, sin hallazgos pendientes. Reporte: [B-ADV-0009-spec-review.md](../../review/spec_reviews/B-ADV-0009-spec-review.md).
+- Verificación documental: `adevv orquestar --verificar "git diff --check"`. Sin cambios de producción ni pruebas ejecutables; no se atribuye a este árbol la evidencia roja del WIP. Continúa `/bug-fix` con el triaje siguiente.
+
+## Triaje
+- Subfase A: Definición [EXEC]: CE-3, F-01 y F-03 y sus escenarios de instalación con bucles, recuperación de aplazamientos antiguos y resincronización.
+- Subfase B: Diseño [EXEC]: separar instalación versionada de copias globales; conservar directorios existentes e integrar la recarga ya disponible.
+- Subfase C1: Pruebas [EXEC]: adaptar contratos autorizados y cubrir instalación real con bucle, puntero, destino intacto, reutilización de versión y recarga.
+- Subfase C2: Corrección [EXEC]: updater, CLI y guarda común del sincronizador; sin reimplementar la recarga.
+- Subfase D: QA [EXEC]: Hades sobre el delta completo.
+- Subfase E: Documentación [EXEC]: README, requisitos, DEC del plan de plataforma y revisión de versión.
+- Subfase F: Cierre [EXEC]: cierre y commit en release/v1.0.
+- Verificación al cierre: `python -m unittest discover -s tests -p test_updater.py`, `python -m unittest discover -s tests -p test_sync.py`, `python -m unittest discover -s tests -p test_cli_commands.py`, `python -m unittest discover -s tests -p test_install_and_release.py`, `python -m unittest discover -s skills/orquestar -p test_recarga.py`, `python -m unittest discover -s skills/telegram_gateway -p test_recarga_gateway.py`; ejercitan instalación, sincronización y transferencia cooperativa sin ejecutar el resto de la suite. Estático: `git diff --check` y compilación de los módulos modificados; sin linter/tipado configurados ni cambios de dependencias.
+- DEC-B09: se conserva `aplazada` solo como entrada heredada que se consume sin esperar bucles; no se producen nuevos aplazamientos de instalación. Las copias globales esperan a la primera orden sin bucles. Los mandatos del motor usan rutas absolutas al almacén activo; ninguna carpeta instalada se sobrescribe.
+- Autorización: el apartado «Alcance (decisión humana)» permite sustituir los contratos anteriores y sus escenarios contradictorios; no se requiere nueva consulta.
