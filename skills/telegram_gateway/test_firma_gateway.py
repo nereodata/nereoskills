@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from skills.telegram_gateway import gateway
+from tests import aislamiento_telegram
 
 
 class TestFirmaGateway(unittest.TestCase):
@@ -114,6 +115,7 @@ class TestFirmaGateway(unittest.TestCase):
 
         self.assertEqual(len(enviados), 1)
         self.assertIn('No he podido procesarlo', enviados[0])
+        self.assertIn('Error simulado', enviados[0])
         self.assertTrue(enviados[0].endswith('— Adevv v0.5.0'))
 
 

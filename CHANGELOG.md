@@ -2,6 +2,37 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.0.0] - 2026-10-27
+
+### Añadido
+
+- **T-ADV-0023** — `/cerrar vX.Y [confirmo]` desde Telegram: resumen de la revisión, cierre no interactivo con push atómico y etiqueta anotada, y relanzamiento del bucle.
+- **T-ADV-0025** — Limpieza de deuda menor de v0.3 a v0.6 en utilidades comunes del bucle y del gateway.
+- **T-ADV-0031** — Perfil de arnés, modelo y esfuerzo fijado por tarea o bug (único o por rol), con reservas y aviso, modo `estricto`, validación del backlog y alta desde Telegram.
+- **T-ADV-0024** — Registro por proyecto del gateway en Inicio de Windows mediante `adevv telegram --autoarranque on|off|estado`, ejecución oculta y diagnóstico de arranques inválidos.
+- **T-ADV-0022** — Formato y lint por tarea sobre el delta Git estable, comandos explícitos o deducción conservadora y evidencia reutilizable por Hades.
+- **T-ADV-0026** — Reservas conversacionales de Telegram por cuota o fallo de arranque, continuidad de sesiones propias, retorno al titular y diagnóstico por modelo con cuotas compartidas.
+- **T-ADV-0030** — Token ambiental de Telegram como respaldo solo para avisos; el gateway requiere token definido en el `.env` del proyecto.
+
+### Corregido
+
+- **B-ADV-0022** — `/cerrar` y las altas por Telegram usan el bucle vivo y no un PID huérfano, las métricas ya no copian la salida de las verificaciones, un único helper reescribe el frontmatter y `/estado` indica el motivo real de la espera.
+- **B-ADV-0021** — Volver atrás con bucles en marcha hacia un motor sin recarga ya no lo mata en silencio: se avisa.
+- **B-ADV-0019** — Las pruebas ya no envían avisos reales a Telegram con el token del entorno.
+- **B-ADV-0017** — El gateway conserva `telegram.log` y no acumula `--root` repetidos tras recargar de versión.
+- **B-ADV-0016** — `espera_cuota()` reconoce «Resets in 56h48m9s» y no vuelve a probar el modelo agotado cada 30 minutos.
+- **B-ADV-0014** — Las dependencias inválidas del backlog se devuelven a Cronos en vez de parar el bucle.
+- **B-ADV-0010** — Suite verde al cerrar v1.0: patrón prohibido en `telegram_gateway.feature` y `/status` con PID simulado.
+- **B-ADV-0015** — Los cambios sin commitear ya no paran el cambio de rama: Clio los resuelve y, si no puede, se guardan en un stash con aviso.
+- **B-ADV-0020** — Comprobación de cuotas supuestas al relanzar y por intervalo, aviso de créditos por episodio y `--cuota-reset` sin borrar histórico, con recuperación de esperas y origen visible en estado/agentes.
+- **B-ADV-0013** — Recuperación por perfil de los análisis sin progreso, aislamiento por paso y argumento, continuidad local y conservación de intentos en recarga.
+- **B-ADV-0012** — Bloqueo local de tareas sin progreso tras agotar promociones, con diagnóstico persistido, aviso y continuidad de tareas independientes.
+- **B-ADV-0009** — Instalación inmediata con bucles en marcha, conservación de versiones existentes y copias globales diferidas hasta que terminen los bucles, también con `--forzar`. La versión nueva se adopta mediante la recarga cooperativa existente.
+- **B-ADV-0011** — Reintentos acotados por perfil ante fallos del arnés en pasos, reservas y diagnóstico final con cola de salida, conservando cuota y progreso commiteado.
+- **B-ADV-0007** — Las pruebas de `test_cli_commands` ya no arrancan un gateway de Telegram real con el token del entorno.
+- **B-ADV-0006** — Recuperación automática de la suite roja al cerrar la versión: bug reutilizable con salida del fallo, promoción de dificultad y parada tras tres arreglos fallidos en dificil.
+- **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
+
 ## [0.6.1] - 2026-10-26
 
 ### Corregido

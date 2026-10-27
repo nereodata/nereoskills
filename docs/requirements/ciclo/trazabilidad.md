@@ -22,14 +22,15 @@
 | RF-F03-03 | F-03 | CA-F03-06 | El sistema deberá hacer la consulta sin pedir nada al usuario (sin ventanas ni p |
 | RF-F03-04 | F-03 | CA-F03-01 | El sistema deberá guardar en el estado de actualización los datos que la tabla u |
 | RF-F03-05 | F-03 | CA-F03-11 | Si la configuración de usuario desactiva la actualización automática, entonces e |
-| RF-F03-06 | F-03 | CA-F03-01 CA-F03-03 CA-F03-04 | Mientras haya algún bucle en marcha, el sistema no deberá instalar ninguna versi |
+| RF-F03-06 | F-03 | CA-F03-01 CA-F03-03 CA-F03-04 | Cuando haya una versión nueva elegible, el sistema deberá instalarla aunque haya  |
 | RF-F03-07 | F-03 | CA-F03-01 CA-F03-02 CA-F03-08 CA-F03-09 | Cuando se aplique una actualización, el sistema deberá instalar desde el origen  |
 | RF-F03-08 | F-03 | CA-F03-05 | El sistema no deberá modificar durante la instalación ningún archivo que use un  |
 | RF-F03-09 | F-03 | CA-F03-10 | Si la sincronización de algún destino falla tras instalar, entonces la versión i |
 | RF-F03-10 | F-03 | CA-F03-12 | Cuando se ejecute adevv actualizar, el sistema deberá hacer la comprobación forz |
-| RF-F03-11 | F-03 | CA-F03-12 CA-F03-13 | adevv actualizar X.Y.Z no hace la comprobación de RF-F03-01: solo consulta la li |
+| RF-F03-11 | F-03 | CA-F03-12 CA-F03-13 CA-F03-17 CA-F03-18 | adevv actualizar X.Y.Z no hace la comprobación de RF-F03-01: solo consulta la li |
 | RF-F03-12 | F-03 | CA-F03-14 | Si X.Y.Z no es una versión publicada, entonces adevv actualizar X.Y.Z deberá ter |
 | RF-F03-13 | F-03 | CA-F03-16 | El sistema deberá escribir los avisos de actualización en la salida de errores,  |
+| RF-F03-14 | F-03 | CA-F03-17 CA-F03-18 | Cuando un bucle o un gateway en marcha vaya a recargar la versión activa entre p |
 | RF-F04-01 | F-04 | CA-F04-01 CA-F04-03 CA-F04-05 | Cuando se ejecute adevv migrar en la raíz de un proyecto, el sistema deberá diag |
 | RF-F04-02 | F-04 | CA-F04-01 CA-F04-02 CA-F04-04 | El sistema deberá contar como pendiente: la entrada .agents en .gitmodules; la c |
 | RF-F04-03 | F-04 | CA-F04-01 CA-F04-03 CA-F04-04 | Son archivos en uso, en la raíz del proyecto: AGENTS.md, CLAUDE.md, GEMINI.md, R |

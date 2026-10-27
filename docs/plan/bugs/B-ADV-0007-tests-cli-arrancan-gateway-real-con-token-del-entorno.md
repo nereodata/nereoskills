@@ -3,15 +3,18 @@ id: B-ADV-0007
 title: "Las pruebas de test_cli_commands arrancan un gateway de Telegram real con el token del entorno"
 type: bug
 weight: 30
-dificultad: sencilla
+dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
 ---
 
 # B-ADV-0007: Las pruebas de test_cli_commands arrancan un gateway de Telegram real con el token del entorno
+
+## 🔓 Alcance (decisión humana, 2026-10-26)
+HC-01 queda resuelto: `tests/test_cli_commands.py` está dentro del alcance. La nota del prompt sobre "skills/", "agents/" y "workflows/" solo distinguía el árbol de trabajo de la copia instalada; no restringe rutas (B-ADV-0008, corregido en v0.6.1). Se puede modificar cualquier ruta del repositorio, incluidas `tests/` y `adevv/`.
 
 ## 🎯 Descripción del Fallo
 
@@ -30,3 +33,14 @@ updated_at: 2026-10-26
 
 ## 📋 Evidencias
 - Detectado al preparar `/release` de v0.6.0 (2026-10-26). El gateway huérfano se paró con `telegram.parar` en su carpeta temporal.
+
+## Triaje (Artemisa, modo orquestado)
+- **A ? Definici?n [SKIP]**: contrato existente de aislamiento de las pruebas; no cambia requisito de producto.
+- **B ? Dise?o [SKIP]**: aislamiento local de dos variables con restauraci?n mediante cleanup; sin decisi?n arquitect?nica.
+- **C1 ? Pruebas [EXEC]**: regresi?n del fixture CLI y un hijo Python inocuo con ambas variables ausentes, presentes y cada una presente por separado; restauraci?n del entorno tras cleanup. Rojo sin ejecutar el motor ni acceder a Telegram.
+- **C2 ? Correcci?n [EXEC]**: aislar las dos variables Telegram en setUp de TestCliCommands y restaurar el entorno con addCleanup.
+- **D ? QA [EXEC]**: Hades /review-test del delta completo de pruebas y /review-code de cierre (producci?n N/A).
+- **E ? Documentaci?n [SKIP]**: no cambia API ni comportamiento del producto; solo aislamiento de pruebas.
+- **F ? Cierre [EXEC]**: revisi?n de versi?n, estado completed al final y commit sem?ntico.
+- **Verificaci?n al cierre**: `python -m unittest discover -s tests -p test_cli_commands.py`: cubre todos los consumidores del fixture y la regresi?n con credenciales ficticias presentes/ausentes; sin suite completa. Est?tico: compilaci?n del archivo y `git diff --check`; lint/tipado no configurados, dependencias sin cambios.
+- **DEC-01**: release/v1.0, sin hotfix ni HITL. Se aplica el desbloqueo humano HC-01 ya registrado; tests/ est? autorizado. Se conserva el cambio de dificultad a media realizado por el bucle.

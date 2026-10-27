@@ -7,6 +7,8 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import ctypes
+import hashlib
 import importlib.util
 import json
 import math
@@ -18,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -64,20 +67,75 @@ PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
+try:
+    from . import metricas
+except ImportError:
+    try:
+        import metricas
+    except ImportError:
+        _metricas_spec = importlib.util.spec_from_file_location('adevv_metricas', Path(__file__).with_name('metricas.py'))
+        metricas = importlib.util.module_from_spec(_metricas_spec)
+        _metricas_spec.loader.exec_module(metricas)
+vkey = metricas.clave_version_numerica
+
+
+def directorio_version_almacen(script=None):
+    """Resuelve una única vez el almacén y directorio versionado de un motor."""
+    try:
+        p = Path(script or __file__).resolve()
+        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
+        versions = home / 'versions'
+        rel = p.relative_to(versions)
+        version_dir = versions / rel.parts[0]
+        version = version_dir.name
+        if not re.fullmatch(r'v?\d+(\.\d+)*', version):
+            return None
+        return home, version_dir, version.lstrip('v')
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return None
+
+
+def version_de_manifiestos(script):
+    """Obtiene la versión del proyecto desde pyproject.toml o task_config.yaml."""
+    try:
+        padres = Path(script).resolve().parents
+    except (OSError, ValueError, RuntimeError):
+        return None
+    for padre in padres:
+        manifiesto = padre / 'pyproject.toml'
+        if manifiesto.is_file():
+            try:
+                datos = tomllib.loads(manifiesto.read_text(encoding='utf-8'))
+                version = datos.get('project', {}).get('version')
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            if isinstance(version, str) and version.strip():
+                return version.strip().lstrip('v')
+    for padre in padres:
+        manifiesto = padre / 'task_config.yaml'
+        if not manifiesto.is_file() or not yaml:
+            continue
+        try:
+            if hasattr(yaml, 'safe_load'):
+                datos = yaml.safe_load(manifiesto.read_text(encoding='utf-8')) or {}
+            elif hasattr(yaml, 'load_yaml'):
+                datos = yaml.load_yaml(manifiesto)
+            else:
+                continue
+            version = (datos.get('project') or {}).get('version') if isinstance(datos, dict) else None
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if isinstance(version, str) and version.strip():
+            return version.strip().lstrip('v')
+    return None
+
 
 def version_adevv(script=None):
     """Devuelve la versión de Adevv del proceso en ejecución (deducida del almacén o metadatos)."""
     try:
-        p = Path(script or __file__).resolve()
-        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
-        if len(p.parents) >= 3 and p.parents[2].parent == home / 'versions':
-            v = p.parents[2].name
-            if re.fullmatch(r'v?\d+(\.\d+)*', v):
-                return v.lstrip('v')
-        if p.is_relative_to(home / 'versions'):
-            rel = p.relative_to(home / 'versions')
-            if rel.parts and re.fullmatch(r'v?\d+(\.\d+)*', rel.parts[0]):
-                return rel.parts[0].lstrip('v')
+        version_dir = directorio_version_almacen(script)
+        if version_dir:
+            return version_dir[2]
     except (OSError, ValueError, RuntimeError):
         pass
     try:
@@ -88,15 +146,12 @@ def version_adevv(script=None):
     except Exception:
         pass
     try:
-        for padre in Path(script or __file__).resolve().parents:
-            pyproj = padre / 'pyproject.toml'
-            if pyproj.is_file():
-                m = re.search(r"version\s*=\s*['\"]([^'\"]+)['\"]", pyproj.read_text(encoding='utf-8'))
-                if m:
-                    return m.group(1).strip().lstrip('v')
+        version = version_de_manifiestos(script or __file__)
+        if version:
+            return version
     except Exception:
         pass
-    return '0.5.0'
+    return 'desconocida'
 
 
 def tiene_firma(texto):
@@ -125,11 +180,11 @@ def firmar(texto, extra=None, script=None):
 def version_activa_distinta(script):
     """Devuelve el homólogo activo solo para motores del almacén versionado."""
     try:
-        script = Path(script).resolve()
-        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
-        version_dir = script.parents[2]
-        if version_dir.parent != home / 'versions':
+        ubicacion = directorio_version_almacen(script)
+        if ubicacion is None:
             return None
+        home, version_dir, _ = ubicacion
+        script = Path(script).resolve()
         datos = json.loads((home / 'active.json').read_text(encoding='utf-8'))
         version = datos.get('version') if isinstance(datos, dict) else None
         if not isinstance(version, str) or not re.fullmatch(r'\d+\.\d+\.\d+', version):
@@ -140,6 +195,38 @@ def version_activa_distinta(script):
     except (OSError, ValueError, IndexError, RuntimeError):
         return None
     return None
+
+
+AVISOS_RECARGA = set()
+
+
+def causa_sin_recarga(destino, version, argumentos):
+    """Motivo por el que el motor de destino no puede asumir este proceso (RF-F03-14), o '' si puede."""
+    if tuple(int(n) for n in version.split('.')) < (0, 5, 0):
+        return 'anterior a v0.5'
+    try:
+        texto = destino.read_text(encoding='utf-8')
+    except OSError:
+        return 'no se puede leer su motor'
+    ausentes = []
+    for a in argumentos:
+        opcion = a.split('=', 1)[0]
+        if opcion.startswith('--') and f"'{opcion}'" not in texto and f'"{opcion}"' not in texto and opcion not in ausentes:
+            ausentes.append(opcion)
+    return f"no admite {', '.join(ausentes)}" if ausentes else ''
+
+
+def avisar_sin_recarga(script, root, etiqueta, version, causa):
+    """Avisa una sola vez por versión activa de que el proceso sigue con la suya, en su log y por Telegram."""
+    clave = (str(root), etiqueta, version)
+    if clave in AVISOS_RECARGA:
+        return
+    AVISOS_RECARGA.add(clave)
+    tipo = 'gateway' if etiqueta == 'gateway' else 'bucle'
+    texto = (f'La {version} activa no puede recargar este {tipo} ({causa}); '
+             f'sigue con la {version_adevv(script)}. Reinícialo para usarla.')
+    print(f'[{etiqueta}] {texto}', flush=True)
+    avisar(root, 'respuesta', texto)
 
 
 def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
@@ -153,17 +240,38 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
     temporal = pid.with_suffix('.recarga.tmp')
     hijo = None
     try:
-        if pid.read_text(encoding='utf-8').strip() != str(os.getpid()):
+        if not es_propietario_pid(root, pid_file):
             return False
         datos = {'root': str(root), 'script': str(destino), 'estado': estado_recarga}
-        env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos)}
+        env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos), 'PYTHONIOENCODING': 'utf-8'}
         argumentos = list(sys.argv[1:])
         if etiqueta == 'gateway':
-            argumentos += ['--root', str(root)]
+            sin_root = []
+            saltar = False
+            for a in argumentos:
+                if saltar:
+                    saltar = False
+                elif a == '--root':
+                    saltar = True
+                elif not a.startswith('--root='):
+                    sin_root.append(a)
+            argumentos = [*sin_root, '--root', str(root)]
+        causa = causa_sin_recarga(destino, version, argumentos)
+        if causa:
+            avisar_sin_recarga(script, root, etiqueta, version, causa)
+            return False
         opciones = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-        hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env, **opciones)
-        temporal.write_text(str(hijo.pid), encoding='utf-8')
-        os.replace(temporal, pid)
+        registro = root / ('telegram.log' if etiqueta == 'gateway' else LOG)
+        with registro.open('a', encoding='utf-8') as log:
+            hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env,
+                                    stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **opciones)
+            temporal.write_text(str(hijo.pid), encoding='utf-8')
+            os.replace(temporal, pid)
+            try:
+                log.write(f'[{etiqueta}] recargado a versión {version}\n')
+                log.flush()
+            except OSError:
+                pass
     except OSError as error:
         if hijo is not None:
             hijo.terminate()
@@ -171,7 +279,6 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
         temporal.unlink(missing_ok=True)
         print(f'[{etiqueta}] no se pudo recargar: {error}', flush=True)
         return False
-    print(f'[{etiqueta}] recargado a versión {version}', flush=True)
     return True
 
 
@@ -184,7 +291,7 @@ def recibir_recarga(root, pid_file, script):
     if datos['root'] != str(root.resolve()) or datos['script'] != str(Path(script).resolve()):
         raise ValueError('Transferencia de recarga destinada a otro proceso')
     for _ in range(100):
-        if (root / pid_file).read_text(encoding='utf-8').strip() == str(os.getpid()):
+        if es_propietario_pid(root, pid_file):
             return datos['estado']
         time.sleep(0.05)
     raise RuntimeError('No se publicó el PID de la recarga')
@@ -203,6 +310,48 @@ def get_active_version_dir():
     except Exception:
         pass
     return Path(__file__).resolve().parents[2]
+
+
+def _proceso_vivo(pid):
+    """Comprueba si existe un proceso, incluyendo procesos ajenos sin permiso de consulta."""
+    if os.name == 'nt':
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5
+        try:
+            codigo = ctypes.c_ulong()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(codigo)) or codigo.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def pid_vivo(root, pid_file=PID):
+    """Devuelve el PID registrado si sigue vivo; ignora marcas inválidas o muertas."""
+    try:
+        pid = int((Path(root) / pid_file).read_text(encoding='utf-8').strip())
+        return pid if pid > 0 and _proceso_vivo(pid) else None
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def es_propietario_pid(root, pid_file=PID):
+    """Indica si el archivo de PID pertenece al proceso actual."""
+    try:
+        return (Path(root) / pid_file).read_text(encoding='utf-8').strip() == str(os.getpid())
+    except (OSError, ValueError):
+        return False
 
 
 def es_repositorio_fuente_adevv(root):
@@ -240,7 +389,7 @@ def construir_prompt_paso(root, paso, arg):
     """Construye el prompt de un paso para el arnés con rutas absolutas instaladas."""
     version_dir = get_active_version_dir()
     dif = dificultad_de(root, arg) if arg else None
-    rol, cfg_rol = rol_de(root, paso, dificultad=dif)
+    rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
     persona = version_dir / "agents" / f"{rol}.md"
     skill_file = version_dir / "skills" / "orquestar" / "SKILL.md"
     skills_dir = version_dir / "skills"
@@ -266,7 +415,14 @@ def construir_prompt_paso(root, paso, arg):
     if es_repositorio_fuente_adevv(root):
         nota_fuente = ' Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.'
 
-    return instruccion_agente + prompt_cuerpo + extra + nota_fuente
+    corregir = ''
+    if paso == 'calcular-dependencias':
+        errores = errores_dependencias(backlog(root))
+        if errores:
+            corregir = (' El backlog tiene dependencias inválidas que debes corregir: '
+                        + '; '.join(errores) + '.')
+
+    return instruccion_agente + prompt_cuerpo + corregir + extra + nota_fuente
 
 
 def construir_prompt_agente(root, rol, prompt, reanudacion=False):
@@ -493,7 +649,9 @@ def backlog(root):
             dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
             if dif not in ('sencilla', 'media', 'dificil'):
                 dif = 'media'
+            perfil, perfil_errores = perfil_del_fichero(f)
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
+                        'perfil': perfil, 'perfil_errores': perfil_errores,
                         'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
                         'weight': int(peso) if peso.lstrip('-').isdigit() else 0,
@@ -516,6 +674,205 @@ def dificultad_de(root, iid):
                     dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
                     return dif if dif in ('sencilla', 'media', 'dificil') else 'media'
     return 'media'
+
+
+ROLES_PERFIL = ('artemisa', 'hades', 'atenea', 'clio', 'cronos')
+ESFUERZOS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+AVISOS_PERFIL = set()
+
+
+def mapa_flujo(texto):
+    """Interpreta un mapa YAML de flujo (`{a: b, c: {d: e}}`) como dict de cadenas."""
+    def citar(m):
+        t = m[0]
+        return json.dumps(t[1:-1] if t[0] in '"\'' else t)
+    return json.loads(re.sub(r'"[^"]*"|\'[^\']*\'|[^\s{}:,]+', citar, texto))
+
+
+def mapa_bloque(lineas):
+    """Mapa YAML anidado por sangría; los valores de flujo `{...}` se interpretan con `mapa_flujo`."""
+    res, i = {}, 0
+    while i < len(lineas):
+        sangria = len(lineas[i]) - len(lineas[i].lstrip())
+        clave, _, valor = lineas[i].strip().partition(':')
+        i += 1
+        hijos = []
+        while i < len(lineas) and len(lineas[i]) - len(lineas[i].lstrip()) > sangria:
+            hijos.append(lineas[i])
+            i += 1
+        valor = valor.strip()
+        if hijos:
+            res[clave.strip()] = mapa_bloque(hijos)
+        elif valor.startswith('{'):
+            res[clave.strip()] = mapa_flujo(valor)
+        else:
+            res[clave.strip()] = valor.strip('"\'')
+    return res
+
+
+def sin_comentario(linea):
+    """La línea sin su comentario YAML final (el `#` fuera de comillas y precedido de espacio)."""
+    comilla = ''
+    for i, c in enumerate(linea):
+        if comilla:
+            comilla = '' if c == comilla else comilla
+        elif c in '"\'':
+            comilla = c
+        elif c == '#' and (i == 0 or linea[i - 1] in ' \t'):
+            return linea[:i].rstrip()
+    return linea.rstrip()
+
+
+def perfil_crudo(path):
+    """Valor del campo `perfil` del frontmatter (None si falta); ValueError si no se puede leer."""
+    m = re.match(r'---\s*\n(.*?)\n---', path.read_text(encoding='utf-8'), re.S)
+    lineas = [sin_comentario(l) for l in (m[1].splitlines() if m else [])]
+    lineas = [l for l in lineas if l.strip()]
+    for i, linea in enumerate(lineas):
+        if not re.match(r'perfil\s*:', linea):
+            continue
+        valor = linea.split(':', 1)[1].strip()
+        if valor.startswith('{'):
+            return mapa_flujo(valor)
+        if valor and valor not in ('null', '~'):
+            raise ValueError('debe ser un mapa con harness, model, effort o roles')
+        hijos = []
+        for resto in lineas[i + 1:]:
+            if resto[0] not in ' \t':
+                break
+            hijos.append(resto)
+        return mapa_bloque(hijos) if hijos else None
+    return None
+
+
+def normalizar_perfil(crudo):
+    """(perfil, errores): `{'unico': {...}|None, 'roles': {rol: {...}}, 'estricto': bool}` validado."""
+    if crudo is None:
+        return None, []
+    if not isinstance(crudo, dict) or not crudo:
+        return None, ['perfil debe ser un mapa con harness, model, effort o roles']
+    errores = []
+    admitidos = ', '.join(ROLES_PERFIL)
+
+    def campos(datos, donde):
+        out = {}
+        for clave, valor in datos.items():
+            if isinstance(valor, dict):
+                errores.append(f'perfil: rol desconocido "{clave}" (admitidos: {admitidos})')
+            elif clave not in ('harness', 'model', 'effort'):
+                errores.append(f'{donde}: campo desconocido "{clave}"')
+            elif not str(valor).strip():
+                errores.append(f'{donde}: "{clave}" vacío')
+            else:
+                out[clave] = str(valor).strip()
+        if out.get('harness') and out['harness'] not in HARNESS:
+            errores.append(f'{donde}: arnés no soportado "{out["harness"]}" (admitidos: {", ".join(HARNESS)})')
+        if out.get('effort') and out['effort'] not in ESFUERZOS:
+            errores.append(f'{donde}: esfuerzo no válido "{out["effort"]}" (admitidos: {", ".join(ESFUERZOS)})')
+        return out
+
+    estricto = crudo.get('estricto', False)
+    if isinstance(estricto, str) and estricto.strip().lower() in ('true', 'false'):
+        estricto = estricto.strip().lower() == 'true'
+    if not isinstance(estricto, bool):
+        errores.append('perfil: "estricto" debe ser true o false')
+        estricto = False
+    resto = {k: v for k, v in crudo.items() if k != 'estricto'}
+    roles = {k: v for k, v in resto.items() if k in ROLES_PERFIL}
+    unico, porrol = None, {}
+    if roles:
+        sueltos = [k for k, v in resto.items() if k not in roles and not isinstance(v, dict)]
+        if sueltos:
+            errores.append(f'perfil: mezcla campos sueltos ({", ".join(sueltos)}) con perfiles por rol')
+        for k, v in resto.items():
+            if k not in roles and isinstance(v, dict):
+                errores.append(f'perfil: rol desconocido "{k}" (admitidos: {admitidos})')
+        for rol, datos in roles.items():
+            if isinstance(datos, dict):
+                porrol[rol] = campos(datos, f'perfil.{rol}')
+            else:
+                errores.append(f'perfil.{rol}: debe ser un mapa con harness, model o effort')
+    else:
+        unico = campos(resto, 'perfil')
+    if not errores and not unico and not any(porrol.values()):
+        errores.append('perfil: indica al menos harness, model o effort')
+    return (None if errores else {'unico': unico or None, 'roles': porrol, 'estricto': estricto}), errores
+
+
+def perfil_del_fichero(path):
+    """(perfil normalizado | None, errores) del frontmatter de una tarea o bug."""
+    try:
+        return normalizar_perfil(perfil_crudo(path))
+    except ValueError as error:
+        return None, [f'perfil ilegible ({error}); entrecomilla los valores que llevan ":" o "#"']
+
+
+def errores_perfil(items):
+    """Errores de `perfil` en tareas y bugs pendientes, con su ID."""
+    return [f'{i["id"]}: {e}' for i in items if i['status'] not in CERRADO for e in i.get('perfil_errores') or []]
+
+
+def perfil_de(root, iid):
+    """Perfil fijado de una tarea o bug maestro, o None."""
+    for it in backlog(root) if iid else []:
+        if it['id'] == iid:
+            return it.get('perfil')
+    return None
+
+
+def perfil_fijado_de(root, iid, rol):
+    """(campos, estricto) que la tarea fija para un rol; el perfil único es del rol que ejecuta task-dev y bug-fix."""
+    perfil = perfil_de(root, iid)
+    if not perfil:
+        return None, False
+    return perfil['roles'].get(rol) or (perfil['unico'] if rol == 'artemisa' else None), perfil['estricto']
+
+
+def aplicar_perfil(root, iid, rol, cfg):
+    """Perfil por dificultad con lo que fije la tarea para el rol encima; `estricto` quita las reservas."""
+    fijado, estricto = perfil_fijado_de(root, iid, rol)
+    if not fijado:
+        return cfg
+    nuevo = {**cfg, **fijado, 'fijado': True}
+    if cfg.get('reserva'):
+        nuevo['reserva'] = lista_reservas(cfg)
+    if estricto:
+        nuevo['estricto'] = True
+        nuevo.pop('reserva', None)
+    return nuevo
+
+
+def marca_fijado(cfg):
+    """Marca de las métricas para lo ejecutado con el perfil fijado por la tarea."""
+    return {'perfil_fijado': True} if cfg.get('fijado') else {}
+
+
+def clave_perfil(cfg):
+    """`arnés/modelo` de un perfil, para los avisos."""
+    return f'{cfg.get("harness") or "claude"}/{cfg.get("model") or "predeterminado"}'
+
+
+def avisar_perfil(root, iid, fijado, motivo, destino):
+    """Avisa una sola vez de que el perfil fijado por la tarea cede ante una reserva."""
+    clave = (str(root), iid, motivo)
+    if clave in AVISOS_PERFIL:
+        return
+    AVISOS_PERFIL.add(clave)
+    texto = f'{iid}: perfil fijado {clave_perfil(fijado)} {motivo}; uso la reserva {clave_perfil(destino)}'
+    print(f'[orquestar] {texto}', flush=True)
+    avisar(root, 'cuota' if motivo == 'sin cuota' else 'arnes', texto)
+
+
+def agotado_estricto(root, iid):
+    """Motivo por el que una tarea de perfil estricto ya no se reintenta (lo que subiría o escalaría), o ''."""
+    debe, motivo = comprobar_promocion(root, iid)
+    if debe:
+        return motivo
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    esc = cfg_dev.get('escalada') or {}
+    if esc and rechazos(root, iid) >= esc.get('rechazos', 2):
+        return f'{rechazos(root, iid)} rechazos seguidos de Hades'
+    return ''
 
 
 def siguiente_dificultad(dif):
@@ -682,7 +1039,7 @@ def slug(texto):
     return re.sub(r'[^a-z0-9]+', '-', plano.lower()).strip('-')[:60].strip('-')
 
 
-def alta(root, tipo, titulo, autor=''):
+def alta(root, tipo, titulo, autor='', perfil=None):
     """Crea una tarea o un bug maestro sin versión (`backlog`): el bucle no lo trabaja hasta que alguien le pone versión.
 
     Las tareas van sin `depende_de`: se calculan cuando entren en una versión.
@@ -696,7 +1053,8 @@ def alta(root, tipo, titulo, autor=''):
     origen = f'Telegram{f" (usuario {autor})" if autor else ""}, {hoy}'
     cabecera = (f'---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n'
                 f'type: {"bug" if letra == "B" else "funcional"}\nweight: 100\nversion: ""\nstatus: backlog\n'
-                f'created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n')
+                + (f'perfil: {{{", ".join(f"{k}: {v}" for k, v in perfil.items())}}}\n' if perfil else '')
+                + f'created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n')
     cuerpo = (f'## 🎯 Descripción del Fallo\n{titulo}\n\n## 📋 Reproducir\n1. Por detallar.\n\n'
               f'## 📋 Evidencias\n- Registrado desde {origen}.\n') if letra == 'B' else \
              (f'## 🎯 Objetivo de Negocio\n{titulo}\n\n## 📋 Criterios de Aceptación (Nivel Máster)\n'
@@ -706,11 +1064,27 @@ def alta(root, tipo, titulo, autor=''):
     return iid, f
 
 
-def apuntar(root, tipo, titulo, autor=''):
+def extraer_perfil(argumento):
+    """(título, perfil, error) de `<título> [--perfil arnés/modelo[/esfuerzo]] [--estricto]` (órdenes de Telegram)."""
+    m = re.search(r'--perfil\s+(\S+)', argumento)
+    estricto = re.search(r'--estricto\b', argumento) is not None
+    titulo = ' '.join(re.sub(r'--perfil\s+\S+|--estricto\b', ' ', argumento).split())
+    if not m:
+        return titulo, None, ('--estricto solo se usa junto a --perfil' if estricto else None)
+    perfil = dict(zip(('harness', 'model', 'effort'), m[1].split('/')))
+    perfil = {k: v for k, v in perfil.items() if v}
+    if estricto:
+        perfil['estricto'] = 'true'
+    valido, errores = normalizar_perfil(perfil)
+    return titulo, (perfil if valido else None), ('; '.join(errores) if errores else None)
+
+
+def apuntar(root, tipo, titulo, autor='', perfil=None):
     """Deja en el buzón una tarea o un bug pedido desde fuera; el bucle lo registra entre pasos."""
     excluir(root)
     with (root / BUZON).open('a', encoding='utf-8') as f:
-        f.write(json.dumps({'tipo': tipo, 'titulo': titulo, 'autor': autor, 'fecha': ahora()}, ensure_ascii=False) + '\n')
+        f.write(json.dumps({'tipo': tipo, 'titulo': titulo, 'autor': autor, 'fecha': ahora(),
+                            **({'perfil': perfil} if perfil else {})}, ensure_ascii=False) + '\n')
 
 
 def ingerir(root):
@@ -725,7 +1099,7 @@ def ingerir(root):
     for linea in tmp.read_text(encoding='utf-8').splitlines():
         if linea.strip():
             e = json.loads(linea)
-            iid, fichero = alta(root, e['tipo'], e['titulo'], e.get('autor', ''))
+            iid, fichero = alta(root, e['tipo'], e['titulo'], e.get('autor', ''), e.get('perfil'))
             hechos.append((iid, e['titulo'], fichero))
     if hechos:
         rutas = [str(x[2].relative_to(root)) for x in hechos]
@@ -741,11 +1115,6 @@ def ingerir(root):
 def deuda(items):
     """Deuda registrada: bugs pendientes sin versión, fuera del bucle hasta que se incluyan."""
     return [i for i in items if i['paso'] == 'bug-fix' and i['status'] not in FUERA and not vkey(i['version'])]
-
-
-def vkey(v):
-    m = re.match(r'v?(\d+)\.(\d+)', v or '')
-    return (int(m[1]), int(m[2])) if m else None
 
 
 def primera_linea(path):
@@ -793,12 +1162,15 @@ def estado(root, docs):
     items = backlog(root)
     if not (d / 'work_plan.md').exists() or not items:
         return ('PASO', 'work-plan', '', None)
+    errores = errores_perfil(items)
+    if errores:
+        return ('PARAR', 'Perfil inválido en el backlog (solo una persona lo corrige): ' + '; '.join(errores))
     if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None and vkey(i['version'])
            for i in items):
         return ('PASO', 'calcular-dependencias', '', None)
     errores = errores_dependencias(items)
     if errores:
-        return ('PARAR', 'Dependencias inválidas en el backlog: ' + '; '.join(errores))
+        return ('PASO', 'calcular-dependencias', '', None)
 
     por_id = {i['id']: i for i in items}
     alcance = desbloquea(items)
@@ -870,15 +1242,17 @@ def config(root):
     return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
 
 
-def rol_de(root, paso, dificultad=None):
+def rol_de(root, paso, dificultad=None, iid=None):
     """(rol, configuración) que ejecuta un paso del bucle: Artemisa desarrolla, Atenea analiza y decide.
 
     Sin la clave del rol en orchestration.json se usa `development` (y Atenea, sin ella, la de Artemisa).
+    El `perfil` de la tarea (`iid`) sustituye al que tocaría por dificultad.
     """
     cfg = config(root)
     dev = cfg.get('artemisa') or cfg.get('development', {})
     rol = 'artemisa' if paso in DESARROLLO else 'atenea'
-    return rol, ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso, dificultad=dificultad)
+    base = ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso, dificultad=dificultad)
+    return rol, aplicar_perfil(root, iid, rol, base)
 
 
 def ajustes(cfg, paso='', dificultad=None):
@@ -905,14 +1279,80 @@ def lista_reservas(cfg_rol):
     return resultado
 
 
+PASOS_ANALISIS = frozenset(('especificar', 'revisar-tarea', 'revisar-version',
+                           'calcular-dependencias', 'work-plan', 'revisar-deuda', 'aplicar-producto'))
+
+
+def cadena_analisis(root, paso, dificultad='media', iid=None):
+    """Perfiles de recuperación finitos y efectivos, sin expandir reservas de niveles."""
+    dificultad = dificultad or 'media'
+    rol, inicial = rol_de(root, paso, dificultad=dificultad, iid=iid)
+    if inicial.get('estricto'):
+        return [inicial]
+    cfg = config(root)
+    dev = cfg.get('artemisa') or cfg.get('development', {})
+    base = dev if rol == 'artemisa' else cfg.get('atenea') or dev
+    candidatos = [inicial]
+    nivel = siguiente_dificultad(dificultad)
+    while nivel:
+        if nivel in (base.get('dificultad') or {}):
+            candidatos.append(ajustes(base, paso, dificultad=nivel))
+        nivel = siguiente_dificultad(nivel)
+    esc = inicial.get('escalada') or {}
+    if esc:
+        candidatos.append({**inicial, **{k: v for k, v in esc.items() if k != 'rechazos'}})
+    candidatos.extend(lista_reservas(inicial))
+    resultado, vistos = [], set()
+    for candidato in candidatos:
+        identidad = (candidato.get('harness') or 'claude',
+                     candidato.get('model') or 'predeterminado', candidato.get('effort') or None)
+        if identidad not in vistos:
+            vistos.add(identidad)
+            resultado.append(candidato)
+    return resultado
+
+
+def diagnostico_analisis(recuperacion, limite):
+    """Identifica el par agotado y los perfiles probados con sus intentos."""
+    perfiles = ' → '.join(
+        f'{c.get("harness") or "claude"}/{c.get("model") or "predeterminado"}/'
+        f'{c.get("effort") or "predeterminado"} ({limite} intentos)'
+        for c in recuperacion['perfiles'])
+    return (f'"{recuperacion["paso"]}" {recuperacion["arg"] or "(sin argumento)"} '
+            f'sin progreso tras agotar perfiles: {perfiles}.')
+
+
 def configuraciones_con_cuota(root, configuraciones):
-    """Omite agotamientos vigentes con reservas, conservando la última si todos agotaron."""
-    if len(configuraciones) < 2:
-        return configuraciones
-    cuotas = consumo_cuotas(root, fecha_estado(ahora()))[1]
+    """Respeta reinicios reales y permite sondeos supuestos al relanzar o vencer el intervalo."""
+    instante = fecha_estado(ahora())
+    filas = leer_metricas(root)
+    cuotas = consumo_cuotas(root, instante, filas)[1]
+    marcas = marcas_cuota(root, instante, filas)
+    for clave in list(cuotas):
+        if marcas[clave]['tipo'] == 'supuesta':
+            sondeo = SONDEOS_CUOTA.get((str(root.resolve()), clave))
+            if sondeo is None or (instante - sondeo).total_seconds() >= intervalo_cuota(root):
+                cuotas.pop(clave)
     disponibles = [cfg for cfg in configuraciones
                    if (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado') not in cuotas]
-    return disponibles or configuraciones[-1:]
+    return disponibles
+
+
+def cuota_descartada(root, configuraciones, seleccionadas, incluir_recuperadas=False):
+    """Recupera la menor espera omitida; opcionalmente incluye perfiles ya recuperados."""
+    omitidas = [cfg for cfg in configuraciones if cfg not in seleccionadas]
+    if not omitidas:
+        return None, None
+    instante = fecha_estado(ahora())
+    cuotas = consumo_cuotas(root, instante)[1]
+    pendientes = []
+    for cfg in omitidas:
+        harness = cfg.get('harness', 'claude')
+        hasta = cuotas.get((harness, cfg.get('model') or 'predeterminado'))
+        plantilla = HARNESS.get(harness)
+        if (hasta or incluir_recuperadas) and plantilla and buscar_ejecutable(plantilla[0]):
+            pendientes.append((max((hasta - instante).total_seconds(), 0) if hasta else 0, cfg))
+    return min(pendientes, key=lambda par: par[0]) if pendientes else (None, None)
 
 
 def rechazos(root, iid):
@@ -1045,6 +1485,24 @@ def arnes(a, rol):
     return None if a.cmd else a.harness or rol.get('harness', 'claude')
 
 
+class ArnesAusente(RuntimeError):
+    """Señala un ejecutable ausente que permite probar otra configuración."""
+
+
+def registrar_ausencia(root, tipo, posicion, cfg, **contexto):
+    """Registra y avisa una omisión sin atribuir ejecución ni cuota."""
+    harness = cfg.get('harness', 'claude')
+    texto = f'[orquestar] no se encuentra el arnés "{harness}"; conmutando a reserva...'
+    print(texto, flush=True)
+    registrar(root, {'tipo': tipo, 'fecha': ahora(), **contexto,
+                     'posicion': posicion, 'arnes': harness,
+                     'modelo': cfg.get('model') or 'predeterminado',
+                     'arnes_ausente': True, 'codigo': 127, 'modelos': {},
+                     'entrada': 0, 'cache_leida': 0, 'cache_escrita': 0,
+                     'salida': 0, 'razonamiento': 0, 'coste_usd': 0})
+    avisar(root, 'arnes', texto)
+
+
 def comando(a, prompt, root=None, rol=None, sesion=None):
     rol = rol if rol is not None else rol_de(root or Path.cwd(), 'task-dev')[1]
     harness = arnes(a, rol)
@@ -1052,7 +1510,9 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
     plantilla = [p.strip('"\'') for p in plantilla]
     exe = buscar_ejecutable(plantilla[0])
     if not exe:
-        sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
+        if a.cmd:
+            sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
+        raise ArnesAusente(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
     if sesion and not a.cmd:
         if harness == 'claude':
             cmd = [exe, '--resume', sesion] + [p.replace('{prompt}', prompt) for p in plantilla[1:]]
@@ -1217,7 +1677,7 @@ def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
         iid = (env or {}).get('ORQUESTAR_ID') or os.environ.get('ORQUESTAR_ID', '')
         paso = (env or {}).get('ORQUESTAR_PASO') or os.environ.get('ORQUESTAR_PASO', 'task-dev')
         dif = dificultad_de(root, iid) if iid else None
-        rol = rol_de(root, paso, dificultad=dif)[1]
+        rol = rol_de(root, paso, dificultad=dif, iid=iid)[1]
     harness = arnes(a, rol)
     if sesion:
         cmd = comando(a, prompt, root, rol, sesion=sesion)
@@ -1251,7 +1711,7 @@ def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
     dif = dificultad_de(root, iid) if iid else None
-    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
+    cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
     if 'instructions' in cfg:
         p_inst = Path(cfg['instructions'])
         if not p_inst.is_absolute():
@@ -1260,9 +1720,12 @@ def agente(root, rol, prompt):
             sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
 
     reservas = lista_reservas(cfg)
-    configs_a_probar = configuraciones_con_cuota(root, [cfg] + reservas)
+    configs_originales = [cfg] + reservas
+    configs_a_probar = configuraciones_con_cuota(root, configs_originales)
     cuotas_acumuladas = []
+    ultima_cuota = None
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
+    cede = 'sin cuota' if cfg.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg else ''
 
     for idx_cfg, cfg_actual in enumerate(configs_a_probar):
         harness = cfg_actual.get('harness', 'claude')
@@ -1275,9 +1738,16 @@ def agente(root, rol, prompt):
             sys.exit(f'Arnés no soportado para roles: {harness}')
         exe = buscar_ejecutable(base[0])
         if not exe:
-            sys.exit(f'No se encuentra el arnés "{base[0]}" en el PATH.')
+            posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
+            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid)
+            if cfg_actual is cfg and cfg.get('fijado'):
+                cede = 'sin arnés'
+            continue
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+        if cede and cfg_actual is not cfg:
+            avisar_perfil(root, iid, cfg, cede, cfg_actual)
+            cede = ''
         if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
             prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
@@ -1286,20 +1756,26 @@ def agente(root, rol, prompt):
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
-            m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota)
+            datos = fallo_cuota(root, harness, cfg_actual.get('model') or 'predeterminado', salida)
+            m.update(datos)
+            cuota = datos['cuota_espera_s']
             cuotas_acumuladas.append(cuota)
             if hay_mas_reservas:
+                ultima_cuota = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
+                                'paso': paso, 'id': iid, 'arnes': harness, 'codigo': codigo}
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                 'arnes': harness, 'codigo': codigo,
+                                 'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                                  **({'escalado': True} if escalado else {}), **m})
                 print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
                       f'conmutando a reserva...', flush=True)
+                if cfg_actual is cfg and cfg.get('fijado'):
+                    cede = 'sin cuota'
                 continue
             else:
                 menor_cuota = min(cuotas_acumuladas)
                 veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                 'arnes': harness, 'codigo': codigo,
+                                 'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                                  **({'veredicto': veredicto[-1]} if veredicto else {}),
                                  'sin_cuota': True, 'espera_s': menor_cuota,
                                  **({'escalado': True} if escalado else {}), **m})
@@ -1307,16 +1783,35 @@ def agente(root, rol, prompt):
                       'el bucle esperará la cuota y reintentará.', flush=True)
                 return codigo
 
+        if not codigo:
+            recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
         veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
         registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                         'arnes': harness, 'codigo': codigo,
+                         'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                          **({'veredicto': veredicto[-1]} if veredicto else {}),
                          **({'escalado': True} if escalado else {}), **m})
         if veredicto and veredicto[-1] == 'RECHAZADO':
             print(tope_de_rechazos(root, iid), flush=True)
         return codigo
 
-    return codigo
+    if ultima_cuota is not None:
+        registrar(root, {**ultima_cuota, 'modelos': {}, 'sin_cuota': True,
+                         **({'escalado': True} if escalado else {}),
+                         'espera_s': min(cuotas_acumuladas)})
+        print(f'[orquestar] {rol} sin cuota; se conserva la espera del arnés disponible.', flush=True)
+        return ultima_cuota['codigo']
+    espera, cfg_omitida = cuota_descartada(root, [cfg] + reservas, configs_a_probar)
+    if espera is not None:
+        registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                         'arnes': cfg_omitida.get('harness', 'claude'), 'codigo': 1,
+                         'modelos': {}, 'sin_cuota': True, 'espera_s': espera,
+                         **({'escalado': True} if escalado else {})})
+        print(f'[orquestar] {rol} sin cuota; se conserva la recuperación vigente.', flush=True)
+        return 1
+    mensaje = f'{rol}: ningún arnés disponible en el principal ni en las reservas.'
+    print(f'[orquestar] {mensaje}', flush=True)
+    avisar(root, 'error', mensaje)
+    return 1
 
 
 def tope_de_rechazos(root, iid):
@@ -1348,14 +1843,91 @@ def tope_de_rechazos(root, iid):
 # ---------------------------------------------------------------- cuota
 
 CUOTA = re.compile(r'usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests'
-                   r'|\b429\b|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
+                   r'|\b429\b|resource_exhausted|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit', re.I)
+
+CREDITOS = re.compile(r'out of credits|credit balance|billing_hard_limit', re.I)
+SONDEOS_CUOTA = {}
 
 
-def espera_cuota(salida, ahora=None):
+def intervalo_cuota(root):
+    """Intervalo positivo finito de las comprobaciones de cuota supuesta."""
+    valor = config(root).get('cuota_reintento_s')
+    return valor if numero_cuota(valor) and valor > 0 else 300
+
+
+def marcas_cuota(root, instante, filas=None):
+    """Pliega agotamientos y recuperaciones sin reescribir el histórico ni los tokens."""
+    marcas = {}
+    for fila in leer_metricas(root) if filas is None else filas:
+        fecha = fecha_estado(fila.get('fecha'))
+        if fecha is None or fecha > instante:
+            continue
+        arnes = fila.get('arnes') or 'desconocido'
+        modelo = fila.get('modelo_cuota')
+        if fila.get('tipo') == 'cuota_recuperada':
+            marcas.pop((arnes, modelo), None)
+            continue
+        segundos = fila.get('cuota_espera_s')
+        if segundos is None and fila.get('sin_cuota'):
+            segundos = fila.get('espera_s')
+            modelos = fila.get('modelos') or {}
+            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
+        if not modelo or not numero_cuota(segundos) or segundos < 0:
+            continue
+        try:
+            hasta = fecha + timedelta(seconds=segundos)
+        except OverflowError:
+            continue
+        tipo = fila.get('cuota_tipo') or ('supuesta' if segundos == 1800 else 'real')
+        origen = fila.get('cuota_origen') or ('sin hora en la respuesta' if tipo == 'supuesta'
+                                             else 'recuperación histórica registrada')
+        clave = (arnes, modelo)
+        anterior = marcas.get(clave)
+        if anterior and anterior['tipo'] == tipo == 'real' and anterior['hasta'] > hasta:
+            continue
+        marcas[clave] = dict(hasta=hasta, tipo=tipo, origen=origen)
+    return marcas
+
+
+def recuperar_cuota(root, harness, modelo):
+    """Añade una recuperación para un par conocido, conservando el consumo histórico."""
+    if (harness, modelo) in marcas_cuota(root, fecha_estado(ahora())):
+        registrar(root, dict(tipo='cuota_recuperada', fecha=ahora(), arnes=harness, modelo_cuota=modelo))
+    SONDEOS_CUOTA.pop((str(root.resolve()), (harness, modelo)), None)
+
+
+def reset_cuotas(root, selector=''):
+    """Recupera únicamente los pares del selector arnés/modelo, arnés o global."""
+    pares = marcas_cuota(root, fecha_estado(ahora()))
+    seleccionados = [par for par in pares if not selector or selector == par[0]
+                     or selector == '/'.join(par)]
+    for harness, modelo in seleccionados:
+        recuperar_cuota(root, harness, modelo)
+    return len(seleccionados)
+
+
+def fallo_cuota(root, harness, modelo, salida):
+    """Clasifica el fallo, limita los sondeos y avisa de créditos una vez por episodio."""
+    creditos = bool(CREDITOS.search(salida))
+    segundos = espera_cuota(salida, sin_hora=None)
+    tipo = 'supuesta' if creditos or segundos is None else 'real'
+    origen = 'sin créditos' if creditos else ('hora en la respuesta' if tipo == 'real'
+                                            else 'sin hora en la respuesta')
+    if creditos:
+        anterior = marcas_cuota(root, fecha_estado(ahora())).get((harness, modelo))
+        if not anterior or anterior['origen'] != 'sin créditos':
+            avisar(root, 'cuota', f'Sin créditos en {harness}: recarga y el bucle lo reintentará')
+    if tipo == 'supuesta':
+        segundos = intervalo_cuota(root)
+        SONDEOS_CUOTA[(str(root.resolve()), (harness, modelo))] = fecha_estado(ahora())
+    return dict(modelo_cuota=modelo, cuota_espera_s=segundos, cuota_tipo=tipo, cuota_origen=origen)
+
+
+def espera_cuota(salida, ahora=None, sin_hora=1800):
     """Segundos hasta poder reintentar si la salida indica falta de cuota; None si es otro error.
 
     Reconoce la hora de recuperación en los formatos habituales (marca de tiempo tras «|»,
-    «try again in 2h 13m», «resets at 5pm»); si no la hay, propone 30 minutos.
+    «try again in 2h 13m», «resets in 56h48m9s», «resets at 5pm»); si no la hay, propone 30 minutos.
     """
     if not CUOTA.search(salida):
         return None
@@ -1364,10 +1936,12 @@ def espera_cuota(salida, ahora=None):
     m = re.search(r'\|(\d{10})\b', salida)
     if m:
         return max(int(m[1]) - int(ahora.timestamp()), 0) + margen
-    m = re.search(r'(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*'
-                  r'(?:(\d+)\s*(?:minutes?|mins?|m)\b)?', salida, re.I)
-    if m and (m[1] or m[2]):
-        return int(m[1] or 0) * 3600 + int(m[2] or 0) * 60 + margen
+    m = re.search(r'(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:days?|d)(?![a-z]))?\s*'
+                  r'(?:(\d+)\s*(?:hours?|hrs?|h)(?![a-z]))?\s*(?:(\d+)\s*(?:minutes?|mins?|m)(?![a-z]))?\s*'
+                  r'(?:(\d+)\s*(?:seconds?|secs?|s)(?![a-z]))?', salida, re.I)
+    if m and any(m.groups()):
+        d, h, mi, sg = (int(g or 0) for g in m.groups())
+        return d * 86400 + h * 3600 + mi * 60 + sg + margen
     m = re.search(r'(?:try again|resets?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b', salida, re.I)
     if m:
         h = int(m[1]) % 12 + (12 if m[3].lower() == 'pm' else 0)
@@ -1375,18 +1949,40 @@ def espera_cuota(salida, ahora=None):
         if objetivo <= ahora:
             objetivo += timedelta(days=1)
         return int((objetivo - ahora).total_seconds()) + margen
-    return 1800
+    return sin_hora
 
 
-def esperar(root, segundos):
+def leer_espera(root):
+    """Devuelve (hora de fin, motivo) de la espera en curso; (None, '') si no hay marca legible."""
+    try:
+        primera, _, motivo = (root / ESPERA).read_text(encoding='utf-8').partition('\n')
+        return fecha_estado(primera.strip()), motivo.strip() or 'sin cuota'
+    except (OSError, ValueError):
+        return None, ''
+
+
+def esperar(root, segundos, motivo='sin cuota', cuotas_esperadas=None):
     """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
     hasta = datetime.now() + timedelta(seconds=segundos)
-    (root / ESPERA).write_text(hasta.isoformat(timespec='minutes'), encoding='utf-8')
-    print(f'[orquestar] sin cuota: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
+    pendientes = set(marcas_cuota(root, fecha_estado(ahora()))) if motivo == 'sin cuota' else set()
+    (root / ESPERA).write_text(f"{hasta.isoformat(timespec='minutes')}\n{motivo}", encoding='utf-8')
+    print(f'[orquestar] {motivo}: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
     try:
         while datetime.now() < hasta:
             if (root / PARADA).exists():
                 return False
+            if motivo == 'sin cuota':
+                filas = leer_metricas(root)
+                if cuotas_esperadas is not None:
+                    nuevas = filas[cuotas_esperadas['desde']:]
+                    pares = set(cuotas_esperadas['pares']) | {
+                        (f.get('arnes'), f['modelo_cuota']) for f in nuevas
+                        if f.get('modelo_cuota') and f.get('cuota_espera_s') is not None}
+                    if any(f.get('tipo') == 'cuota_recuperada'
+                           and (f.get('arnes'), f.get('modelo_cuota')) in pares for f in nuevas):
+                        return True
+                if pendientes and pendientes - set(marcas_cuota(root, fecha_estado(ahora()), filas)):
+                    return True
             time.sleep(min(30, max((hasta - datetime.now()).total_seconds(), 0)))
         return True
     finally:
@@ -1395,7 +1991,7 @@ def esperar(root, segundos):
 
 # ---------------------------------------------------------------- avisos por Telegram
 
-EVENTOS = ('version', 'cuota', 'respuesta', 'error')  # fin de versión/producto, sin cuota, te toca, fallo
+EVENTOS = ('version', 'cuota', 'respuesta', 'error', 'arnes')
 
 
 def leer_env(ruta):
@@ -1419,14 +2015,32 @@ def leer_env(ruta):
     return valores
 
 
+class CredencialesTelegram:
+    """Credenciales efectivas y procedencia del token de Telegram."""
+
+    def __init__(self, token, usuarios, origen):
+        self.token = token
+        self.usuarios = usuarios
+        self.origen = origen
+
+    def __iter__(self):
+        """Conserva el desempaquetado histórico de token y usuarios."""
+        yield self.token
+        yield self.usuarios
+
+
 def credenciales(root=None):
-    """(token, usuarios autorizados) de .env (en root o CWD) o del entorno de ejecución."""
+    """Devuelve las credenciales efectivas y el origen del token."""
     base = Path(root) if root else Path.cwd()
     env = leer_env(base / '.env')
-    token = env.get('TELEGRAM_BOT_TOKEN') or os.environ.get('TELEGRAM_BOT_TOKEN', '')
-    raw_usr = env.get('TELEGRAM_ALLOWED_USER_IDS') or os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '')
+    token_local = env.get('TELEGRAM_BOT_TOKEN', '').strip()
+    token_entorno = os.environ.get('TELEGRAM_BOT_TOKEN', '').strip()
+    token = token_local or token_entorno
+    origen = 'proyecto' if token_local else 'entorno' if token_entorno else 'ninguno'
+    ids_locales = env.get('TELEGRAM_ALLOWED_USER_IDS', '').strip()
+    raw_usr = ids_locales or os.environ.get('TELEGRAM_ALLOWED_USER_IDS', '').strip()
     usuarios = [u.strip() for u in str(raw_usr).split(',') if u.strip()]
-    return token.strip(), usuarios
+    return CredencialesTelegram(token, usuarios, origen)
 
 
 def telegram(root):
@@ -1462,12 +2076,24 @@ def enviar(token, chat, texto, markdown=False):
     return False
 
 
+def cargar_cierre_version():
+    """Carga el soporte de cierre solo al atender el comando o su aviso final."""
+    spec = importlib.util.spec_from_file_location(
+        'cierre_version', Path(__file__).resolve().parents[1] / 'telegram_gateway/cierre_version.py')
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
 def avisar(root, evento, texto):
     """Envía el aviso a los usuarios autorizados si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
     cfg = telegram(root)
     if not cfg or (evento and evento not in cfg[2]):
         return False
     token, usuarios, _ = cfg
+    version_final = re.search(r'Versión (v\d+\.\d+) terminada\.', texto)
+    if evento == 'version' and version_final:
+        texto += '\n' + cargar_cierre_version().resumen(root, version_final[1])
     texto_firmado = firmar(f'[{root.name}] {texto}')
     return all([enviar(token, u, texto_firmado) for u in usuarios])
 
@@ -1477,6 +2103,28 @@ def parar(root, evento, texto):
     print(f'[orquestar] PARAR: {texto}', flush=True)
     avisar(root, evento, f'⏸ {texto}')
     return 2
+
+
+def cambiar_de_rama(root, rama):
+    """Cambia a `rama` resolviendo sin persona los cambios pendientes: Clio los commitea o descarta; si quedan, `git stash`."""
+    actual = git('branch', '--show-current')
+    if git('status', '--porcelain'):
+        prompt = (f'El árbol de la rama {actual} tiene cambios sin commitear y el bucle debe cambiar a {rama}. '
+                  'Revisa `git status`: commitea (commit semántico) lo que pertenezca al trabajo hecho y '
+                  'descarta solo los restos (temporales o ignorables). No cambies de rama ni toques nada más.')
+        try:
+            agente(root, 'clio', prompt)
+        except (Exception, SystemExit) as exc:
+            print(f'[orquestar] Clio no pudo resolver los cambios: {exc}', flush=True)
+    if git('status', '--porcelain'):
+        nombre = f'orquestar: {actual} {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        subprocess.run(['git', 'stash', 'push', '-u', '-m', nombre], cwd=root, capture_output=True)
+        if git('status', '--porcelain'):
+            return False
+        print(f'[orquestar] cambios guardados en el stash «{nombre}»', flush=True)
+        avisar(root, 'error', f'🗃 Cambios sin commitear de {actual} guardados en el stash «{nombre}»; sigo en {rama}.')
+    git('checkout', '-q', rama)
+    return git('branch', '--show-current') == rama
 
 
 def evento_de(e):
@@ -1526,13 +2174,132 @@ def verificar(root, cmd):
                          'reutilizada': True, 'codigo': 0, 'id': os.environ.get('ORQUESTAR_ID', '')})
         return 0
     inicio = time.monotonic()
-    codigo = subprocess.run(cmd, shell=True, cwd=root).returncode
+    with tempfile.TemporaryFile() as captura:
+        codigo = subprocess.run(cmd, shell=True, cwd=root, stdout=captura, stderr=subprocess.STDOUT).returncode
+        captura.seek(0, os.SEEK_END)
+        captura.seek(max(0, captura.tell() - 32768))
+        salida = captura.read().decode('utf-8', errors='replace')
+    if salida:
+        print(salida, end='' if salida.endswith('\n') else '\n', flush=True)
     fila = {'fecha': ahora(), 'comando': cmd, 'arbol': clave, 'codigo': codigo,
-            'duracion_s': round(time.monotonic() - inicio)}
+            'salida': salida, 'duracion_s': round(time.monotonic() - inicio)}
     with f.open('a', encoding='utf-8') as out:
         out.write(json.dumps(fila, ensure_ascii=False) + '\n')
-    registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **fila})
+    metrica = {c: v for c, v in fila.items() if c != 'salida'}
+    registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **metrica})
     return codigo
+
+
+def reescribir_frontmatter(texto, cambios):
+    """Aplica `cambios` (clave: valor) a la cabecera de un fichero con frontmatter y devuelve (cabecera, cuerpo)."""
+    cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', texto, maxsplit=1)
+    for clave, valor in cambios.items():
+        if re.search(rf'^{clave}:', cabecera, re.M):
+            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
+        else:
+            cabecera += f'\n{clave}: {valor}'
+    return cabecera, cuerpo
+
+
+def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
+    """Bloquea para el humano y persiste el motivo en tarea y revisión de versión.
+
+    `causa` sustituye la frase de los intentos sin progreso cuando el bloqueo es por otro motivo.
+    """
+    fichero = fichero_de(root, iid)
+    version = vkey(frontmatter(fichero).get('version'))
+    dificultad = dificultad_de(root, iid)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    cola = (salida or '(el arnés no produjo salida)')[-2000:]
+    detalle = '\n'.join('    ' + linea for linea in cola.splitlines())
+    frase = causa or f'{iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}'
+    motivo = ((f'- {contexto}\n' if contexto else '')
+              + f'- {frase}; fecha: {ahora()}\n'
+              f'- Cola de la última salida:\n\n{detalle}\n')
+    cabecera, cuerpo = reescribir_frontmatter(
+        fichero.read_text(encoding='utf-8'), {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy})
+    cuerpo = re.sub(r'\n## Bloqueo sin progreso\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
+    fichero.write_text(cabecera + '\n---\n' + cuerpo.rstrip('\n') + '\n\n## Bloqueo sin progreso\n' + motivo,
+                       encoding='utf-8')
+    rutas = [str(fichero.relative_to(root))]
+    if version:
+        revision = root / f'docs/review/versions/v{version[0]}.{version[1]}-revision.md'
+        revision.parent.mkdir(parents=True, exist_ok=True)
+        previo = revision.read_text(encoding='utf-8') if revision.exists() else ''
+        revision.write_text(previo.rstrip('\n') + f'\n\n## {iid} · Bloqueo sin progreso\n' + motivo, encoding='utf-8')
+        rutas.append(str(revision.relative_to(root)))
+    subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True, check=True)
+    subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): bloquear tarea sin progreso', '--', *rutas],
+                   cwd=root, capture_output=True, check=True)
+    avisar(root, 'respuesta', (f'{contexto}\n' if contexto else '')
+           + (f'⏸ {causa}; ' if causa else f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; ')
+           + f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
+
+
+def registrar_fallo_suite(root, version, cmd):
+    """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
+    evidencia = root / EVIDENCIAS
+    filas = [json.loads(l) for l in evidencia.read_text(encoding='utf-8').splitlines() if l.strip()]
+    ultima = next(f for f in reversed(filas) if f['comando'] == cmd and f['codigo'])
+    salida = ultima.get('salida') or '(el comando no produjo salida)'
+    cola_aviso = salida[-1200:]
+    clave_comando = hashlib.sha256(cmd.encode('utf-8')).hexdigest()
+    directorio = backlog_dirs(root)[1]
+    fichero = next((f for f in sorted(directorio.glob('*.md'))
+                    if frontmatter(f).get('suite_cierre', '').lower() == 'true'
+                    and vkey(frontmatter(f).get('version')) == vkey(version)
+                    and frontmatter(f).get('suite_clave') == clave_comando), None)
+    hoy = datetime.now().strftime('%Y-%m-%d')
+    if fichero:
+        fm = frontmatter(fichero)
+        iid = fm['id']
+        if fm.get('status') in ('blocked', 'cancelled'):
+            return iid, f'{iid}: el bug de cierre está {fm["status"]}; no se reabre. Cola de la última salida:\n{cola_aviso}'
+        texto = fichero.read_text(encoding='utf-8')
+    else:
+        directorio.mkdir(parents=True, exist_ok=True)
+        iid = siguiente_id(root, 'B')
+        fichero = directorio / f'{iid}-suite-roja-al-cerrar-version.md'
+        titulo = 'La suite falla al cerrar la versión'
+        texto = (f'---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n'
+                 f'type: bug\nweight: 10\ndificultad: media\nversion: {json.dumps(version)}\n'
+                 f'status: planned\ndepende_de: []\ncreated_at: {hoy}\n'
+                 f'suite_cierre: true\nsuite_clave: {clave_comando}\n'
+                 f'---\n\n# {iid}: {titulo}\n\n## Descripción del fallo\n'
+                 'La suite completa de cierre devuelve un código distinto de cero. '
+                 'Debe pasar antes de revisar o cerrar la versión.\n\n'
+                 '## Reproducir\nEjecutar el comando indicado en la evidencia desde la raíz del proyecto.\n')
+        fichero.write_text(texto, encoding='utf-8')
+        fm = frontmatter(fichero)
+    dificultad = dificultad_de(root, iid)
+    intentos = int(fm.get('suite_intentos', '0')) if fm.get('suite_dificultad') == dificultad else 0
+    if fm.get('status') == 'completed':
+        intentos += 1
+    motivo = ''
+    if intentos >= 3:
+        nueva = promover_dificultad(root, iid, motivo=f'{intentos} arreglos tras los que la suite sigue roja')
+        if nueva:
+            dificultad, intentos = nueva, 0
+            texto = fichero.read_text(encoding='utf-8')
+        else:
+            motivo = (f'{iid}: la suite sigue fallando tras 3 intentos en dificil. '
+                      f'Cola de la última salida (completa en el bug):\n{cola_aviso}')
+    cambios = {'status': 'blocked' if motivo else 'planned', 'updated_at': hoy,
+               'suite_dificultad': dificultad, 'suite_intentos': str(intentos)}
+    if motivo:
+        cambios['pendiente_de'] = 'humano'
+    cabecera, cuerpo = reescribir_frontmatter(texto, cambios)
+    cuerpo = re.sub(r'\n## Último fallo de suite\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
+    detalle = '\n'.join('    ' + linea for linea in salida.splitlines())
+    cuerpo += (f'\n## Último fallo de suite\n- Comando: {json.dumps(cmd, ensure_ascii=False)}\n'
+               f'- Código: {ultima["codigo"]}; árbol: {ultima["arbol"]}; fecha: {ahora()}\n\n{detalle}\n')
+    fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
+    ruta = str(fichero.relative_to(root))
+    subprocess.run(['git', 'add', '--', ruta], cwd=root, capture_output=True, check=True)
+    subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): registrar fallo de suite al cierre',
+                    '--', ruta], cwd=root, capture_output=True, check=True)
+    print(f'[orquestar] {iid}: suite roja registrada para {version} ({intentos} intentos en {dificultad}).', flush=True)
+    return iid, motivo
 
 
 # ---------------------------------------------------------------- ficheros del bucle y métricas
@@ -1594,17 +2361,7 @@ def registrar(root, fila):
 
 def leer_metricas(root):
     """Lee registros completos; tolera una última línea aún en escritura."""
-    ruta = root / METRICAS
-    filas = []
-    if ruta.exists():
-        for linea in ruta.read_text(encoding='utf-8').splitlines():
-            try:
-                fila = json.loads(linea)
-            except ValueError:
-                continue
-            if isinstance(fila, dict):
-                filas.append(fila)
-    return filas
+    return metricas.leer_registros(root, tolerar_ultima=True)
 
 
 def fecha_estado(valor):
@@ -1699,10 +2456,15 @@ def cuota_codex(instante):
     return ultima
 
 
-def consumo_cuotas(root, instante):
+def consumo_cuotas(root, instante, filas=None):
     """Suma la ventana de tokens y conserva todo agotamiento todavía vigente."""
-    uso, cuotas = {}, {}
-    for fila in leer_metricas(root):
+    uso = {}
+    filas = leer_metricas(root) if filas is None else filas
+    marcas = marcas_cuota(root, instante, filas)
+    cuotas = {clave: marca['hasta'] for clave, marca in marcas.items() if marca['hasta'] > instante}
+    for clave in cuotas:
+        uso[clave] = 0
+    for fila in filas:
         fecha = fecha_estado(fila.get('fecha'))
         if fecha is None or fecha > instante:
             continue
@@ -1713,21 +2475,16 @@ def consumo_cuotas(root, instante):
                 clave = (arnes, modelo)
                 uso[clave] = uso.get(clave, 0) + sum(tokens.get(c) or 0 for c in
                                                      ('entrada', 'cache_leida', 'cache_escrita', 'salida'))
-        segundos = fila.get('cuota_espera_s')
-        modelo = fila.get('modelo_cuota')
-        if segundos is None and fila.get('sin_cuota') and fila.get('espera_s') is not None:
-            segundos = fila['espera_s']
-            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
-        if modelo and numero_cuota(segundos) and segundos >= 0:
-            try:
-                hasta = fecha + timedelta(seconds=segundos)
-            except OverflowError:
-                continue
-            if hasta > instante:
-                clave = (arnes, modelo)
-                uso.setdefault(clave, 0)
-                cuotas[clave] = max(cuotas.get(clave, hasta), hasta)
     return uso, cuotas
+
+
+def detalle_marca(marca, instante):
+    """Texto compartido de agotamiento, certeza y origen para estado y agentes."""
+    hasta = marca['hasta']
+    minutos = math.ceil((hasta - instante).total_seconds() / 60)
+    etiqueta = 'supuesto' if marca['tipo'] == 'supuesta' else 'real'
+    return (f'100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min)'
+            f' · {etiqueta}: {marca["origen"]}')
 
 
 def informe_agentes(root, docs='docs/requirements'):
@@ -1743,85 +2500,56 @@ def informe_agentes(root, docs='docs/requirements'):
     if e[0] == 'PASO':
         paso, iid = e[1:3]
         dificultad = dificultad_de(root, iid) if iid else None
-        rol, perfil = rol_de(root, paso, dificultad=dificultad)
+        rol, perfil = rol_de(root, paso, dificultad=dificultad, iid=iid)
         perfil, escalado = escalada(root, rol, perfil, iid)
-        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
+        hades = aplicar_perfil(root, iid, 'hades',
+                               ajustes(config(root).get('hades', {}), paso, dificultad=dificultad))
         lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
         for nombre, efectivo in ((rol, perfil), ('hades', hades)):
             lineas.append(f'{nombre}: {perfil_estado(efectivo)}'
-                          + (' [escalada]' if nombre == rol and escalado else ''))
+                          + (' [escalada]' if nombre == rol and escalado else '')
+                          + (' [fijado por la tarea]' if efectivo.get('fijado') else ''))
     limites = {}
     for _, _, perfil in perfiles:
         clave = (perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado')
         limite = limite_cuota(perfil)
         limites[clave] = min(limites.get(clave, limite), limite)
-    uso, cuotas = consumo_cuotas(root, instante)
+    filas = leer_metricas(root)
+    uso, cuotas = consumo_cuotas(root, instante, filas)
+    marcas = marcas_cuota(root, instante, filas)
     nativo = cuota_codex(instante) if any(h == 'codex' for h, _ in limites) else None
     lineas.append('Cuota por modelo (referencia local cuando no hay dato nativo):')
     for clave, limite in sorted(limites.items()):
         tokens = uso.get(clave, 0)
         hasta = cuotas.get(clave)
         if hasta:
-            minutos = math.ceil((hasta - instante).total_seconds() / 60)
-            detalle = f'100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min)'
+            detalle = detalle_marca(marcas[clave], instante)
         elif clave[0] == 'codex' and nativo:
             detalle = f'{nativo[1]:.1f}% consumido · resetea {nativo[2]:%H:%M %z}'
         else:
             porcentaje = min(100.0, round(tokens * 100.0 / limite, 1))
             detalle = f'{porcentaje:.1f}% consumido ({tokens} / {limite} tokens en 5 h)'
         lineas.append(f'{clave[0]}/{clave[1]}: {detalle}')
-    espera = root / ESPERA
-    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
+    hasta, _ = leer_espera(root)
     if hasta and hasta > instante:
         lineas.append(f'Espera global: hasta {hasta:%H:%M %z} '
                       f'({math.ceil((hasta - instante).total_seconds() / 60)} min restantes)')
     return '\n'.join(lineas)
 
 
-def detalle_estado(root, e):
-    """Presentación común de agentes efectivos y evidencia reciente de uso/cuota."""
-    instante = fecha_estado(ahora())
-    lineas, perfiles = [], []
-    if e[0] == 'PASO':
-        paso, iid = e[1:3]
-        dificultad = dificultad_de(root, iid) if iid else None
-        rol, cfg = rol_de(root, paso, dificultad=dificultad)
-        cfg, escalado = escalada(root, rol, cfg, iid)
-        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
-        lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
-        for nombre, perfil in ((rol, cfg), ('hades', hades)):
-            reservas = lista_reservas(perfil)
-            perfiles.extend([perfil] + reservas)
-            lineas.append(f'{nombre}: {perfil_estado(perfil)}'
-                          + (' [escalada]' if nombre == rol and escalado else '')
-                          + ('; reservas: ' + ', '.join(perfil_estado(r) for r in reservas) if reservas else ''))
-    uso, cuotas = consumo_cuotas(root, instante)
-    for perfil in perfiles:
-        uso.setdefault((perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado'), 0)
-    espera = root / ESPERA
-    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
-    if hasta and hasta > instante:
-        minutos = int((hasta - instante).total_seconds() + 59) // 60
-        lineas.append(f'Espera global: hasta {hasta:%Y-%m-%d %H:%M %z} ({minutos} min restantes)')
-    if not uso:
-        lineas.append('Sin uso registrado en las últimas 5 h')
-    for clave, tokens in sorted(uso.items()):
-        hasta = cuotas.get(clave)
-        cuota = (f'agotado hasta {hasta:%Y-%m-%d %H:%M %z} '
-                 f'({int((hasta - instante).total_seconds() + 59) // 60} min restantes)' if hasta else
-                 'sin agotamiento registrado')
-        lineas.append(f'{clave[0]}/{clave[1]}: {tokens} tokens (5 h); {cuota}')
-    return lineas
-
-
 def resumen(root):
     """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
-    if (root / PID).exists():
-        print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
+    vivo = pid_vivo(root)
+    if vivo:
+        print(f'[orquestar] en marcha (pid {vivo}); salida en {LOG}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
     if not (root / METRICAS).exists():
         return
+    instante = fecha_estado(ahora())
+    for (harness, modelo), marca in sorted(marcas_cuota(root, instante).items()):
+        if marca['hasta'] > instante:
+            print(f'[orquestar] {harness}/{modelo}: {detalle_marca(marca, instante)}')
     filas = leer_metricas(root)
     tipo = lambda t: [f for f in filas if f.get('tipo', 'paso') == t]
     coste = sum(f.get('coste_usd') or 0 for f in filas)
@@ -1845,11 +2573,11 @@ def resumen(root):
 
 def parte(root, docs='docs/requirements'):
     """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
-    hasta = fecha_estado((root / ESPERA).read_text(encoding='utf-8').strip()) if (root / ESPERA).exists() else None
+    hasta, motivo = leer_espera(root)
     if hasta and hasta > fecha_estado(ahora()):
-        marcha = f'esperando cuota hasta {hasta:%H:%M}'
+        marcha = f'esperando ({motivo}) hasta {hasta:%H:%M}'
     else:
-        marcha = 'en marcha' if (root / PID).exists() else 'parado'
+        marcha = 'en marcha' if pid_vivo(root) else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
     items = backlog(root)
@@ -1872,10 +2600,21 @@ def parte(root, docs='docs/requirements'):
     return '\n'.join(lineas)
 
 
-def iniciar_gateway(root):
+_gateway_aviso_entorno = set()
+_GATEWAY_SOLO_AVISOS = 'token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto'
+
+
+def iniciar_gateway(root, informar=True):
     """Solicita el gateway opcional sin abortar el bucle si falla su lanzador."""
     try:
-        if not telegram(root):
+        cfg = telegram(root)
+        if not cfg:
+            return
+        if credenciales(root).origen == 'entorno':
+            clave = str(Path(root).resolve())
+            if informar and clave not in _gateway_aviso_entorno:
+                _gateway_aviso_entorno.add(clave)
+                print(f'[orquestar] {_GATEWAY_SOLO_AVISOS}', flush=True)
             return
         resultado = subprocess.run(
             [sys.executable, str(SKILL.parent.parent / 'telegram_gateway' / 'gateway.py'),
@@ -1890,11 +2629,13 @@ def iniciar_gateway(root):
 
 def en_fondo(root, argumentos=None):
     """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
-    if (root / PID).exists():
-        sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
+    vivo = pid_vivo(root)
+    if vivo:
+        sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). '
                  f'Si no es así, borra {PID}.')
+    (root / PID).unlink(missing_ok=True)
     excluir(root)
-    iniciar_gateway(root)
+    iniciar_gateway(root, informar=False)
     args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
     opciones = {'start_new_session': True}
     if os.name == 'nt':
@@ -1919,10 +2660,14 @@ def main():
     ap.add_argument('--max-pasos', type=int, default=100)
     ap.add_argument('--presupuesto', type=float, help='gasto máximo por paso en USD (solo claude)')
     ap.add_argument('--reintentos', type=int, default=2, help='pasos seguidos sin progreso antes de parar')
+    ap.add_argument('--reintentos-arnes', type=int, default=3,
+                    help='reintentos por perfil ante errores sin cuota (>= 0; esperas 60, 300, 900 segundos)')
     ap.add_argument('--espera-max', type=float, default=12,
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
+    ap.add_argument('--cuota-reset', nargs='?', const='', metavar='ARNES[/MODELO]',
+                    help='recupera marcas de cuota del selector, o todas si se omite')
     ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
                     help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
     ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
@@ -1935,11 +2680,30 @@ def main():
     ap.add_argument('--prompt-file', type=Path, help='mandato para --agente (si no, por la entrada estándar)')
     ap.add_argument('--verificar', nargs='?', const='suite', metavar='CMD',
                     help='ejecuta la suite (o CMD) o reutiliza su resultado en verde para el mismo árbol')
+    ap.add_argument('--calidad', action='store_true', help='comprueba formato y lint del delta de una tarea')
+    ap.add_argument('--base', help='base Git estable de la tarea para --calidad')
+    ap.add_argument('--aplicar', action='store_true', help='aplica formato en escritura antes de --calidad')
     ap.add_argument('--aviso-prueba', action='store_true', help=f'envía un aviso de prueba a Telegram ({CONFIG})')
     a = ap.parse_args()
+    if a.reintentos_arnes < 0:
+        ap.error('--reintentos-arnes debe ser un entero no negativo')
     root = Path.cwd()
     sys.stdout.reconfigure(encoding='utf-8')
     sys.stderr.reconfigure(encoding='utf-8')
+
+    if a.cuota_reset is not None:
+        print(f'[orquestar] {reset_cuotas(root, a.cuota_reset)} marcas de cuota recuperadas.')
+        return 0
+
+    if a.calidad:
+        if not a.base:
+            ap.error('--calidad requiere --base con la base Git estable de la tarea')
+        spec = importlib.util.spec_from_file_location('adevv_calidad', SKILL.with_name('calidad.py'))
+        modulo = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(modulo)
+        return modulo.ejecutar(root, a.base, a.aplicar, verificar)
+    if a.base is not None or a.aplicar:
+        ap.error('--base y --aplicar requieren --calidad')
 
     if a.agentes:
         print(informe_agentes(root, a.docs))
@@ -1995,7 +2759,10 @@ def main():
         print('[orquestar] aviso enviado' if ok else '[orquestar] el aviso no se pudo enviar')
         return 0 if ok else 1
     if a.parar:
-        if not (root / PID).exists():
+        vivo = pid_vivo(root)
+        if not vivo:
+            (root / PID).unlink(missing_ok=True)
+            (root / PARADA).unlink(missing_ok=True)
             print('[orquestar] no hay ningún bucle en marcha')
             return 0
         excluir(root)
@@ -2011,15 +2778,16 @@ def main():
         resumen(root)
     elif a.recarga is not None:
         pass
-    elif (root / PID).exists():
-        sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). Si no es así, borra {PID}.')
+    elif (vivo := pid_vivo(root)):
+        sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.')
     else:
+        (root / PID).unlink(missing_ok=True)
         excluir(root)
         (root / PID).write_text(str(os.getpid()), encoding='utf-8')
     try:
         return bucle(a, root)
     finally:
-        if not a.estado and (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
+        if not a.estado and es_propietario_pid(root):
             for f in (PID, PARADA, ESPERA):
                 (root / f).unlink(missing_ok=True)
 
@@ -2030,6 +2798,7 @@ def cierre_de_version(e):
 
 
 def bucle(a, root):
+    _gateway_aviso_entorno.discard(str(Path(root).resolve()))
     if not a.estado:
         iniciar_gateway(root)
     if a.idea and not (root / a.docs / 'requirements.md').exists():
@@ -2040,12 +2809,19 @@ def bucle(a, root):
     recarga = getattr(a, 'recarga', None) or {}
     sin_progreso = recarga.get('sin_progreso', 0)
     esperado = recarga.get('esperado', 0)
+    intentos_dependencias = {tuple(r['errores']): r['n'] for r in recarga.get('intentos_dependencias', [])}
+    recuperaciones_analisis = {(r['paso'], r['arg']): r
+                              for r in recarga.get('recuperaciones_analisis', [])}
     for n in range(recarga.get('n', 1), a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
             return 2
         if not a.estado and recargar_version(__file__, root, PID,
-                                             {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado}, 'orquestar'):
+                                             {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado,
+                                              'recuperaciones_analisis': list(recuperaciones_analisis.values()),
+                                              'intentos_dependencias': [{'errores': list(k), 'n': v}
+                                                                        for k, v in intentos_dependencias.items()]},
+                                             'orquestar'):
             return 0
         if not a.estado:
             for iid, titulo in ingerir(root):
@@ -2053,8 +2829,17 @@ def bucle(a, root):
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
-        if not a.estado and cmd_suite and cierre_de_version(e) and verificar(root, cmd_suite):
-            return parar(root, 'version', f'la versión no tiene más tareas elegibles pero la suite falla ({cmd_suite}).')
+        if not a.estado and cmd_suite and cierre_de_version(e):
+            version = e[2] if e[0] == 'PASO' else re.search(r'\bv\d+\.\d+(?:\.\d+)?', e[1])[0]
+            rama_cierre = e[3] if e[0] == 'PASO' else f'release/{version}'
+            if rama_cierre and git('branch', '--show-current') != rama_cierre:
+                if not cambiar_de_rama(root, rama_cierre):
+                    return parar(root, 'error', f'no puedo cambiar a {rama_cierre}.')
+            if verificar(root, cmd_suite):
+                iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
+                if motivo:
+                    return parar(root, 'version', motivo)
+                e = estado(root, a.docs)
         if a.estado:
             return 0 if e[0] in ('FIN', 'PASO') else 2
         if e[0] == 'FIN':
@@ -2064,33 +2849,63 @@ def bucle(a, root):
             return parar(root, evento_de(e), e[1])
         _, paso, arg, rama = e
         if rama and git('branch', '--show-current') != rama:
-            if git('status', '--porcelain'):
-                return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama}.')
-            git('checkout', '-q', rama)
+            if not cambiar_de_rama(root, rama):
+                return parar(root, 'error', f'no puedo cambiar a {rama}.')
 
         dif = dificultad_de(root, arg) if arg else None
-        if paso in ('task-dev', 'bug-fix') and arg:
+        fijado, estricto = perfil_fijado_de(root, arg, 'artemisa') if arg else (None, False)
+        estricto = bool(fijado and estricto)
+        if paso in ('task-dev', 'bug-fix') and arg and estricto:
+            motivo = agotado_estricto(root, arg)
+            if motivo:
+                print(f'[orquestar] {arg}: {motivo} con el perfil fijado estricto; no cambio de modelo.', flush=True)
+                registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': arg, 'de': dif,
+                                 'dificultad': dif, 'estricto': True})
+                bloquear_sin_progreso(root, arg, 0, '', causa=(
+                    f'{arg} bloqueada para el humano: {motivo} con el perfil fijado estricto, que impide '
+                    'subir de dificultad o escalar a otro modelo'))
+                continue
+        if paso in ('task-dev', 'bug-fix') and arg and not estricto:
             debe, motivo = comprobar_promocion(root, arg)
             if debe:
                 nueva_dif = promover_dificultad(root, arg, motivo=motivo)
                 if nueva_dif:
                     dif = nueva_dif
         antes = firma(root, a.docs)
-        rol, cfg_rol = rol_de(root, paso, dificultad=dif)
-        cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
+        rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
+        escalado = False
+        if paso not in PASOS_ANALISIS:
+            cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
+            cfg_rol = {k: v for k, v in cfg_rol.items() if k != 'fijado'}
             print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '
                   f'escalo a {cfg_rol.get("model") or cfg_rol.get("harness")}', flush=True)
+        clave_analisis = (paso, arg or '')
+        recuperacion = None
+        if paso in PASOS_ANALISIS:
+            if clave_analisis not in recuperaciones_analisis:
+                recuperaciones_analisis[clave_analisis] = {
+                    'paso': paso, 'arg': arg or '', 'indice': 0, 'intentos': 0,
+                    'perfiles': cadena_analisis(root, paso, dif, arg)}
+            recuperacion = recuperaciones_analisis[clave_analisis]
+            cfg_rol = recuperacion['perfiles'][recuperacion['indice']]
         prompt = construir_prompt_paso(root, paso, arg)
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
         reservas = lista_reservas(cfg_rol)
-        configs_a_probar = [cfg_rol] + reservas
+        configs_originales = [cfg_rol] + reservas
+        contexto_cuota = {'desde': len(leer_metricas(root)), 'pares': {
+            (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado')
+            for cfg in configs_originales}}
+        configs_a_probar = configs_originales
         if not a.cmd and not a.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
+        cede = 'sin cuota' if cfg_rol.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg_rol else ''
+        ausencia_fijada = False
         cuotas_paso = []
+        recuperaciones_paso = []
         sesion_anterior = None
         arnes_anterior = None
         codigo = 1
@@ -2098,62 +2913,194 @@ def bucle(a, root):
         salida = ''
         cuota = None
         cfg_usada = cfg_rol
+        hubo_ejecucion = False
+        pendiente_cuota = False
+        paso_completado = False
+        ultimo_registrado = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-            cfg_usada = cfg_actual
-            f_met = root / METRICAS
-            n_met = sum(1 for _ in f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
             arnes_paso = a.cmd or arnes(a, cfg_actual)
-
             if idx_cfg == 0:
-                sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
+                nueva_sesion = (recuperacion and recuperacion['indice'] > 0
+                                and not recuperacion.get('perfil_iniciado', False))
+                sesion_paso = None if nueva_sesion else buscar_sesion_paso(root, paso, arg, arnes_paso)
             elif arnes_paso == arnes_anterior:
                 sesion_paso = sesion_anterior
             else:
                 sesion_paso = None
 
-            if sesion_paso:
-                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
-            else:
-                codigo, m, salida = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+            ausente = False
+            for intento in range(getattr(a, 'reintentos_arnes', 3) + 1):
+                if (root / PARADA).exists():
+                    return 2
+                f_met = root / METRICAS
+                n_met = len(f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+                try:
+                    if recuperacion is not None:
+                        recuperacion['perfil_iniciado'] = True
+                    if sesion_paso:
+                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+                    else:
+                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+                except ArnesAusente:
+                    posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
+                    registrar_ausencia(root, 'paso', posicion,
+                                       {**cfg_actual, 'harness': arnes_paso}, rol=rol, paso=paso, id=arg)
+                    if cfg_actual is cfg_rol and cfg_rol.get('fijado'):
+                        ausencia_fijada = True
+                        cede = 'sin arnés'
+                    ausente = True
+                    break
+                codigo, m, salida = resultado
+                if cede and cfg_actual is not cfg_rol:
+                    avisar_perfil(root, arg, cfg_rol, cede, cfg_actual)
+                    cede = ''
+                ultimo_registrado = False
+                hubo_ejecucion = True
+                pendiente_cuota = False
+                cfg_usada = cfg_actual
+                cuota = espera_cuota(salida) if codigo else None
+                if cuota is None and f_met.exists():
+                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
+                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
+                if not codigo or cuota is not None:
+                    break
+                if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                    paso_completado = True
+                    break
+                if intento == getattr(a, 'reintentos_arnes', 3):
+                    break
+                registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'rama': git('branch', '--show-current'), 'rol': rol,
+                                 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                 **({'escalado': True} if escalado else {})})
+                demora = (60, 300, 900)[min(intento, 2)]
+                inicio = time.monotonic()
+                seguir = esperar(root, demora, motivo='fallo del arnés')
+                registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'motivo': 'fallo_arnes', 'duracion_s': round(time.monotonic() - inicio)})
+                if not seguir:
+                    print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
+                    return 2
+                sesion_paso = None
+            if ausente:
+                continue
 
+            if codigo and cuota is None and not paso_completado and idx_cfg == len(configs_a_probar) - 1:
+                restante, recuperada = cuota_descartada(root, configs_originales, configs_a_probar,
+                                                       incluir_recuperadas=True)
+                if restante == 0:
+                    configs_a_probar.append(recuperada)
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
             if codigo and cuota_propia is not None:
-                m.update(modelo_cuota=cfg_actual.get('model') or 'predeterminado', cuota_espera_s=cuota_propia)
+                datos = fallo_cuota(root, arnes_paso, cfg_actual.get('model') or 'predeterminado', salida)
+                m.update(datos)
+                cuota_propia = datos['cuota_espera_s']
                 cuotas_paso.append(cuota_propia)
+                recuperaciones_paso.append((time.monotonic() + cuota_propia, cfg_actual))
                 if hay_mas_reservas:
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
-                                     'rol': rol, 'arnes': arnes_paso, 'codigo': codigo, **m,
+                                     'rol': rol, 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
                                      **({'escalado': True} if escalado else {}),
                                      'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
                           f'conmutando a reserva...', flush=True)
+                    if cfg_actual is cfg_rol and cfg_rol.get('fijado'):
+                        cede = 'sin cuota'
                     arnes_anterior = arnes_paso
                     sesion_anterior = m.get('sesion')
+                    pendiente_cuota = True
                     continue
                 else:
                     cuota = min(cuotas_paso)
                     break
+            elif codigo and cuota is None and not paso_completado and hay_mas_reservas:
+                registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                 'rama': git('branch', '--show-current'), 'rol': rol,
+                                 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                 **({'escalado': True} if escalado else {})})
+                ultimo_registrado = True
+                print(f'[orquestar] fallo persistente en {rol} ({cfg_actual.get("model") or arnes_paso}); '
+                      'conmutando a reserva...', flush=True)
+                arnes_anterior = None
+                sesion_anterior = None
+                continue
             else:
-                if cuota_propia is None and f_met.exists():
-                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
-                    cuota = next((f.get('espera_s', 1800) for f in reversed(nuevas)
-                                  if f.get('tipo') == 'agente' and f.get('sin_cuota')), None)
                 break
 
-        registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                         'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada), 'codigo': codigo, **m,
-                         **({'escalado': True} if escalado else {}),
-                         **({'sin_cuota': True} if cuota else {})})
+        if not hubo_ejecucion and ausencia_fijada and cfg_rol.get('estricto'):
+            motivo = (f'perfil fijado estricto {clave_perfil(cfg_rol)}: el arnés '
+                      f'"{cfg_rol.get("harness") or "claude"}" no está disponible y no se cambia de modelo')
+            print(f'[orquestar] {arg}: {motivo}', flush=True)
+            bloquear_sin_progreso(root, arg, 0, '', causa=f'{arg} bloqueada para el humano: {motivo}')
+            continue
+        if not hubo_ejecucion:
+            cuota, cfg_omitida = cuota_descartada(root, [cfg_rol] + reservas, configs_a_probar)
+            if cuota is None:
+                return parar(root, 'error', f'{paso}: ningún arnés disponible en el principal ni en las reservas.')
+            cfg_usada = cfg_omitida
+            m = {'modelos': {}}
+        if pendiente_cuota:
+            cuota = min(cuotas_paso)
+            m = {}
+        if codigo and not paso_completado and (cuota is None or cuotas_paso):
+            cuota_omitida, cfg_omitida = cuota_descartada(root, configs_originales, configs_a_probar)
+            pendientes = [(max(hasta - time.monotonic(), 0), cfg) for hasta, cfg in recuperaciones_paso]
+            if cuota_omitida is not None:
+                pendientes.append((cuota_omitida, cfg_omitida))
+            if pendientes:
+                cuota, cfg_recuperable = min(pendientes, key=lambda par: par[0])
+                if cfg_recuperable is not cfg_usada:
+                    if not ultimo_registrado:
+                        registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
+                                         'rama': git('branch', '--show-current'), 'rol': rol,
+                                         'arnes': a.cmd or arnes(a, cfg_usada),
+                                         'modelo': cfg_usada.get('model') or 'predeterminado',
+                                         'codigo': codigo, **m, **marca_fijado(cfg_usada),
+                                         **({'sin_cuota': True} if 'cuota_espera_s' in m else {}),
+                                         **({'escalado': True} if escalado else {})})
+                    cfg_usada = cfg_recuperable
+                    m = {'modelos': {}}
+        if not codigo:
+            recuperar_cuota(root, arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
+        if not ultimo_registrado or cuota is not None:
+            registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
+                             'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada),
+                             'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
+                             **marca_fijado(cfg_usada),
+                             **({'escalado': True} if escalado else {}),
+                             **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
+        if paso_completado:
+            print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
+            sin_progreso = 0
+            esperado = 0
+            recuperaciones_analisis.pop(clave_analisis, None)
+            continue
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
-            avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
-                                  f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
+            marcas = marcas_cuota(root, fecha_estado(ahora()))
+            clave = (arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
+            causas = [marcas[clave]] if clave in marcas else []
+            nuevas = leer_metricas(root)[contexto_cuota['desde']:]
+            for fila in nuevas:
+                if (fila.get('tipo') == 'agente' and fila.get('cuota_espera_s') is not None
+                        and fila.get('cuota_espera_s') == cuota):
+                    marca = marcas.get((fila.get('arnes'), fila.get('modelo_cuota')))
+                    if marca:
+                        causas.append(marca)
+            if not any(marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())
+                       for marca in causas):
+                avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
+                                      f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
             inicio = time.monotonic()
-            seguir = esperar(root, cuota)
+            seguir = esperar(root, cuota, cuotas_esperadas=contexto_cuota)
             registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
                              'duracion_s': round(time.monotonic() - inicio)})
             if not seguir:
@@ -2164,27 +3111,60 @@ def bucle(a, root):
             if firma(root, a.docs) != antes and not git('status', '--porcelain'):
                 print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
                 sin_progreso = 0
+                recuperaciones_analisis.pop(clave_analisis, None)
                 continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             return parar(root, 'cuota' if cuota is not None else 'error',
-                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.')
+                         f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.'
+                         + (f'\nÚltima salida del arnés:\n{salida[-2000:]}' if cuota is None else ''))
         esperado = 0
 
         if firma(root, a.docs) == antes:
+            if recuperacion is not None:
+                recuperacion['intentos'] += 1
+                print(f'[orquestar] {paso} {arg or ""}: sin progreso '
+                      f'({recuperacion["intentos"]}/{a.reintentos})', flush=True)
+                if recuperacion['intentos'] >= a.reintentos:
+                    if recuperacion['indice'] + 1 < len(recuperacion['perfiles']):
+                        recuperacion['indice'] += 1
+                        recuperacion['intentos'] = 0
+                        recuperacion['perfil_iniciado'] = False
+                    else:
+                        diagnostico = diagnostico_analisis(recuperacion, a.reintentos)
+                        if paso in ('especificar', 'revisar-tarea') and arg:
+                            print(f'[orquestar] {diagnostico}', flush=True)
+                            bloquear_sin_progreso(root, arg, a.reintentos, salida, contexto=diagnostico)
+                            recuperaciones_analisis.pop(clave_analisis, None)
+                        else:
+                            return parar(root, 'error', diagnostico)
+                continue
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')
             if sin_progreso >= a.reintentos:
                 if paso in ('task-dev', 'bug-fix') and arg:
                     dif_actual = dificultad_de(root, arg)
-                    if dif_actual in ('sencilla', 'media'):
+                    if dif_actual in ('sencilla', 'media') and not estricto:
                         nueva_dif = promover_dificultad(root, arg, motivo=f'tras {sin_progreso} intentos sin progreso')
                         if nueva_dif:
                             sin_progreso = 0
                             continue
+                    bloquear_sin_progreso(root, arg, sin_progreso, salida)
+                    sin_progreso = 0
+                    continue
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
+            recuperaciones_analisis.pop(clave_analisis, None)
+            if paso == 'calcular-dependencias':
+                errores = tuple(errores_dependencias(backlog(root)))
+                if not errores:
+                    intentos_dependencias.clear()
+                else:
+                    intentos_dependencias[errores] = intentos_dependencias.get(errores, 0) + 1
+                    if intentos_dependencias[errores] >= a.reintentos:
+                        return parar(root, 'respuesta', 'Dependencias inválidas en el backlog tras '
+                                     f'{a.reintentos} intentos de corregirlas: ' + '; '.join(errores))
     return parar(root, 'error', f'alcanzado --max-pasos={a.max_pasos}.')
 
 

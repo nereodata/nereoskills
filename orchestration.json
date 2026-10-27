@@ -30,6 +30,11 @@
         "harness": "agy",
         "model": "gemini-4-argon",
         "effort": "medium"
+      },
+      {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium"
       }
     ],
     "dificultad": {
@@ -39,7 +44,7 @@
         "effort": "medium",
         "reserva": [
           {
-            "harness": "agy",
+            "harness": "claude",
             "model": "claude-sonnet-5-5",
             "effort": "medium"
           },
@@ -47,11 +52,6 @@
             "harness": "codex",
             "model": "gpt-6-luna",
             "effort": "high"
-          },
-          {
-            "harness": "claude",
-            "model": "claude-sonnet-5-5",
-            "effort": "medium"
           }
         ]
       },
@@ -68,6 +68,11 @@
           {
             "harness": "agy",
             "model": "gemini-4-argon",
+            "effort": "medium"
+          },
+          {
+            "harness": "claude",
+            "model": "claude-sonnet-5-5",
             "effort": "medium"
           }
         ]
@@ -173,7 +178,7 @@
     "effort": "low",
     "reserva": [
       {
-        "harness": "agy",
+        "harness": "claude",
         "model": "claude-sonnet-5-5",
         "effort": "medium"
       },
@@ -190,7 +195,7 @@
     "effort": "low",
     "reserva": [
       {
-        "harness": "agy",
+        "harness": "claude",
         "model": "claude-sonnet-5-5",
         "effort": "medium"
       },

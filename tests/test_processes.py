@@ -10,6 +10,7 @@ from adevv.processes import (
     formatear_proceso_ui,
     hay_bucles_en_marcha,
 )
+from tests import aislamiento_telegram
 
 
 class TestProcesses(unittest.TestCase):

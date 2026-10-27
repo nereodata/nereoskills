@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+from tests import aislamiento_telegram
 
 SPEC = importlib.util.spec_from_file_location('orquestar_motor', Path(__file__).with_name('orquestar.py'))
 motor = importlib.util.module_from_spec(SPEC)

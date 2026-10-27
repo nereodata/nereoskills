@@ -1,6 +1,7 @@
 """Pruebas unitarias e integradas para el actualizador automático de Adevv."""
 
 import datetime
+import importlib.util
 import io
 import json
 import os
@@ -11,11 +12,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from adevv.cli import main_cli
+from adevv.cli import _resincronizar_desfasados_al_arrancar, main_cli
+from adevv.sync import sincronizar_destinos
 from adevv.store import (
     get_active_info,
     get_adevv_home,
     get_config,
+    get_sync_registry,
     get_update_state,
     set_active_info,
     set_config,
@@ -28,8 +31,11 @@ from adevv.updater import (
     consultar_versiones_publicadas,
     evaluar_comprobacion_actualizacion,
     instalar_version_publicada,
+    materializar_version_local,
+    mensaje_actualizacion,
     limpiar_versiones_antiguas,
 )
+from tests import aislamiento_telegram
 
 
 class TestUpdaterUnit(unittest.TestCase):
@@ -282,59 +288,18 @@ class TestUpdaterUnit(unittest.TestCase):
             self.assertEqual(ver, "0.2.1")
 
     def test_ejemplos_e8_e9_e10_e11_aplazada(self):
-        # E8: aplazada 0.2.0, aviso lun 09:00, ahora lun 12:00, bucle vivo -> APLAZADA sin aviso (3h < 24h)
-        lun_09 = datetime.datetime(2026, 10, 19, 9, 0, 0)
-        set_update_state({
-            "aplazada": "0.2.0",
-            "last_notice_aplazada_at": lun_09.isoformat(),
-        })
-        ahora_e8 = lun_09 + datetime.timedelta(hours=3)
-        bucle_proc = [{"pid": 999, "tipo": "bucle", "cwd": "C:\\SW\\Afinn", "cmd": "adevv orquestar"}]
-
-        with patch("adevv.updater.hay_bucles_en_marcha", return_value=bucle_proc), \
-             patch("adevv.updater.consultar_versiones_publicadas") as mock_query:
-            res, msg, ver = evaluar_comprobacion_actualizacion(ahora=ahora_e8)
-            self.assertEqual(res, ResultadoActualizacion.APLAZADA)
-            self.assertIsNone(msg)
-            mock_query.assert_not_called()
-
-        # E9: ahora lun 12:00, sin bucles -> APLICADA (aplazada no espera 24h)
-        set_update_state({
-            "aplazada": "0.2.0",
-            "last_notice_aplazada_at": lun_09.isoformat(),
-        })
-        with patch("adevv.updater.hay_bucles_en_marcha", return_value=[]), \
-             patch("adevv.updater.instalar_version_publicada") as mock_inst:
-            mock_inst.return_value = (True, "OK", [])
-            res, msg, ver = evaluar_comprobacion_actualizacion(ahora=ahora_e8)
-            self.assertEqual(res, ResultadoActualizacion.APLICADA)
-            self.assertEqual(ver, "0.2.0")
-
-        # E10: ahora mar 09:00 (24h), bucle vivo -> APLAZADA con aviso
-        set_update_state({
-            "aplazada": "0.2.0",
-            "last_notice_aplazada_at": lun_09.isoformat(),
-        })
-        ahora_e10 = lun_09 + datetime.timedelta(hours=24)
-        with patch("adevv.updater.hay_bucles_en_marcha", return_value=bucle_proc):
-            res, msg, ver = evaluar_comprobacion_actualizacion(ahora=ahora_e10)
-            self.assertEqual(res, ResultadoActualizacion.APLAZADA)
-            self.assertIsNotNone(msg)
-            self.assertIn("Adevv 0.2.0 disponible; se aplicará cuando no haya bucles en marcha: bucle en C:\\SW\\Afinn.", msg)
-
-        # E11: aplazada 0.2.0, ahora lun 12:00, solo gateway vivo -> APLICADA + reinicio gateway
-        set_update_state({
-            "aplazada": "0.2.0",
-            "last_notice_aplazada_at": lun_09.isoformat(),
-        })
-        gateway_proc = [{"pid": 888, "tipo": "gateway", "cwd": "C:\\SW\\Adevv", "cmd": "adevv telegram"}]
-        with patch("adevv.updater.hay_bucles_en_marcha", return_value=[]), \
-             patch("adevv.updater.detectar_procesos_adevv", return_value=gateway_proc), \
-             patch("adevv.updater.instalar_version_publicada") as mock_inst:
-            mock_inst.return_value = (True, "OK", [])
-            res, msg, ver = evaluar_comprobacion_actualizacion(ahora=ahora_e8)
-            self.assertEqual(res, ResultadoActualizacion.APLICADA)
-            self.assertIn("Reinicia el gateway en C:\\SW\\Adevv.", msg)
+        """Un aplazamiento heredado se consume con o sin bucles y sin consultar lista."""
+        for bucles in ([], [{"pid": 999, "tipo": "bucle", "cwd": "proyecto"}]):
+            for horas in (3, 24):
+                with self.subTest(bucles=bucles, horas=horas):
+                    inicio = datetime.datetime(2026, 10, 19, 9)
+                    set_update_state({"aplazada": "0.2.0", "last_notice_aplazada_at": inicio.isoformat()})
+                    with patch("adevv.updater.hay_bucles_en_marcha", return_value=bucles), patch("adevv.updater.consultar_versiones_publicadas") as query, patch("adevv.updater.instalar_version_publicada", return_value=(True, "OK", [])) as instalar:
+                        res, msg, ver = evaluar_comprobacion_actualizacion(ahora=inicio + datetime.timedelta(hours=horas))
+                    self.assertEqual((res, ver), (ResultadoActualizacion.APLICADA, "0.2.0"))
+                    instalar.assert_called_once_with(target_version="0.2.0", origin_url=None)
+                    query.assert_not_called()
+                    self.assertNotIn("aplazada", get_update_state())
 
     def test_ejemplo_e12_aplazada_sin_red(self):
         lun_09 = datetime.datetime(2026, 10, 19, 9, 0, 0)
@@ -506,6 +471,161 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         # Verificar que 0.1.0 sigue existiendo porque el gateway la usa
         self.assertTrue((self.adevv_home / "versions" / "0.1.0").exists())
 
+    def preparar_instalacion_con_bucle(self):
+        """Instalación real desde git local, copia intacta y transferencia al sucesor."""
+        vieja = self.adevv_home / "versions/0.5.0"
+        vieja.mkdir(parents=True)
+        (vieja / "pyproject.toml").write_text('[project]\nname="adevv"\nversion="0.5.0"\n', encoding="utf-8")
+        set_active_info({"version": "0.5.0", "origen": "publicada"})
+        (vieja / "skills/demo").mkdir(parents=True, exist_ok=True)
+        (vieja / "skills/demo/SKILL.md").write_text("anterior", encoding="utf-8")
+        script = vieja / "skills/orquestar/orquestar.py"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text("motor anterior", encoding="utf-8")
+        self.claude_home.mkdir(parents=True, exist_ok=True)
+        sincronizar_destinos(origen_dir=vieja, version="0.5.0")
+        registro = get_sync_registry("claude")
+        destino = self.claude_home / "skills/demo/SKILL.md"
+        repo = Path(self.temp_dir.name) / "origin"
+        repo.mkdir()
+        (repo / "pyproject.toml").write_text('[project]\nname="adevv"\nversion="0.6.1"\n', encoding="utf-8")
+        for rel, contenido in (("skills/demo/SKILL.md", "nuevo"), ("skills/orquestar/orquestar.py", "motor nuevo"), ("adevv/sync.py", "raise RuntimeError('no cargar sincronizador entrante con bucles')")):
+            archivo = repo / rel
+            archivo.parent.mkdir(parents=True, exist_ok=True)
+            archivo.write_text(contenido, encoding="utf-8")
+        for args in (("init",), ("config", "user.name", "Test"), ("config", "user.email", "test@example.test"), ("add", "."), ("commit", "-m", "release"), ("tag", "-a", "v0.6.1", "-m", "release")):
+            subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+        bucle = {"pid": 7777, "tipo": "bucle", "cwd": str(repo), "cmd": f'python "{script}"'}
+        with patch("adevv.processes.hay_bucles_en_marcha", return_value=[bucle]), patch("adevv.updater.hay_bucles_en_marcha", return_value=[bucle]), patch("adevv.updater.detectar_procesos_adevv", return_value=[bucle]):
+            ok, causa, pendientes = instalar_version_publicada("0.6.1", origin_url=str(repo))
+        self.assertTrue(ok, causa)
+        self.assertEqual(get_active_info()["version"], "0.6.1")
+        self.assertTrue(pendientes)
+        self.assertEqual(destino.read_text(encoding="utf-8"), "anterior")
+        self.assertEqual(get_sync_registry("claude"), registro)
+        self.assertEqual(script.read_text(encoding="utf-8"), "motor anterior")
+        spec = importlib.util.spec_from_file_location("motor_b09", Path(__file__).resolve().parents[1] / "skills/orquestar/orquestar.py")
+        motor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(motor)
+        root = Path(self.temp_dir.name)
+        (root / motor.PID).write_text(str(os.getpid()))
+        with patch.object(motor.subprocess, "Popen", return_value=MagicMock(pid=9876)) as lanzar:
+            self.assertTrue(motor.recargar_version(script, root, motor.PID, {"n": 1}, "orquestar"))
+        self.assertEqual(Path(lanzar.call_args.args[0][2]).resolve(), (self.adevv_home / "versions/0.6.1/skills/orquestar/orquestar.py").resolve())
+        sincronizar_destinos(origen_dir=self.adevv_home / "versions/0.6.1", version="0.6.1")
+        self.assertEqual(destino.read_text(encoding="utf-8"), "nuevo")
+
+    def test_instalacion_con_bucle_activa_sin_copiar_y_habilita_recarga(self):
+        """RF-F03-06: se adopta una versión compatible desde un motor v0.5."""
+        self.preparar_instalacion_con_bucle()
+
+    def test_version_existente_no_se_reemplaza_al_volver_atras(self):
+        """La vuelta atrás no reemplaza una carpeta que un proceso puede estar leyendo."""
+        self.preparar_instalacion_con_bucle()
+        existente = self.adevv_home / "versions/0.6.1"
+        marcador = existente / "archivo_en_uso"
+        marcador.write_text("intacto", encoding="utf-8")
+        set_active_info({"version": "0.7.0", "origen": "publicada"})
+        ok, causa, _ = instalar_version_publicada("0.6.1", origin_url=str(Path(self.temp_dir.name) / "origin"))
+        self.assertTrue(ok, causa)
+        self.assertEqual(marcador.read_text(encoding="utf-8"), "intacto")
+        self.assertEqual(get_active_info()["version"], "0.6.1")
+
+    def test_version_existente_invalida_no_se_borra_ni_activa(self):
+        """RF-F03-08: una carpeta inválida nunca se reemplaza ni se activa."""
+        destino = self.adevv_home / "versions/0.6.1"
+        destino.mkdir()
+        marcador = destino / "archivo_en_uso"
+        marcador.write_text("intacto", encoding="utf-8")
+        with patch("adevv.updater.subprocess.run") as descargar:
+            ok, causa, _ = instalar_version_publicada("0.6.1", origin_url="origen-inaccesible")
+        self.assertFalse(ok)
+        self.assertIn("0.6.1", causa)
+        self.assertEqual(marcador.read_text(encoding="utf-8"), "intacto")
+        self.assertEqual(get_active_info()["version"], "0.1.0")
+        self.assertEqual(descargar.call_count, 0)
+
+    def test_instalar_incluso_forzar_no_copia_con_bucles(self):
+        """Instalar comparte la guarda de las actualizaciones, incluso con --forzar."""
+        self.claude_home.mkdir(parents=True)
+        skill = self.v010_dir / "skills/demo/SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("anterior", encoding="utf-8")
+        sincronizar_destinos(origen_dir=self.v010_dir, version="0.1.0")
+        destino = self.claude_home / "skills/demo/SKILL.md"
+        registro = get_sync_registry("claude")
+        skill.write_text("nuevo", encoding="utf-8")
+        set_config({"auto_update": False})
+        for argumentos in (["instalar"], ["instalar", "--forzar"]):
+            with self.subTest(argumentos=argumentos), patch("adevv.processes.hay_bucles_en_marcha", return_value=[{"tipo": "bucle", "pid": 123, "cwd": "otro"}]):
+                self.assertEqual(main_cli(argumentos, out=io.StringIO(), err=io.StringIO()), 0)
+            self.assertEqual(destino.read_text(encoding="utf-8"), "anterior")
+            self.assertEqual(get_sync_registry("claude"), registro)
+            self.assertEqual(get_active_info()["version"], "0.1.0")
+
+    def test_materializar_version_existente_conserva_archivos(self):
+        """La ruta local de instalar reutiliza las versiones existentes."""
+        marcador = self.v010_dir / "archivo_en_uso"
+        marcador.write_text("intacto", encoding="utf-8")
+        self.assertEqual(materializar_version_local("0.1.0").resolve(), self.v010_dir.resolve())
+        self.assertEqual(marcador.read_text(encoding="utf-8"), "intacto")
+
+    def test_instalar_reutiliza_version_sin_puntero_y_no_la_limpia(self):
+        """Recuperar una instalación local activa el puntero antes de limpiar."""
+        marcador = self.v010_dir / "archivo_en_uso"
+        marcador.write_text("intacto", encoding="utf-8")
+        (self.adevv_home / "active.json").unlink()
+        set_config({"auto_update": False})
+        with patch("adevv.cli.__version__", "0.1.0"):
+            self.assertEqual(main_cli(["instalar"], out=io.StringIO(), err=io.StringIO()), 0)
+        activo = get_active_info()
+        self.assertIsNotNone(activo)
+        self.assertEqual(activo["version"], "0.1.0")
+        self.assertEqual(marcador.read_text(encoding="utf-8"), "intacto")
+
+    def test_ca_f03_13_rollback_cli_con_bucle_recarga_y_conserva_copias(self):
+        """La orden dirigida vuelve a 0.5.0 sin cortar un paso de 0.6.1."""
+        scripts = {}
+        for version in ("0.5.0", "0.6.1"):
+            carpeta = self.adevv_home / "versions" / version
+            carpeta.mkdir()
+            (carpeta / "pyproject.toml").write_text(
+                f'[project]\nname="adevv"\nversion="{version}"\n', encoding="utf-8")
+            script = carpeta / "skills/orquestar/orquestar.py"
+            script.parent.mkdir(parents=True)
+            script.write_text(f"motor {version}", encoding="utf-8")
+            skill = carpeta / "skills/demo/SKILL.md"
+            skill.parent.mkdir(parents=True)
+            skill.write_text(version, encoding="utf-8")
+            scripts[version] = script
+        set_active_info({"version": "0.6.1", "origen": "publicada"})
+        self.claude_home.mkdir(parents=True)
+        sincronizar_destinos(origen_dir=self.adevv_home / "versions/0.6.1", version="0.6.1")
+        registro = get_sync_registry("claude")
+        bucle = {"tipo": "bucle", "pid": 1234, "cwd": "otro", "cmd": str(scripts["0.6.1"])}
+        out, err = io.StringIO(), io.StringIO()
+        with patch("adevv.updater.consultar_versiones_publicadas", return_value=(
+                ["0.5.0", "0.6.1"], {"0.5.0": "c5", "0.6.1": "c6"}, None)), \
+                patch("adevv.processes.hay_bucles_en_marcha", return_value=[bucle]), \
+                patch("adevv.updater.detectar_procesos_adevv", return_value=[bucle]):
+            self.assertEqual(main_cli(["actualizar", "0.5.0"], out=out, err=err), 0)
+        self.assertEqual(get_active_info()["version"], "0.5.0")
+        self.assertFalse(get_config()["auto_update"])
+        self.assertEqual(get_sync_registry("claude"), registro)
+        self.assertEqual((self.claude_home / "skills/demo/SKILL.md").read_text(encoding="utf-8"), "0.6.1")
+        self.assertEqual(scripts["0.6.1"].read_text(encoding="utf-8"), "motor 0.6.1")
+        self.assertIn("al terminar su paso o respuesta actual", err.getvalue())
+        self.assertIn("Los anteriores requieren reinicio manual", err.getvalue())
+        self.assertNotIn("al terminar su paso actual", out.getvalue())
+        spec = importlib.util.spec_from_file_location("motor_rollback_b09", Path(__file__).resolve().parents[1] / "skills/orquestar/orquestar.py")
+        motor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(motor)
+        raiz = Path(self.temp_dir.name)
+        (raiz / motor.PID).write_text(str(os.getpid()))
+        with patch.object(motor.subprocess, "Popen", return_value=MagicMock(pid=9876)) as lanzar:
+            self.assertTrue(motor.recargar_version(scripts["0.6.1"], raiz, motor.PID, {"n": 1}, "orquestar"))
+        self.assertEqual(Path(lanzar.call_args.args[0][2]).resolve(), scripts["0.5.0"].resolve())
+
     def test_instalar_version_falla_si_paquete_no_coincide(self):
         # Repositorio donde la etiqueta es v0.3.0 pero el paquete dice 0.2.9
         repo_dir = Path(self.temp_dir.name) / "bad_repo"
@@ -615,35 +735,19 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         self.assertEqual(code_v, 0)
         self.assertIn("Adevv 0.2.0", out_v.getvalue())
 
-    # H-02: Cobertura de @CA-F03-03 (Transición inicial a APLAZADA al detectar bucle en otro proyecto)
-    def test_ca_f03_03_transicion_inicial_a_aplazada(self):
-        bucle_proc = [{"pid": 4321, "tipo": "bucle", "cwd": "C:\\SW\\Afinn", "cmd": "adevv orquestar"}]
-
-        with patch("adevv.updater.consultar_versiones_publicadas") as mock_query, \
-             patch("adevv.updater.hay_bucles_en_marcha", return_value=bucle_proc), \
-             patch("adevv.updater.instalar_version_publicada") as mock_inst:
-            mock_query.return_value = (["0.1.0", "0.2.0"], {"0.2.0": "c2"}, None)
-
+    def test_ca_f03_03_instala_con_bucle_en_otro_proyecto(self):
+        """La actualización automática instala en presencia de bucles."""
+        bucle = [{"pid": 4321, "tipo": "bucle", "cwd": "otro proyecto"}]
+        with patch("adevv.updater.consultar_versiones_publicadas", return_value=(["0.1.0", "0.2.0"], {"0.2.0": "c2"}, None)), patch("adevv.updater.hay_bucles_en_marcha", return_value=bucle), patch("adevv.updater.instalar_version_publicada", return_value=(True, "OK", [])) as instalar:
             res, msg, ver = evaluar_comprobacion_actualizacion()
-            self.assertEqual(res, ResultadoActualizacion.APLAZADA)
-            self.assertEqual(ver, "0.2.0")
-            self.assertEqual(msg, "Adevv 0.2.0 disponible; se aplicará cuando no haya bucles en marcha: bucle en C:\\SW\\Afinn.")
-            mock_inst.assert_not_called()
-
-            # Se guardó como aplazada en el estado
-            self.assertEqual(get_update_state().get("aplazada"), "0.2.0")
-
-        # Cuando el bucle de Afinn termina, la siguiente orden aplica 0.2.0 sin esperar 24h
-        with patch("adevv.updater.hay_bucles_en_marcha", return_value=[]), \
-             patch("adevv.updater.instalar_version_publicada", return_value=(True, "OK", [])) as mock_inst2:
-            res2, msg2, ver2 = evaluar_comprobacion_actualizacion()
-            self.assertEqual(res2, ResultadoActualizacion.APLICADA)
-            self.assertEqual(ver2, "0.2.0")
-            mock_inst2.assert_called_once()
+        self.assertEqual((res, ver), (ResultadoActualizacion.APLICADA, "0.2.0"))
+        instalar.assert_called_once_with(target_version="0.2.0", commit_hash="c2", origin_url=None)
+        self.assertIn("no admite recarga", msg)
+        self.assertNotIn("aplazada", get_update_state())
 
     # H-02: Cobertura de @CA-F03-04 y @CA-F03-05 (adevv actualizar sin argumentos frente a bucle previo y gateway)
     def test_ca_f03_04_y_05_adevv_actualizar_sin_argumentos_bucle_y_gateway(self):
-        # @CA-F03-04: bucle anterior a la migración bloquea adevv actualizar
+        # @CA-F03-04: bucle anterior a la migración permite instalar
         out = io.StringIO()
         err = io.StringIO()
         bucle_previo = [{
@@ -654,13 +758,13 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         }]
         with patch("adevv.updater.consultar_versiones_publicadas", return_value=(["0.1.0", "0.2.0"], {"0.2.0": "c2"}, None)), \
              patch("adevv.updater.hay_bucles_en_marcha", return_value=bucle_previo), \
-             patch("adevv.updater.instalar_version_publicada") as mock_inst:
+             patch("adevv.updater.instalar_version_publicada", return_value=(True, "OK", [])) as mock_inst:
             code = main_cli(["actualizar"], out=out, err=err)
-            self.assertEqual(code, 1)
-            mock_inst.assert_not_called()
-            self.assertIn("Adevv 0.2.0 disponible; se aplicará cuando no haya bucles en marcha: bucle en C:\\SW\\Aprexx.", err.getvalue())
+            self.assertEqual(code, 0)
+            mock_inst.assert_called_once()
+            self.assertIn("no admite recarga", err.getvalue())
+            self.assertNotIn("anteriores a v0.5", out.getvalue())
 
-        # @CA-F03-05: gateway en marcha no bloquea adevv actualizar, actualiza a 0.2.0 y pide reiniciar gateway
         out = io.StringIO()
         err = io.StringIO()
         gateway_proc = [{
@@ -676,7 +780,8 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             code = main_cli(["actualizar"], out=out, err=err)
             self.assertEqual(code, 0)
             mock_inst.assert_called_once()
-            self.assertIn("Reinicia el gateway en C:\\SW\\Adevv.", out.getvalue())
+            self.assertIn("no admite recarga", err.getvalue())
+            self.assertNotIn("no admite recarga", out.getvalue())
 
     # H-02: Cobertura de @CA-F03-12 (Volver atrás a 0.2.1 desactiva auto_update y adevv actualizar a 0.3.1 la reactiva)
     def test_ca_f03_12_volver_atras_y_reactivar(self):
@@ -737,11 +842,65 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         err = io.StringIO()
         bucle_proc = [{"pid": 1234, "tipo": "bucle", "cwd": "C:\\SW\\Afinn", "cmd": "adevv orquestar"}]
         self.mock_bucles.return_value = bucle_proc
-        with patch("adevv.updater.consultar_versiones_publicadas") as mock_q:
+        with patch("adevv.updater.instalar_version_publicada", return_value=(True, "OK", [])) as instalar, patch("adevv.updater.consultar_versiones_publicadas") as mock_q:
             mock_q.return_value = (["0.1.0", "0.2.0"], {"0.1.0": "c1", "0.2.0": "c2"}, None)
             code = main_cli(["actualizar", "0.2.0"], out=out, err=err)
-            self.assertEqual(code, 1)
-            self.assertIn("No se puede instalar 0.2.0 con bucles en marcha: bucle en C:\\SW\\Afinn.", err.getvalue())
+            self.assertEqual(code, 0)
+            instalar.assert_called_once_with(target_version="0.2.0", commit_hash="c2")
+            self.assertIn("no admite recarga", err.getvalue())
+            self.assertNotIn("al terminar su paso actual", out.getvalue())
+
+
+class TestAvisoRecargaYLimpieza(unittest.TestCase):
+    """B-ADV-0021: el aviso de instalación no promete recargas imposibles y la limpieza se reintenta."""
+
+    def aviso(self, version_nueva):
+        procesos = [{"tipo": "bucle", "pid": 1, "cwd": "C:\\SW\\Afinn", "cmd": "orquestar.py"},
+                    {"tipo": "gateway", "pid": 2, "cwd": "C:\\SW\\Afinn", "cmd": "gateway.py"}]
+        with patch("adevv.updater.hay_bucles_en_marcha", return_value=procesos[:1]), \
+             patch("adevv.updater.detectar_procesos_adevv", return_value=procesos):
+            return mensaje_actualizacion("1.0.0", version_nueva, [])
+
+    def test_destino_anterior_a_v05_pide_reinicio_manual_y_advierte_a_los_motores_publicados(self):
+        msg = self.aviso("0.4.0")
+        self.assertIn("La 0.4.0 no admite recarga: reinicia a mano los bucles y gateways en marcha para usarla; "
+                      "los de v0.5.0 a v0.6.1 se detendrán al terminar su paso o respuesta actual. En marcha: ", msg)
+        self.assertNotIn("tomarán", msg)
+        self.assertIn("Afinn", msg)
+
+    def test_destino_desde_v05_promete_la_recarga_solo_si_admite_las_opciones(self):
+        msg = self.aviso("0.6.1")
+        self.assertIn("Los motores desde v0.5.0 tomarán la versión activa al terminar su paso o respuesta actual "
+                      "si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0). "
+                      "Los anteriores requieren reinicio manual. En marcha: ", msg)
+
+    def test_orden_sin_bucles_reintenta_la_limpieza_aunque_no_haya_destinos_desfasados(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value={"version": "1.0.0"}), patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[]), \
+             patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}), \
+             patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_called_once()
+
+    def test_orden_sin_puntero_activo_no_limpia(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value=None),              patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[]),              patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}),              patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_not_called()
+
+    def test_limpieza_sin_versiones_antiguas_no_detecta_procesos(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"ADEVV_HOME": tmp}):
+            (Path(tmp) / "versions/1.0.0").mkdir(parents=True)
+            (Path(tmp) / "active.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
+            with patch("adevv.updater.sincronizacion_bloqueada") as bloqueada, patch("adevv.updater.detectar_procesos_adevv") as detectar:
+                limpiar_versiones_antiguas()
+        bloqueada.assert_not_called()
+        detectar.assert_not_called()
+
+    def test_orden_con_bucles_no_limpia(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value={"version": "1.0.0"}), patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[{"tipo": "bucle"}]), \
+             patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}), \
+             patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -2,12 +2,14 @@
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('gateway_control', Path(__file__).with_name('gateway.py'))
@@ -37,8 +39,8 @@ class ControlTests(unittest.TestCase):
             return gateway.responder(self.root, usuario, texto, {'12345'})
 
     def pid(self):
-        """Simula la marca de ejecución sin un proceso vivo."""
-        (self.root / motor.PID).write_text('777', encoding='utf-8')
+        """Simula la marca de un bucle vivo con el PID del propio proceso de prueba."""
+        (self.root / motor.PID).write_text(str(os.getpid()), encoding='utf-8')
 
     def datos(self):
         """Genera backlog y consumo conocido de dos versiones."""
@@ -67,7 +69,7 @@ class ControlTests(unittest.TestCase):
                 self.excluir.side_effect = lambda root: self.assertFalse(senal.exists())
                 respuesta = self.responder(comando)
                 self.assertTrue(senal.exists())
-                self.assertEqual((self.root / motor.PID).read_text(), '777')
+                self.assertEqual((self.root / motor.PID).read_text(), str(os.getpid()))
                 self.assertIn('paso en curso', respuesta)
         self.assertEqual(self.excluir.call_count, 2)
         self.proceso.assert_not_called()

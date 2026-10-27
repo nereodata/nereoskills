@@ -1,0 +1,6 @@
+RED antes de corregir, mediante adevv orquestar --verificar "python -m unittest discover -s skills/orquestar -p test_fallos_arnes.py"
+Ran 9 tests in 0.084s; FAILED (failures=7), salida completa en la sesión y evidencia de verificación roja.
+Fallos: reserva con cero reintentos: 2 != 0; cuota mixta: esperar no llamado; default/saturación: 1 != 4 y 1 != 5 ejecuciones; parada en espera: aviso error inesperado; persistente: solo principal en vez de principal/principal/reserva/reserva; transitorio: 2 != 0.
+Los tests de progreso en disco, éxito y CLI inválida pasan antes (regresión); CLI se fortalecerá para comprobar aceptación de un entero válido, evitando verde por opción desconocida.
+
+RED posterior a Hades código: 13 tests, failures=3. Casos dirigidos: cuota omitida 120 s vs cuota del paso 3600 s no llama a esperar; perfil omitido recuperado termina con 2 en vez de 0; modelos sin uso quedan [None, None] en vez de [principal, reserva].

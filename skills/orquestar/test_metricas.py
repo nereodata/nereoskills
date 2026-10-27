@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests import aislamiento_telegram
 
 
 SCRIPT = Path(__file__).with_name('orquestar.py').resolve()

@@ -22,6 +22,10 @@ Al ejecutar `adevv instalar`:
 2. Sincroniza las skills, agentes y workflows en las carpetas globales confirmadas de cada arnés detectado (`~/.claude`, `~/.codex`, `~/.gemini/config`).
 3. Registra huellas SHA-256 de los archivos instalados para proteger tus archivos ajenos o editados a mano.
 
+Las actualizaciones, también `adevv actualizar X.Y.Z`, se instalan aunque haya bucles en marcha. Cada versión ocupa su propia carpeta y las versiones existentes se conservan sin sobrescribir. Los motores desde v0.5 toman la versión activa al terminar su paso actual; el gateway la toma entre vueltas de polling. Desde v1.0.0 solo recargan si el destino es de v0.5.0 o posterior y acepta sus opciones; si no (por ejemplo, al volver atrás a una versión anterior), siguen con su versión, conservan su PID y avisan una vez en su log y por Telegram de que hace falta reiniciarlos. Los motores anteriores requieren reinicio manual, según el aviso de actualización; al volver atrás a una versión anterior a v0.5.0, los de v0.5.0 a v0.6.1 se detienen al terminar su paso.
+
+Las copias globales de skills y agentes esperan mientras haya bucles, incluso con `adevv instalar --forzar`. La primera orden fuera de pasos y sin bucles reintenta la sincronización. Esta espera no impide instalar ni recargar los motores; reinicia las sesiones abiertas de los arneses cuando las copias estén sincronizadas.
+
 Para comprobar el estado y las versiones sincronizadas en cualquier momento:
 ```bash
 adevv --version
@@ -72,6 +76,8 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 ```
 
 ### Orquestador (`/orquestar`)
+
+Las cuotas con hora de recuperación se respetan; las respuestas sin hora y los errores de créditos permiten comprobar el trabajo pendiente al relanzar y cada 300 segundos (`cuota_reintento_s` en `orchestration.json`). `adevv orquestar --cuota-reset [arnés[/modelo]]` recupera las marcas seleccionadas, o todas sin selector, conservando el histórico. Un bucle esperando cuota lo detecta en un máximo de 30 segundos. `--estado` y `--agentes` muestran si la marca es real o supuesta y su origen; los créditos generan un aviso específico una vez por episodio.
 
 Lleva un producto de la idea a su última versión sin parar: requisitos → plataforma → plan → por versión, revisión de deuda, `task-dev`/`bug-fix`, revisión de versión y, si se activa, revisión de producto. El humano solo interviene al cerrar cada versión: ajusta la tabla de propuestas y el bucle crea las tareas. Desde cualquier arnés, `/orquestar` lanza el bucle desatendido (`orquestar.py --fondo`), informa de cómo va (`estado`) o lo para (`parar`); el bucle deduce la fase del disco y continúa desde donde toque. Detalle en [`skills/orquestar/SKILL.md`](skills/orquestar/SKILL.md); diagramas en [`docs/orquestacion.md`](docs/orquestacion.md). Las dependencias entre tareas (`depende_de`) las resuelve el script; los roles (arnés, modelo y esfuerzo de Atenea, Artemisa, Hades, Clío y Cronos) se configuran en `orchestration.json`. Por Telegram, el bucle avisa de fin de versión, falta de cuota y paradas que necesitan respuesta, y el gateway ([`skills/telegram_gateway`](skills/telegram_gateway/SKILL.md)) responde a `/estado` y registra tareas y bugs sin versión.
 
@@ -172,3 +178,18 @@ Para migrar el propio repositorio fuente de Adevv (que utiliza una junction `.ag
    ```
 4. Relanzar el bucle con `adevv orquestar`.
 5. La copia congelada en `~/.adevv/congelado` solo debe borrarse cuando se confirme que ningún proceso ni arnés en el sistema la está utilizando.
+
+### Calidad por tarea
+
+El triaje conserva una base Git estable. Las skills task-dev y bug-fix aplican el formato disponible y comprueban formato y lint del delta antes de cerrar; Hades comprueba sin escritura. Configuración, deducción conservadora y omisiones justificadas: [calidad del delta](skills/orquestar/SKILL.md#calidad-del-delta-en-cada-tarea). La suite completa sigue correspondiendo al cierre de versión.
+
+
+Los pasos del bucle recuperan errores de red o autenticación mediante `adevv orquestar --reintentos-arnes 3`: reintentos por perfil y después reservas, con diagnóstico si se agotan. Consulta las esperas y la parada cooperativa en [Orquestación](docs/orquestacion.md).
+
+
+Los pasos de análisis recuperan la falta de progreso por `(paso, argumento)`:
+prueban niveles superiores, escalada y reservas con el límite `--reintentos` por
+perfil. La recarga conserva sus intentos. Si se agotan, `especificar` y
+`revisar-tarea` bloquean solo la tarea y permiten continuar las independientes;
+los análisis globales paran indicando los perfiles probados. Véase
+[recuperación de análisis](skills/orquestar/SKILL.md#recuperación-de-análisis-sin-progreso).

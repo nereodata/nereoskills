@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 def cargar(nombre):
@@ -73,26 +74,26 @@ class CuotaVigenteTests(unittest.TestCase):
         self.agotamiento('intermedia')
         self.assertEqual(self.invocar(), ['ultima'])
 
-    def test_todas_agotadas_conservan_ultima_configuracion(self):
-        """La lista nunca queda vacía y el fallo final conserva la señal de espera."""
+    def test_todas_agotadas_conservan_espera_sin_ejecutar(self):
+        """Las marcas reales se respetan incluso cuando ninguna reserva tiene cuota."""
         self.agotamiento()
         self.agotamiento('intermedia')
         self.agotamiento('ultima', 'agy')
         with patch.object(motor, 'lanzar', return_value=(1, {}, 'out of credits')) as lanzar:
             self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
-        lanzar.assert_called_once()
-        self.assertEqual(lanzar.call_args.args[2], 'agy')
+        lanzar.assert_not_called()
         filas = motor.leer_metricas(self.root)
         self.assertTrue(filas[-1]['sin_cuota'])
         self.assertGreater(filas[-1]['espera_s'], 0)
 
-    def test_sin_reservas_conserva_titular_sin_consultar_cuotas(self):
-        """Una única configuración sigue el manejo de cuota existente."""
+    def test_sin_reservas_respeta_marca_real(self):
+        """No se sondea una marca real por ser el único perfil disponible."""
         self.cfg.pop('reserva')
         self.agotamiento()
-        with patch.object(motor, 'consumo_cuotas', wraps=motor.consumo_cuotas) as consumo:
-            self.assertEqual(self.invocar(), ['titular'])
-        consumo.assert_not_called()
+        with patch.object(motor, 'lanzar') as lanzar:
+            self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
+        lanzar.assert_not_called()
+        self.assertGreater(motor.leer_metricas(self.root)[-1]['espera_s'], 0)
 
     def test_clave_incluye_arnes_y_modelo_predeterminado(self):
         """No se confunden modelos homónimos de arneses distintos ni el modelo implícito."""

@@ -10,6 +10,7 @@ from adevv._build import (
     build_wheel,
     inspect_distribution_cleanliness,
 )
+from tests import aislamiento_telegram
 
 
 class TestPackageAndInstructions(unittest.TestCase):

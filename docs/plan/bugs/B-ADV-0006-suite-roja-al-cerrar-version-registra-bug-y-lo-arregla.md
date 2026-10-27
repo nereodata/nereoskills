@@ -5,7 +5,7 @@ type: bug
 weight: 40
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-10-26
 updated_at: 2026-10-26
@@ -38,3 +38,16 @@ Además, `verificar()` (`:1517`) ejecuta la suite sin capturar su salida, así q
 - `skills/orquestar/orquestar.py:2056-2057` — parada al cerrar versión con suite en rojo (igual en `~/.adevv/versions/0.6.0`).
 - `skills/orquestar/orquestar.py:1517` — `verificar()` no captura la salida de la suite.
 - Caso observado: cinco ficheros con formato de Prettier pendiente.
+
+## Triaje
+- Subfase A: [EXEC] Escenarios de recuperación automática del cierre en `tests/features/uso_sin_rutas.feature`.
+- Subfase B: [EXEC] Persistencia del bug y contadores, compatibilidad de verificar y selección de rama.
+- Subfase C1: [EXEC] Regresiones en `tests/test_orquestar.py` para captura, alta/reapertura, promoción, límite y continuidad del bucle; además parser ligero sin PyYAML, aviso largo con transporte simulado y cambio de rama PASO/PARAR con guardia de árbol sucio (hallazgos Hades H1-H3).
+- Subfase C2: [EXEC] Motor `skills/orquestar/orquestar.py`.
+- Subfase D: [EXEC] Hades sobre el delta completo de producción.
+- Subfase E: [EXEC] Actualizar contrato operativo de `skills/orquestar/SKILL.md`.
+- Subfase F: [EXEC] Cierre y commit.
+- Verificación al cierre: `python -m unittest discover -s tests -p test_orquestar.py` ejercita el motor afectado; `git diff --check` y compilación de los dos Python modificados. No hay linter, tipado ni escáner de secretos configurados para este delta; inspección de secretos en Hades, sin dependencias nuevas.
+- DEC: el bug de cierre se identifica por versión y comando, no por texto de error variable. El primer fallo registra el bug; solo las recaídas tras completed cuentan como intentos fallidos. Tres recaídas por nivel promocionan y tres en dificil paran. Un bloqueo o cancelación mantiene el control habitual y no se reabre.
+
+- Ajuste de diseño tras QA: identidad persistida como SHA-256 UTF-8 del comando para evitar escapes del parser ligero; aviso limitado a los últimos 1200 caracteres, con evidencia completa en el bug. Sin cambios al parser ni al transporte compartidos.

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('gateway_recarga', Path(__file__).with_name('gateway.py'))
@@ -71,9 +72,12 @@ class GatewayRecargaTests(unittest.TestCase):
             root = Path(tmp).resolve()
             destino = root / 'versions/0.6.0/skills/telegram_gateway/gateway.py'
             (root / gateway.PID).write_text(str(os.getpid()))
-            with patch.object(gateway.motor, 'version_activa_distinta', return_value=(destino, '0.6.0')), patch.object(gateway.sys, 'argv', ['gateway', '--root', 'relativo', '--gestionado']), patch.object(gateway.motor.subprocess, 'Popen', return_value=Mock(pid=9876)) as lanzar, patch('builtins.print') as imprimir:
+            destino.parent.mkdir(parents=True)
+            destino.write_text("p.add_argument('--root')"+chr(10)+"p.add_argument('--gestionado')"+chr(10), encoding='utf-8')
+            with patch.object(gateway.motor, 'version_activa_distinta', return_value=(destino, '0.6.0')), patch.object(gateway.sys, 'argv', ['gateway', '--root', 'relativo', '--gestionado', '--root=anterior', '--root', 'duplicado']), patch.object(gateway.motor.subprocess, 'Popen', return_value=Mock(pid=9876)) as lanzar, patch('builtins.print') as imprimir:
                 self.assertTrue(gateway.motor.recargar_version(gateway.__file__, root, gateway.PID, {'desde': 43}, 'gateway'))
-            self.assertEqual(lanzar.call_args.args[0], [gateway.sys.executable, '-u', str(destino), '--root', 'relativo', '--gestionado', '--root', str(root)])
+            self.assertEqual(lanzar.call_args.args[0], [gateway.sys.executable, '-u', str(destino), '--gestionado', '--root', str(root)])
             self.assertEqual(lanzar.call_args.kwargs['cwd'], root)
             self.assertEqual((root / gateway.PID).read_text(), '9876')
-            imprimir.assert_called_once_with('[gateway] recargado a versión 0.6.0', flush=True)
+            imprimir.assert_not_called()
+            self.assertEqual((root / 'telegram.log').read_text(encoding='utf-8'), '[gateway] recargado a versión 0.6.0\n')

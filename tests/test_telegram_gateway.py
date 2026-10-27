@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -71,9 +72,10 @@ class GatewayTests(unittest.TestCase):
         self.assertTrue((self.root / 'docs/plan/bugs/B-ADV-0001-el-login-falla.md').exists())
 
     def test_with_loop_running_only_the_inbox_is_written(self):
-        (self.root / motor.PID).write_text('1', encoding='utf-8')
+        (self.root / motor.PID).write_text(str(os.getpid()), encoding='utf-8')
         antes = self.backlog()
-        self.assertIn('Apuntado', self.responder('/tarea Exportar informe'))
+        with patch.object(motor, 'pid_vivo', return_value=True):
+            self.assertIn('Apuntado', self.responder('/tarea Exportar informe'))
         self.assertEqual(self.backlog(), antes)
         self.assertIn('Exportar informe', (self.root / motor.BUZON).read_text(encoding='utf-8'))
 
@@ -82,9 +84,10 @@ class GatewayTests(unittest.TestCase):
         self.assertFalse((self.root / motor.BUZON).exists())
 
     def test_status_summarizes_loop_version_and_backlog(self):
-        (self.root / motor.PID).write_text('1', encoding='utf-8')
+        (self.root / motor.PID).write_text(str(os.getpid()), encoding='utf-8')
         motor.apuntar(self.root, 'bug', 'Pendiente', '12345')
-        with patch.object(motor, 'git', return_value=''):
+        with patch.object(motor, 'pid_vivo', return_value=True), \
+                patch.object(motor, 'git', return_value=''):
             texto = self.responder('/status')
         self.assertIn('bucle en marcha', texto)
         self.assertIn('v0.1.0:* 0/1 cerradas · en curso T-ADV-0002', texto)
@@ -200,7 +203,7 @@ class GatewayTests(unittest.TestCase):
             gateway.escuchar(self.root, 'tok', AUTORIZADOS, vueltas=1)
         act.assert_called_once_with('tok', None)
         self.assertEqual([c.args[1:3] for c in enviar.call_args_list],
-                         [(555, motor.firmar('No he podido procesarlo; mira el log del gateway.')),
+                         [(555, motor.firmar('No he podido procesarlo (RuntimeError: x); mira el log del gateway.')),
                           (555, 'ayuda')])
 
 

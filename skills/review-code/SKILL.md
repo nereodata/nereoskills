@@ -14,6 +14,8 @@ Audita solo el código de producción del delta: todo lo que no es prueba, inclu
 
 **Análisis estático**: quien invoca entrega lint, tipado y chequeos de seguridad aplicables al delta (secretos, `git diff --check`; auditoría de dependencias si cambian manifiestos) en limpio; si ya constan en verde en la verificación del árbol (`--verificar`), no los relances: ejecuta con `--verificar` solo lo que falte. Fallo de tipado, compilación o secreto expuesto = 🔴; linter o vulnerabilidad = 🟠.
 
+**Formato y lint por tarea**: toma `base_calidad` del triaje y ejecuta `adevv orquestar --calidad --base <base_calidad>` sin escritura. El motor comprueba ambas etapas mediante `--verificar`, reutilizando únicamente el verde del mismo árbol y comando (base y objetivos incluidos). Un cambio posterior, incluido el formateo, exige evidencia del árbol resultante. No uses `--aplicar`, no modifiques ficheros ni pases la suite completa. Fallo de formato/lint, configuración inválida o base inexistente: hallazgo para `desarrollador`, destino `resolver`, sin aprobación hasta corregirlo. Registra las omisiones justificadas; no equivalen a una herramienta ejecutada en verde. Contrato de configuración y deducción en `/orquestar`.
+
 **Evalúa (1-10 cada uno):**
 - **Corrección**: sin errores lógicos ni precondiciones implícitas; entradas, estados y valores extremos que la especificación no cubre se tratan bien.
 - **Seguridad**: credenciales, inyecciones y validación de entradas.
