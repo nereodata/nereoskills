@@ -30,6 +30,11 @@
         "harness": "agy",
         "model": "gemini-4-argon",
         "effort": "medium"
+      },
+      {
+        "harness": "claude",
+        "model": "claude-sonnet-5-5",
+        "effort": "medium"
       }
     ],
     "dificultad": {
@@ -63,6 +68,11 @@
           {
             "harness": "agy",
             "model": "gemini-4-argon",
+            "effort": "medium"
+          },
+          {
+            "harness": "claude",
+            "model": "claude-sonnet-5-5",
             "effort": "medium"
           }
         ]
