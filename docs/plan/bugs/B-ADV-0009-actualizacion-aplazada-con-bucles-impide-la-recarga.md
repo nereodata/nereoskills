@@ -5,7 +5,8 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "Hotfix v0.6.1 (B-ADV-0008): publicada la 0.6.1, no se instaló porque había bucles en marcha, y el bucle de Adevv siguió con la nota de alcance vieja de la 0.6.0"
 created_at: 2026-10-27
@@ -40,3 +41,14 @@ El usuario ha pedido expresamente este cambio de comportamiento. Modificar los r
 2. Publicar una versión nueva de Adevv (etiqueta `vX.Y.Z`).
 3. Ejecutar `adevv actualizar`: responde que se aplicará cuando no haya bucles en marcha, y `adevv --version` y `active.json` siguen en la versión anterior.
 4. El bucle sigue con su versión y nunca se recarga.
+
+## Bloqueo de especificaci?n ? 2026-10-27
+
+- `/review-spec` de Hades: **RECHAZADO**, hallazgos H1 y H2 cr?ticos y H3 medio, todos `para: especificador`, `destino: resolver`. Se aplica la regla 5 del modo orquestado, sin pedir decisiones humanas.
+- **H1**: los escenarios que exigen recarga deben partir de motores desde v0.5.0; la vuelta atr?s debe elegir tambi?n un destino compatible. Los motores anteriores solo permiten instalar conservando archivos y requieren reinicio manual. Alinear los escenarios de F-03 y sus copias en tests/features.
+- **H2**: eliminar la condici?n ?ning?n bucle en marcha? que todav?a conservan APLICADA/FALLIDA en la tabla normativa; aclarar el papel de la fila 7 y alinear el aviso de gateway con la recarga cooperativa y el reinicio de motores antiguos.
+- **H3**: fijar en el nuevo esquema de sincronizaci?n un origen controlado cuya ?ltima publicada sea 0.2.0 para que instalar/--forzar/actualizar no puedan instalar una superior a la esperada.
+- Trabajo completo del intento en `wip/B-ADV-0009`, commit `cd22e3f`: triaje, escenarios, requisitos, dise?o preliminar, pruebas borrador, reporte de Hades y evidencia roja. No hay cambios de producci?n. El borrador contiene ajustes parciales posteriores al an?lisis inicial; no constituyen aprobaci?n ni resoluci?n de H1?H3.
+- Reporte: `wip/B-ADV-0009:docs/review/spec_reviews/B-ADV-0009-spec-review.md`. Evidencia: `wip/B-ADV-0009:docs/review/test_reviews/B-ADV-0009-red.md`.
+- Verificaci?n realizada: `adevv orquestar --verificar "python -m unittest discover -s tests -p test_updater.py"`: 27 pruebas, 8 fallos funcionales antes de corregir. No se ejecut? suite completa. No se inici? review-test ni correcci?n tras el rechazo; no hay cierre funcional.
+- Verificaci?n de este cierre de bloqueo: `adevv orquestar --verificar "git diff --check"` sobre el delta documental, sin repetir pruebas del WIP.
