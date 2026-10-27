@@ -5,7 +5,8 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: blocked
+pendiente_de: especificador
 depende_de: []
 origen: "Reporte del usuario (2026-10-27): con cuota de Codex disponible, el bucle esperaba hasta las 09:07 o pasaba a Claude"
 created_at: 2026-10-27
@@ -41,3 +42,10 @@ updated_at: 2026-10-27
 
 ## 🔓 Alcance (decisión humana, 2026-10-27)
 El usuario lo ha pedido expresamente. Incluye la orden nueva `--cuota-reset` y los cambios de requisitos y escenarios del bucle que hagan falta. Se puede tocar cualquier ruta necesaria.
+
+## Bloqueo de especificación · 2026-10-27
+Hades rechaza `/review-spec`: H1 (alta), H2/H3 (medias), todos `para: especificador`, `destino: resolver`. Aplicada regla 5 de `/orquestar`; avance conservado en `wip/B-ADV-0020` (7650397), release restaurada al estado previo salvo el enrutado y los informes.
+
+El especificador debe concretar los casos históricos sin clasificación y duración distinta de 1800 segundos, el intervalo con opción ausente y la conservación de las restricciones de pares ajenos al reset. Detalle y reporte en `docs/review/versions/v1.0-revision.md` y `docs/review/spec_reviews/B-ADV-0020-spec-review.md`.
+
+Triaje de este cierre por bloqueo: [EXEC] enrutado documental y `adevv orquestar --verificar "git diff --check"`; [SKIP] implementación y pruebas funcionales, pendientes de especificación aprobada. No se ha corregido el fallo ni ejecutado la suite completa.
