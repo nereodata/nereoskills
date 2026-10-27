@@ -120,6 +120,32 @@ Característica: F-03 · Actualización automática de versiones publicadas
     Y el bucle mantiene su paso actual y recarga la 0.5.0 al terminarlo
     Y los destinos compartidos permanecen intactos
 
+  @B-ADV-0021 @CA-F03-17 @RF-F03-14 @RF-F03-11
+  Escenario: Volver atrás a un motor sin recarga con un bucle en marcha
+    Dado Adevv 1.0.0 instalado, publicadas la 0.4.0 y la 1.0.0, y un bucle y un gateway de 1.0.0 en marcha en "C:\SW\Afinn"
+    Cuando ejecuto "adevv actualizar 0.4.0"
+    Entonces queda instalada la 0.4.0 y el aviso dice "La 0.4.0 no admite recarga: reinicia a mano los bucles y gateways en marcha para usarla; los de v0.5.0 a v0.6.1 se detendrán al terminar su paso o respuesta actual."
+    Y el aviso identifica el bucle y el gateway de "C:\SW\Afinn"
+    Cuando el bucle de Afinn termina su paso actual
+    Entonces sigue en marcha con la 1.0.0 y "orquestar.pid" conserva su PID
+    Y su log y Telegram avisan una sola vez "La 0.4.0 activa no puede recargar este bucle (anterior a v0.5); sigue con la 1.0.0. Reinícialo para usarla."
+    Y "adevv orquestar --estado" muestra el bucle vivo
+    Cuando el gateway termina su vuelta de polling
+    Entonces sigue respondiendo con la 1.0.0 y "telegram.pid" conserva su PID
+    Y su log y Telegram avisan una sola vez "La 0.4.0 activa no puede recargar este gateway (anterior a v0.5); sigue con la 1.0.0. Reinícialo para usarla."
+
+  @B-ADV-0021 @CA-F03-18 @RF-F03-14 @RF-F03-11
+  Escenario: El motor de destino no acepta las opciones del proceso en marcha
+    Dado Adevv 1.0.0 instalado, publicadas la 0.6.1 y la 1.0.0, un bucle de 1.0.0 en marcha lanzado con "--calidad" y un gateway de 1.0.0 en marcha
+    Y el bucle de la 0.6.1 no admite "--calidad"
+    Cuando ejecuto "adevv actualizar 0.6.1"
+    Entonces queda instalada la 0.6.1 y el aviso dice "Los motores desde v0.5.0 tomarán la versión activa al terminar su paso o respuesta actual si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0). Los anteriores requieren reinicio manual."
+    Cuando el bucle termina su paso actual y el gateway termina su vuelta de polling
+    Entonces el bucle sigue con la 1.0.0 y avisa una sola vez "La 0.6.1 activa no puede recargar este bucle (no admite --calidad); sigue con la 1.0.0. Reinícialo para usarla."
+    Y el gateway, cuyas opciones sí acepta la 0.6.1, recarga la 0.6.1
+    Cuando se publica la 1.0.1, que admite "--calidad", y ejecuto "adevv actualizar"
+    Entonces el bucle recarga la 1.0.1 al terminar su paso actual
+
   @CA-F03-14 @RF-F03-12
   Escenario: Versión inexistente
     Dado Adevv 0.1.0 instalado y las versiones publicadas 0.1.0 y 0.2.0

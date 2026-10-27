@@ -14,7 +14,9 @@ La tabla de resultados, su precedencia, sus mensajes y las definiciones (versió
 - **RF-F03-05** Si la configuración de usuario desactiva la actualización automática, entonces el sistema no deberá consultar la red salvo en `adevv actualizar`.
 
 **Bucles en marcha**
-- **RF-F03-06** Cuando haya una versión nueva elegible, el sistema deberá instalarla aunque haya bucles en marcha, conmutar `active.json` atómicamente y avisar que los motores desde v0.5.0 la tomarán al terminar su paso actual; los anteriores requieren reinicio manual. Solo se aplaza la copia a destinos globales según RF-F01-11. No se guardan nuevos aplazamientos de instalación; los heredados se consumen sin esperar bucles.
+- **RF-F03-06** Cuando haya una versión nueva elegible, el sistema deberá instalarla aunque haya bucles en marcha, conmutar `active.json` atómicamente y avisar que los motores desde v0.5.0 la tomarán al terminar su paso actual si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0) (`RF-F03-14`); los anteriores requieren reinicio manual. Solo se aplaza la copia a destinos globales según RF-F01-11. No se guardan nuevos aplazamientos de instalación; los heredados se consumen sin esperar bucles.
+
+- **RF-F03-14** Cuando un bucle o un gateway en marcha vaya a recargar la versión activa entre pasos o vueltas de polling, solo deberá hacerlo si el motor de destino admite la recarga (versión desde v0.5.0) y acepta todas las opciones con que se lanzó el proceso. Si no, deberá seguir con su versión sin ceder `orquestar.pid` ni `telegram.pid` y avisar una sola vez por versión activa, en su log y por Telegram (evento `respuesta`): «La X.Y.Z activa no puede recargar este <bucle|gateway> (<causa>); sigue con la A.B.C. Reinícialo para usarla.», con causa «anterior a v0.5» o «no admite <opciones>». Si `active.json` pasa después a una versión compatible, la recarga sigue la regla general. Esta protección la aplican los motores desde v1.0.0; los motores ya publicados de 0.5.0 a 0.6.1 no la tienen.
 
 **Aplicación**
 - **RF-F03-07** Cuando se aplique una actualización, el sistema deberá instalar desde el origen fijo el commit al que apuntaba la etiqueta en la consulta, comprobar que la versión instalada es la de la etiqueta, sincronizar los destinos (`F-01`) y ejecutar la acción de la orden que la disparó con la versión nueva; si la instalación falla, no termina en ≤ 180 s o la versión no coincide, deberá ejecutar la acción con la versión anterior, intacta, y guardar la versión como fallida.
@@ -23,7 +25,7 @@ La tabla de resultados, su precedencia, sus mensajes y las definiciones (versió
 
 **Orden manual y vuelta atrás**
 - **RF-F03-10** Cuando se ejecute `adevv actualizar`, el sistema deberá hacer la comprobación forzada (sin las filas «auto»), olvidar la versión fallida, reactivar la actualización automática si estaba desactivada (y decirlo) y aplicar la última versión publicada si es mayor que la instalada.
-- **RF-F03-11** `adevv actualizar X.Y.Z` no hace la comprobación de `RF-F03-01`: solo consulta la lista de versiones publicadas para validar X.Y.Z. Cuando X.Y.Z sea una versión publicada distinta de la instalada, el sistema deberá instalarla; si es menor que la última publicada, deberá además desactivar la actualización automática y decirlo: «Actualización automática desactivada; `adevv actualizar` la reactiva.». Con bucles en marcha deberá instalar igualmente, conservar las versiones en uso y avisar de la recarga entre pasos desde v0.5.0 y del reinicio manual de motores anteriores; las copias globales se aplazan según RF-F01-11. Si X.Y.Z es la instalada: «Adevv X.Y.Z ya está instalado.», sin cambios. Si la consulta falla: «No se pudo consultar <origen>: <causa>. Sigues con la X.Y.Z.», sin cambios.
+- **RF-F03-11** `adevv actualizar X.Y.Z` no hace la comprobación de `RF-F03-01`: solo consulta la lista de versiones publicadas para validar X.Y.Z. Cuando X.Y.Z sea una versión publicada distinta de la instalada, el sistema deberá instalarla; si es menor que la última publicada, deberá además desactivar la actualización automática y decirlo: «Actualización automática desactivada; `adevv actualizar` la reactiva.». Con bucles en marcha deberá instalar igualmente, conservar las versiones en uso y avisar de la recarga entre pasos desde v0.5.0 si el destino admite la recarga y las opciones de cada proceso (`RF-F03-14`) y del reinicio manual de motores anteriores o hacia destinos anteriores a v0.5.0; las copias globales se aplazan según RF-F01-11. Si X.Y.Z es la instalada: «Adevv X.Y.Z ya está instalado.», sin cambios. Si la consulta falla: «No se pudo consultar <origen>: <causa>. Sigues con la X.Y.Z.», sin cambios.
 - **RF-F03-12** Si `X.Y.Z` no es una versión publicada, entonces `adevv actualizar X.Y.Z` deberá terminar sin cambios con «X.Y.Z no es una versión publicada. Publicadas: <las 5 mayores, de mayor a menor>.».
 
 **Avisos**
@@ -63,6 +65,7 @@ Comprobación automática; instalada 0.1.0; publicada 0.2.0 salvo que se diga; s
 | Etiqueta `v0.3.0` cuyo paquete dice 0.2.9 | `FALLIDA` («la versión instalada no es 0.3.0»); no se reintenta hasta otra versión o `adevv actualizar` |
 | Instalación de desarrollo | `DESARROLLO`; `adevv actualizar` sí instala la última publicada y pasa a origen `publicada` |
 | Comparación `0.10.0` frente a `0.9.3` | `0.10.0` es mayor |
+| Volver atrás con bucles o gateways desde v1.0 en marcha hacia una versión anterior a v0.5, o hacia una que no acepta sus opciones | Se instala igualmente; los procesos siguen con su versión, no ceden su PID y avisan una vez de que hace falta reiniciarlos (`RF-F03-14`) |
 | La orden que dispara la actualización es `adevv orquestar --fondo` | El bucle se lanza después de instalar, ya con la versión nueva (o con la anterior si falló) |
 
 ## Criterios de aceptación
@@ -183,6 +186,32 @@ Escenario: Volver atrás con un bucle en marcha
   Entonces queda instalada la 0.5.0 y se desactiva la actualización automática
   Y el bucle mantiene su paso actual y recarga la 0.5.0 al terminarlo
   Y los destinos compartidos permanecen intactos
+
+@B-ADV-0021 @CA-F03-17 @RF-F03-14 @RF-F03-11
+Escenario: Volver atrás a un motor sin recarga con un bucle en marcha
+  Dado Adevv 1.0.0 instalado, publicadas la 0.4.0 y la 1.0.0, y un bucle y un gateway de 1.0.0 en marcha en "C:\SW\Afinn"
+  Cuando ejecuto "adevv actualizar 0.4.0"
+  Entonces queda instalada la 0.4.0 y el aviso dice "La 0.4.0 no admite recarga: reinicia a mano los bucles y gateways en marcha para usarla; los de v0.5.0 a v0.6.1 se detendrán al terminar su paso o respuesta actual."
+  Y el aviso identifica el bucle y el gateway de "C:\SW\Afinn"
+  Cuando el bucle de Afinn termina su paso actual
+  Entonces sigue en marcha con la 1.0.0 y "orquestar.pid" conserva su PID
+  Y su log y Telegram avisan una sola vez "La 0.4.0 activa no puede recargar este bucle (anterior a v0.5); sigue con la 1.0.0. Reinícialo para usarla."
+  Y "adevv orquestar --estado" muestra el bucle vivo
+  Cuando el gateway termina su vuelta de polling
+  Entonces sigue respondiendo con la 1.0.0 y "telegram.pid" conserva su PID
+  Y su log y Telegram avisan una sola vez "La 0.4.0 activa no puede recargar este gateway (anterior a v0.5); sigue con la 1.0.0. Reinícialo para usarla."
+
+@B-ADV-0021 @CA-F03-18 @RF-F03-14 @RF-F03-11
+Escenario: El motor de destino no acepta las opciones del proceso en marcha
+  Dado Adevv 1.0.0 instalado, publicadas la 0.6.1 y la 1.0.0, un bucle de 1.0.0 en marcha lanzado con "--calidad" y un gateway de 1.0.0 en marcha
+  Y el bucle de la 0.6.1 no admite "--calidad"
+  Cuando ejecuto "adevv actualizar 0.6.1"
+  Entonces queda instalada la 0.6.1 y el aviso dice "Los motores desde v0.5.0 tomarán la versión activa al terminar su paso o respuesta actual si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0). Los anteriores requieren reinicio manual."
+  Cuando el bucle termina su paso actual y el gateway termina su vuelta de polling
+  Entonces el bucle sigue con la 1.0.0 y avisa una sola vez "La 0.6.1 activa no puede recargar este bucle (no admite --calidad); sigue con la 1.0.0. Reinícialo para usarla."
+  Y el gateway, cuyas opciones sí acepta la 0.6.1, recarga la 0.6.1
+  Cuando se publica la 1.0.1, que admite "--calidad", y ejecuto "adevv actualizar"
+  Entonces el bucle recarga la 1.0.1 al terminar su paso actual
 
 @CA-F03-14 @RF-F03-12
 Escenario: Versión inexistente
