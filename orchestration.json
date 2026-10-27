@@ -39,7 +39,7 @@
         "effort": "medium",
         "reserva": [
           {
-            "harness": "agy",
+            "harness": "claude",
             "model": "claude-sonnet-5-5",
             "effort": "medium"
           },
@@ -47,11 +47,6 @@
             "harness": "codex",
             "model": "gpt-6-luna",
             "effort": "high"
-          },
-          {
-            "harness": "claude",
-            "model": "claude-sonnet-5-5",
-            "effort": "medium"
           }
         ]
       },
@@ -173,7 +168,7 @@
     "effort": "low",
     "reserva": [
       {
-        "harness": "agy",
+        "harness": "claude",
         "model": "claude-sonnet-5-5",
         "effort": "medium"
       },
@@ -190,7 +185,7 @@
     "effort": "low",
     "reserva": [
       {
-        "harness": "agy",
+        "harness": "claude",
         "model": "claude-sonnet-5-5",
         "effort": "medium"
       },
