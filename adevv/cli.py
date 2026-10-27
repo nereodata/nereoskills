@@ -121,6 +121,8 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
             desfasados.append((target_key, plan["nombre"], v_reg))
 
     if not desfasados:
+        if act and not bucles_vivos:
+            updater.limpiar_versiones_antiguas()
         return
 
     if bucles_vivos:
@@ -130,6 +132,7 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
             print(msg, file=err)
     else:
         sincronizar_destinos(origen_dir=origen_dir, version=version_activa)
+        updater.limpiar_versiones_antiguas()
         for _, nombre, _ in desfasados:
             msg = f"{nombre} sincronizado con la {version_activa}."
             print(msg, file=err)

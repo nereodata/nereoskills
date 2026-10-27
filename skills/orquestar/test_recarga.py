@@ -27,7 +27,7 @@ class RecargaTests(unittest.TestCase):
         self.nuevo = self.root / 'versions/0.6.0/skills/orquestar/orquestar.py'
         for script in (self.actual, self.nuevo):
             script.parent.mkdir(parents=True)
-            script.touch()
+            script.write_text("p.add_argument('--max-pasos')\np.add_argument('--root')\n", encoding='utf-8')
         self.puntero('0.6.0')
         self.env = patch.dict(os.environ, {'ADEVV_HOME': str(self.root)})
         self.env.start()
@@ -87,6 +87,44 @@ class RecargaTests(unittest.TestCase):
             self.assertEqual(Path(opciones['stdout'].name), self.root / log)
             self.assertEqual(opciones['stderr'], subprocess.STDOUT)
 
+    def lanzar_con(self, argv, version='0.6.0', etiqueta='orquestar'):
+        (self.root / motor.PID).write_text(str(os.getpid()))
+        self.puntero(version)
+        with patch.object(motor.sys, 'argv', ['viejo', *argv]), patch.object(motor.subprocess, 'Popen') as lanzar, patch.object(motor, 'avisar') as avisar, patch('builtins.print') as imprimir:
+            resultado = motor.recargar_version(self.actual, self.root, motor.PID, {}, etiqueta)
+        return resultado, lanzar, avisar, imprimir
+
+    def test_destino_anterior_a_v05_no_recarga_y_avisa_una_vez(self):
+        motor.AVISOS_RECARGA.clear()
+        self.nuevo.parent.parent.parent.rename(self.root / 'versions/0.4.0')
+        for _ in range(2):
+            resultado, lanzar, avisar, imprimir = self.lanzar_con([], '0.4.0')
+            self.assertFalse(resultado)
+            lanzar.assert_not_called()
+        self.assertEqual((self.root / motor.PID).read_text(), str(os.getpid()))
+        avisar.assert_not_called()
+        resultado, lanzar, avisar, imprimir = self.lanzar_con([], '0.4.0', 'gateway')
+        texto = f'La 0.4.0 activa no puede recargar este gateway (anterior a v0.5); sigue con la {motor.version_adevv(self.actual)}. Reinícialo para usarla.'
+        avisar.assert_called_once_with(self.root.resolve(), 'respuesta', texto)
+        imprimir.assert_called_once_with(f'[gateway] {texto}', flush=True)
+
+    def test_destino_sin_opcion_no_recarga_y_recarga_con_version_compatible(self):
+        motor.AVISOS_RECARGA.clear()
+        resultado, lanzar, avisar, _ = self.lanzar_con(['--max-pasos', '8', '--calidad'])
+        self.assertFalse(resultado)
+        lanzar.assert_not_called()
+        self.assertIn('(no admite --calidad)', avisar.call_args.args[2])
+        self.assertIn('Reinícialo para usarla.', avisar.call_args.args[2])
+        self.assertEqual((self.root / motor.PID).read_text(), str(os.getpid()))
+        self.lanzar_con(['--calidad'])[2].assert_not_called()
+        siguiente = self.root / 'versions/1.0.1/skills/orquestar/orquestar.py'
+        siguiente.parent.mkdir(parents=True)
+        siguiente.write_text("p.add_argument('--calidad')\n", encoding='utf-8')
+        self.puntero('1.0.1')
+        (self.root / motor.PID).write_text(str(os.getpid()))
+        with patch.object(motor.sys, 'argv', ['viejo', '--calidad']), patch.object(motor.subprocess, 'Popen', return_value=Mock(pid=9876)):
+            self.assertTrue(motor.recargar_version(self.actual, self.root, motor.PID, {}, 'orquestar'))
+
     def test_fallo_lanzamiento_conserva_pid(self):
         (self.root / motor.PID).write_text(str(os.getpid()))
         with patch.object(motor.subprocess, 'Popen', side_effect=OSError('fallo')):
@@ -96,7 +134,7 @@ class RecargaTests(unittest.TestCase):
 
     def test_bucle_transfiere_antes_de_calcular_paso(self):
         a = argparse.Namespace(estado=False, idea=None, docs='docs', max_pasos=8,
-                               recarga={'n': 3, 'sin_progreso': 1, 'esperado': 90, 'recuperaciones_analisis': []})
+                               recarga={'n': 3, 'sin_progreso': 1, 'esperado': 90, 'recuperaciones_analisis': [], 'intentos_dependencias': []})
         with patch.object(motor, 'iniciar_gateway'), patch.object(motor, 'suite', return_value=None), patch.object(motor, 'recargar_version', return_value=True, create=True) as recarga, patch.object(motor, 'estado') as estado:
             self.assertEqual(motor.bucle(a, self.root), 0)
         estado.assert_not_called()
@@ -153,7 +191,7 @@ class RecargaTests(unittest.TestCase):
                                'motor.subprocess.Popen = lanzar\n'
                                'assert motor.recargar_version(__file__, root, motor.PID, {"n": 4}, "orquestar")\n'
                                'try:\n    hijos[0].wait(timeout=10)\nfinally:\n    if hijos[0].poll() is None:\n        hijos[0].kill()\n        hijos[0].wait()\n', encoding='utf-8')
-        self.nuevo.write_text(carga + 'estado = motor.recibir_recarga(root, motor.PID, __file__)\n'
+        self.nuevo.write_text(carga + "OPCIONES = ['--docs']"+chr(10)+'estado = motor.recibir_recarga(root, motor.PID, __file__)\n'
                               'print("salida áéñ", flush=True)\n'
                               'print("error áéñ", file=sys.stderr, flush=True)\n'
                               '(root / "resultado.json").write_text(json.dumps({"estado": estado, "pid": os.getpid(), "args": sys.argv[1:]}))\n', encoding='utf-8')

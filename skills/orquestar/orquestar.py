@@ -197,6 +197,38 @@ def version_activa_distinta(script):
     return None
 
 
+AVISOS_RECARGA = set()
+
+
+def causa_sin_recarga(destino, version, argumentos):
+    """Motivo por el que el motor de destino no puede asumir este proceso (RF-F03-14), o '' si puede."""
+    if tuple(int(n) for n in version.split('.')) < (0, 5, 0):
+        return 'anterior a v0.5'
+    try:
+        texto = destino.read_text(encoding='utf-8')
+    except OSError:
+        return 'no se puede leer su motor'
+    ausentes = []
+    for a in argumentos:
+        opcion = a.split('=', 1)[0]
+        if opcion.startswith('--') and f"'{opcion}'" not in texto and f'"{opcion}"' not in texto and opcion not in ausentes:
+            ausentes.append(opcion)
+    return f"no admite {', '.join(ausentes)}" if ausentes else ''
+
+
+def avisar_sin_recarga(script, root, etiqueta, version, causa):
+    """Avisa una sola vez por versión activa de que el proceso sigue con la suya, en su log y por Telegram."""
+    clave = (str(root), etiqueta, version)
+    if clave in AVISOS_RECARGA:
+        return
+    AVISOS_RECARGA.add(clave)
+    tipo = 'gateway' if etiqueta == 'gateway' else 'bucle'
+    texto = (f'La {version} activa no puede recargar este {tipo} ({causa}); '
+             f'sigue con la {version_adevv(script)}. Reinícialo para usarla.')
+    print(f'[{etiqueta}] {texto}', flush=True)
+    avisar(root, 'respuesta', texto)
+
+
 def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
     """Publica el PID del sucesor antes de cederle la ejecución entre ciclos."""
     nueva = version_activa_distinta(script)
@@ -224,6 +256,10 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
                 elif not a.startswith('--root='):
                     sin_root.append(a)
             argumentos = [*sin_root, '--root', str(root)]
+        causa = causa_sin_recarga(destino, version, argumentos)
+        if causa:
+            avisar_sin_recarga(script, root, etiqueta, version, causa)
+            return False
         opciones = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
         registro = root / ('telegram.log' if etiqueta == 'gateway' else LOG)
         with registro.open('a', encoding='utf-8') as log:

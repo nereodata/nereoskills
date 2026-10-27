@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from adevv.cli import main_cli
+from adevv.cli import _resincronizar_desfasados_al_arrancar, main_cli
 from adevv.sync import sincronizar_destinos
 from adevv.store import (
     get_active_info,
@@ -32,6 +32,7 @@ from adevv.updater import (
     evaluar_comprobacion_actualizacion,
     instalar_version_publicada,
     materializar_version_local,
+    mensaje_actualizacion,
     limpiar_versiones_antiguas,
 )
 from tests import aislamiento_telegram
@@ -613,8 +614,8 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         self.assertEqual(get_sync_registry("claude"), registro)
         self.assertEqual((self.claude_home / "skills/demo/SKILL.md").read_text(encoding="utf-8"), "0.6.1")
         self.assertEqual(scripts["0.6.1"].read_text(encoding="utf-8"), "motor 0.6.1")
-        self.assertIn("al terminar su paso actual", err.getvalue())
-        self.assertIn("anteriores a v0.5", err.getvalue())
+        self.assertIn("al terminar su paso o respuesta actual", err.getvalue())
+        self.assertIn("Los anteriores requieren reinicio manual", err.getvalue())
         self.assertNotIn("al terminar su paso actual", out.getvalue())
         spec = importlib.util.spec_from_file_location("motor_rollback_b09", Path(__file__).resolve().parents[1] / "skills/orquestar/orquestar.py")
         motor = importlib.util.module_from_spec(spec)
@@ -741,7 +742,7 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             res, msg, ver = evaluar_comprobacion_actualizacion()
         self.assertEqual((res, ver), (ResultadoActualizacion.APLICADA, "0.2.0"))
         instalar.assert_called_once_with(target_version="0.2.0", commit_hash="c2", origin_url=None)
-        self.assertIn("al terminar su paso actual", msg)
+        self.assertIn("no admite recarga", msg)
         self.assertNotIn("aplazada", get_update_state())
 
     # H-02: Cobertura de @CA-F03-04 y @CA-F03-05 (adevv actualizar sin argumentos frente a bucle previo y gateway)
@@ -761,7 +762,7 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             code = main_cli(["actualizar"], out=out, err=err)
             self.assertEqual(code, 0)
             mock_inst.assert_called_once()
-            self.assertIn("anteriores a v0.5", err.getvalue())
+            self.assertIn("no admite recarga", err.getvalue())
             self.assertNotIn("anteriores a v0.5", out.getvalue())
 
         out = io.StringIO()
@@ -779,8 +780,8 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             code = main_cli(["actualizar"], out=out, err=err)
             self.assertEqual(code, 0)
             mock_inst.assert_called_once()
-            self.assertIn("entre vueltas de polling", err.getvalue())
-            self.assertNotIn("entre vueltas de polling", out.getvalue())
+            self.assertIn("no admite recarga", err.getvalue())
+            self.assertNotIn("no admite recarga", out.getvalue())
 
     # H-02: Cobertura de @CA-F03-12 (Volver atrás a 0.2.1 desactiva auto_update y adevv actualizar a 0.3.1 la reactiva)
     def test_ca_f03_12_volver_atras_y_reactivar(self):
@@ -846,8 +847,60 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             code = main_cli(["actualizar", "0.2.0"], out=out, err=err)
             self.assertEqual(code, 0)
             instalar.assert_called_once_with(target_version="0.2.0", commit_hash="c2")
-            self.assertIn("al terminar su paso actual", err.getvalue())
+            self.assertIn("no admite recarga", err.getvalue())
             self.assertNotIn("al terminar su paso actual", out.getvalue())
+
+
+class TestAvisoRecargaYLimpieza(unittest.TestCase):
+    """B-ADV-0021: el aviso de instalación no promete recargas imposibles y la limpieza se reintenta."""
+
+    def aviso(self, version_nueva):
+        procesos = [{"tipo": "bucle", "pid": 1, "cwd": "C:\\SW\\Afinn", "cmd": "orquestar.py"},
+                    {"tipo": "gateway", "pid": 2, "cwd": "C:\\SW\\Afinn", "cmd": "gateway.py"}]
+        with patch("adevv.updater.hay_bucles_en_marcha", return_value=procesos[:1]), \
+             patch("adevv.updater.detectar_procesos_adevv", return_value=procesos):
+            return mensaje_actualizacion("1.0.0", version_nueva, [])
+
+    def test_destino_anterior_a_v05_pide_reinicio_manual_y_advierte_a_los_motores_publicados(self):
+        msg = self.aviso("0.4.0")
+        self.assertIn("La 0.4.0 no admite recarga: reinicia a mano los bucles y gateways en marcha para usarla; "
+                      "los de v0.5.0 a v0.6.1 se detendrán al terminar su paso o respuesta actual. En marcha: ", msg)
+        self.assertNotIn("tomarán", msg)
+        self.assertIn("Afinn", msg)
+
+    def test_destino_desde_v05_promete_la_recarga_solo_si_admite_las_opciones(self):
+        msg = self.aviso("0.6.1")
+        self.assertIn("Los motores desde v0.5.0 tomarán la versión activa al terminar su paso o respuesta actual "
+                      "si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0). "
+                      "Los anteriores requieren reinicio manual. En marcha: ", msg)
+
+    def test_orden_sin_bucles_reintenta_la_limpieza_aunque_no_haya_destinos_desfasados(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value={"version": "1.0.0"}), patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[]), \
+             patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}), \
+             patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_called_once()
+
+    def test_orden_sin_puntero_activo_no_limpia(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value=None),              patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[]),              patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}),              patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_not_called()
+
+    def test_limpieza_sin_versiones_antiguas_no_detecta_procesos(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"ADEVV_HOME": tmp}):
+            (Path(tmp) / "versions/1.0.0").mkdir(parents=True)
+            (Path(tmp) / "active.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
+            with patch("adevv.updater.sincronizacion_bloqueada") as bloqueada, patch("adevv.updater.detectar_procesos_adevv") as detectar:
+                limpiar_versiones_antiguas()
+        bloqueada.assert_not_called()
+        detectar.assert_not_called()
+
+    def test_orden_con_bucles_no_limpia(self):
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": ""}), patch("adevv.cli.get_active_info", return_value={"version": "1.0.0"}), patch("adevv.cli.processes.hay_bucles_en_marcha", return_value=[{"tipo": "bucle"}]), \
+             patch("adevv.cli.planificar_sincronizacion", return_value={"estado": "SINCRONIZADO", "nombre": "x"}), \
+             patch("adevv.cli.updater.limpiar_versiones_antiguas") as limpiar:
+            _resincronizar_desfasados_al_arrancar(io.StringIO(), io.StringIO())
+        limpiar.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -159,14 +159,16 @@ def consultar_versiones_publicadas(origin_url: Optional[str] = None, timeout: in
 
 def limpiar_versiones_antiguas() -> None:
     """Limpia versiones antiguas en versions/ que no sean la activa ni estén en uso por procesos."""
-    if sincronizacion_bloqueada():
-        return
     versions_dir = get_adevv_home() / "versions"
     if not versions_dir.exists() or not versions_dir.is_dir():
         return
 
     act = get_active_info()
     version_activa = act.get("version") if act else None
+    if not any(i.is_dir() and i.name != version_activa and not i.name.startswith(".staging-") for i in versions_dir.iterdir()):
+        return
+    if sincronizacion_bloqueada():
+        return
 
     procesos = detectar_procesos_adevv()
 
@@ -417,6 +419,9 @@ def _activar_version_publicada(
     return True, "OK", desfasados
 
 
+VERSION_MINIMA_RECARGA = "0.5.0"
+
+
 def mensaje_actualizacion(version_anterior: str, version_nueva: str, desfasados: List[str]) -> str:
     """Describe instalación, copias pendientes y adopción cooperativa o manual."""
     msg = f"Adevv actualizado de {version_anterior} a {version_nueva}."
@@ -426,14 +431,21 @@ def mensaje_actualizacion(version_anterior: str, version_nueva: str, desfasados:
         msg += " Reinicia las sesiones abiertas de los arneses para usar las skills nuevas."
     bucles = hay_bucles_en_marcha()
     gateways = [p for p in detectar_procesos_adevv() if p.get("tipo") == "gateway"]
-    if bucles:
-        lista = ", ".join(formatear_proceso_ui(p) for p in bucles)
-        msg += f" Los bucles desde v0.5 tomarán la versión al terminar su paso actual: {lista}."
-    if gateways:
-        lista = ", ".join(formatear_proceso_ui(p) for p in gateways)
-        msg += f" Los gateways desde v0.5 tomarán la versión entre vueltas de polling: {lista}."
-    if bucles or gateways:
-        msg += " Los motores anteriores a v0.5 requieren reinicio manual."
+    procesos = [*bucles, *gateways]
+    if procesos:
+        lista = ", ".join(formatear_proceso_ui(p) for p in procesos)
+        if _version_es_mayor(VERSION_MINIMA_RECARGA, version_nueva):
+            msg += (
+                f" La {version_nueva} no admite recarga: reinicia a mano los bucles y gateways en marcha para usarla;"
+                " los de v0.5.0 a v0.6.1 se detendrán al terminar su paso o respuesta actual."
+            )
+        else:
+            msg += (
+                " Los motores desde v0.5.0 tomarán la versión activa al terminar su paso o respuesta actual"
+                " si admite sus opciones; si no, siguen con su versión y lo avisan (desde v1.0.0)."
+                " Los anteriores requieren reinicio manual."
+            )
+        msg += f" En marcha: {lista}."
     if desfasados:
         msg += f" Arneses sin sincronizar: {', '.join(desfasados)}."
     return msg

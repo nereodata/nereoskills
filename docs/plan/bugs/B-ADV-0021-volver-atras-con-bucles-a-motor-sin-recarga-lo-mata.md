@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), H-01 🟠 y H-07 🟡"
 created_at: 2026-10-27
@@ -44,3 +44,20 @@ Política elegida (DEC-P13, «Recarga solo hacia motores compatibles»): **recar
 
 ## 📋 Evidencias
 - `docs/review/versions/v1.0-arquitectura.md`, hallazgos H-01 y H-07.
+
+## 🧭 Triaje (bug-fix, 2026-10-27)
+- **Causa raíz confirmada:** `recargar_version` cedía el PID al sucesor sin comprobar que admite la recarga ni las opciones del proceso.
+- Subfase A: Definición → `[SKIP]` (especificada en el paso `especificar`: RF-F03-14, @CA-F03-17/18, Hades 9/10).
+- Subfase B: Diseño → `[SKIP]` (DEC-P13 ya fija la política; comprobación previa en el proceso que recarga).
+- Subfase C1: Pruebas → `[EXEC]` (`skills/orquestar/test_recarga.py`, `tests/test_updater.py`): destino anterior a v0.5, destino sin opción, aviso único, recarga posterior, aviso de instalación y reintento de limpieza.
+- Subfase C2: Corrección → `[EXEC]` (`orquestar.py`: `causa_sin_recarga`/`avisar_sin_recarga`; `updater.mensaje_actualizacion`; `cli._resincronizar_desfasados_al_arrancar`; README y SKILL de orquestar).
+- Subfase D: QA → `[EXEC]` (Hades `/review-code` sobre el delta).
+- Subfase E: Documentación → `[EXEC]` (README y SKILL, inline).
+- Subfase F: Cierre → `[EXEC]`.
+- **Verificación al cierre:** `python -m unittest tests.test_updater skills.orquestar.test_recarga skills.telegram_gateway.test_recarga_gateway skills.orquestar.test_deuda_menor tests.test_cli_commands tests.test_sync tests.test_telegram_gateway`: ejercita la recarga del motor y del gateway, el aviso de instalación y el reintento de limpieza.
+
+## ✅ Resolución
+- `recargar_version` comprueba antes de ceder el PID (`causa_sin_recarga`): destino anterior a v0.5.0 o sin alguna opción del proceso → sigue con su versión, conserva el PID y avisa una vez por versión activa (log y Telegram, evento `respuesta`). Cubre bucle y gateway.
+- `mensaje_actualizacion` usa las frases de RF-F03-06/11 y @CA-F03-17/18 y nombra los procesos en « En marcha: …».
+- La limpieza de versiones antiguas (DEC-P02) se reintenta en la primera orden sin bucles ni pasos; sale antes si no hay versiones antiguas ni puntero activo.
+- Hades `/review-code`: RECHAZADO 8,2 (🟠 aviso de instalación) → APROBADO 9,0. Reporte: [B-ADV-0021-code-review.md](../../review/code_reviews/B-ADV-0021-code-review.md).
