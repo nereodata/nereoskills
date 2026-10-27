@@ -2,7 +2,7 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
-## [1.0.0] - 2026-10-26
+## [1.0.0] - 2026-10-27
 
 ### Añadido
 
@@ -29,6 +29,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 - **B-ADV-0012** — Bloqueo local de tareas sin progreso tras agotar promociones, con diagnóstico persistido, aviso y continuidad de tareas independientes.
 - **B-ADV-0009** — Instalación inmediata con bucles en marcha, conservación de versiones existentes y copias globales diferidas hasta que terminen los bucles, también con `--forzar`. La versión nueva se adopta mediante la recarga cooperativa existente.
 - **B-ADV-0011** — Reintentos acotados por perfil ante fallos del arnés en pasos, reservas y diagnóstico final con cola de salida, conservando cuota y progreso commiteado.
+- **B-ADV-0007** — Las pruebas de `test_cli_commands` ya no arrancan un gateway de Telegram real con el token del entorno.
 - **B-ADV-0006** — Recuperación automática de la suite roja al cerrar la versión: bug reutilizable con salida del fallo, promoción de dificultad y parada tras tres arreglos fallidos en dificil.
 - **B-ADV-0005** — Continuidad con reservas cuando falta el ejecutable en pasos, agentes y conversación de Telegram; evento filtrable `arnes`, métricas sin consumo y conservación de cuota previa.
 
