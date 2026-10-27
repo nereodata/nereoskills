@@ -379,7 +379,14 @@ def construir_prompt_paso(root, paso, arg):
     if es_repositorio_fuente_adevv(root):
         nota_fuente = ' Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.'
 
-    return instruccion_agente + prompt_cuerpo + extra + nota_fuente
+    corregir = ''
+    if paso == 'calcular-dependencias':
+        errores = errores_dependencias(backlog(root))
+        if errores:
+            corregir = (' El backlog tiene dependencias inválidas que debes corregir: '
+                        + '; '.join(errores) + '.')
+
+    return instruccion_agente + prompt_cuerpo + corregir + extra + nota_fuente
 
 
 def construir_prompt_agente(root, rol, prompt, reanudacion=False):
@@ -906,7 +913,7 @@ def estado(root, docs):
         return ('PASO', 'calcular-dependencias', '', None)
     errores = errores_dependencias(items)
     if errores:
-        return ('PARAR', 'Dependencias inválidas en el backlog: ' + '; '.join(errores))
+        return ('PASO', 'calcular-dependencias', '', None)
 
     por_id = {i['id']: i for i in items}
     alcance = desbloquea(items)
@@ -2494,6 +2501,7 @@ def bucle(a, root):
     recarga = getattr(a, 'recarga', None) or {}
     sin_progreso = recarga.get('sin_progreso', 0)
     esperado = recarga.get('esperado', 0)
+    intentos_dependencias = {tuple(r['errores']): r['n'] for r in recarga.get('intentos_dependencias', [])}
     recuperaciones_analisis = {(r['paso'], r['arg']): r
                               for r in recarga.get('recuperaciones_analisis', [])}
     for n in range(recarga.get('n', 1), a.max_pasos + 1):
@@ -2502,7 +2510,10 @@ def bucle(a, root):
             return 2
         if not a.estado and recargar_version(__file__, root, PID,
                                              {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado,
-                                              'recuperaciones_analisis': list(recuperaciones_analisis.values())}, 'orquestar'):
+                                              'recuperaciones_analisis': list(recuperaciones_analisis.values()),
+                                              'intentos_dependencias': [{'errores': list(k), 'n': v}
+                                                                        for k, v in intentos_dependencias.items()]},
+                                             'orquestar'):
             return 0
         if not a.estado:
             for iid, titulo in ingerir(root):
@@ -2809,6 +2820,15 @@ def bucle(a, root):
         else:
             sin_progreso = 0
             recuperaciones_analisis.pop(clave_analisis, None)
+            if paso == 'calcular-dependencias':
+                errores = tuple(errores_dependencias(backlog(root)))
+                if not errores:
+                    intentos_dependencias.clear()
+                else:
+                    intentos_dependencias[errores] = intentos_dependencias.get(errores, 0) + 1
+                    if intentos_dependencias[errores] >= a.reintentos:
+                        return parar(root, 'respuesta', 'Dependencias inválidas en el backlog tras '
+                                     f'{a.reintentos} intentos de corregirlas: ' + '; '.join(errores))
     return parar(root, 'error', f'alcanzado --max-pasos={a.max_pasos}.')
 
 

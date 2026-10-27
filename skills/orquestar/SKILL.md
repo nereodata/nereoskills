@@ -88,7 +88,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | `platform_review.md` con `RECHAZADO` | PARAR: plataforma rechazada |
 | Sin `work_plan.md` o backlog vacío | paso `work-plan` |
 | Alguna tarea maestra abierta con versión y sin el campo `depende_de` | paso `calcular-dependencias` |
-| `depende_de` con IDs inexistentes o ciclos | PARAR: dependencias inválidas |
+| `depende_de` con IDs inexistentes, ciclos o versiones posteriores | paso `calcular-dependencias` con los errores en el prompt; si tras `--reintentos` siguen los mismos, PARAR: dependencias inválidas |
 | Rama `release/vX.Y` recién abierta (ninguna tarea empezada), con deuda registrada pendiente y sin `docs/review/versions/vX.Y-deuda.md` | paso `revisar-deuda` |
 | Rama `release/vX.Y` con un ID `completed` sin reporte en `docs/review/code_reviews/` | paso `revisar-tarea` |
 | Rama `release/vX.Y` con un ID `blocked` y `pendiente_de: especificador` | paso `especificar` (primero el que más tareas retiene) |

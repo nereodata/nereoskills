@@ -344,6 +344,22 @@ class BuzonTests(unittest.TestCase):
             items[0]['version'] = 'v0.2.0'
             self.assertEqual(motor.estado(self.root, 'docs')[1], 'calcular-dependencias')
 
+    def test_invalid_dependencies_return_to_calcular_dependencias(self):
+        def tarea(iid, deps):
+            return {'paso': 'task-dev', 'id': iid, 'status': 'planned', 'version': 'v0.2.0', 'depende_de': deps,
+                    'pendiente_de': '', 'weight': 0}
+        for f in ('requirements.md', 'req_analysis.md', 'platform_plan.md', 'platform_review.md', 'work_plan.md'):
+            (self.root / 'docs' / f).write_text('', encoding='utf-8')
+        casos = {
+            'inexistente': ([tarea('T1', ['T9'])], 'T9'),
+            'ciclo': ([tarea('T1', ['T2']), tarea('T2', ['T1'])], 'ciclo'),
+        }
+        for nombre, (items, texto) in casos.items():
+            with self.subTest(nombre):
+                with (patch.object(motor, 'backlog', return_value=items), patch.object(motor, 'git', return_value='')):
+                    self.assertEqual(motor.estado(self.root, 'docs'), ('PASO', 'calcular-dependencias', '', None))
+                    self.assertIn(texto, motor.construir_prompt_paso(self.root, 'calcular-dependencias', ''))
+
 
 class RolesTests(unittest.TestCase):
     """Atenea analiza y decide, Artemisa desarrolla; cada una con su arnés, modelo y esfuerzo."""
@@ -1367,6 +1383,25 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(events, ['suite roja', 'bug-fix completado', 'suite verde', 'revisar-version'])
         self.assertEqual(steps, ['bug-fix', 'revisar-version'])
         self.assertEqual(verify.call_count, 2)
+
+    def test_loop_stops_when_dependency_errors_persist_after_progress(self):
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=10, reintentos=2, espera_max=0, cmd=None)
+        items = [{'paso': 'task-dev', 'id': 'T1', 'status': 'planned', 'version': 'v0.2.0', 'depende_de': ['T9'],
+                  'pendiente_de': '', 'weight': 0}]
+        ejecuciones = []
+        def execute(a, root, prompt, **kwargs):
+            ejecuciones.append(prompt)
+            return 0, {}, ''
+        with (patch.object(motor, 'estado', return_value=('PASO', 'calcular-dependencias', '', None)),
+              patch.object(motor, 'backlog', return_value=items),
+              patch.object(motor, 'firma', side_effect=range(100)),
+              patch.object(motor, 'ejecutar', side_effect=execute),
+              patch.object(motor, 'avisar') as notify):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+        self.assertEqual(len(ejecuciones), 2)
+        self.assertIn('T1 depende de T9', ejecuciones[0])
+        self.assertIn('T1 depende de T9', notify.call_args.args[2])
 
     def test_loop_at_maximum_notifies_and_never_launches_review(self):
         iid, _ = self.observe_failure()
