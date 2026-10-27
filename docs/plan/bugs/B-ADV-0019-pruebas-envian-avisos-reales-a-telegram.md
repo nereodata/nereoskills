@@ -1,5 +1,5 @@
 ---
-id: B-ADV-0018
+id: B-ADV-0019
 title: "Las pruebas envían avisos reales a Telegram con el token del entorno"
 type: bug
 weight: 10
@@ -12,7 +12,7 @@ created_at: 2026-10-27
 updated_at: 2026-10-27
 ---
 
-# B-ADV-0018: Las pruebas envían avisos reales a Telegram con el token del entorno
+# B-ADV-0019: Las pruebas envían avisos reales a Telegram con el token del entorno
 
 ## 🎯 Descripción del Fallo
 
