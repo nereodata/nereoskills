@@ -1,68 +1,64 @@
 ﻿# Revisión de especificación B-ADV-0020
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO**
 
-Fecha: 2026-10-27. Modo: orquestado. Revisor: Hades. Ronda: 2.
+Fecha: 2026-10-27. Modo: orquestado. Revisor: Hades. Ronda: 3.
 
 ## Alcance y método
 
-Reevaluación de H1–H3 del informe anterior y del delta de escenarios `@B-ADV-0020` en `skills/orquestar/features/orquestacion.feature`, frente al contrato del bug `docs/plan/bugs/B-ADV-0020-marca-de-agotado-a-ciegas-impide-usar-modelo-con-cuota.md`, incluido triaje y decisiones. Se aplicó la skill instalada de la versión 0.6.1. No se revisaron código, diseño ni pruebas; no se ejecutaron pruebas ni suite completa.
+Reevaluación de H1–H3 de la ronda 2 y del delta corrector de `skills/orquestar/features/orquestacion.feature`, frente al contrato, triaje y decisiones de `docs/plan/bugs/B-ADV-0020-marca-de-agotado-a-ciegas-impide-usar-modelo-con-cuota.md`. Se aplicaron las instrucciones de Hades y la skill `review-spec` instaladas en la versión 0.6.1, ignorando el modelo del frontmatter.
 
-Las correcciones añaden recuperación del registro histórico de 1800 segundos, ejemplos de intervalo configurado y conservación de marcas ajenas al selector. El cambio autorizado de espera supuesta de 1800 a 300 segundos no constituye un hallazgo. Los escenarios no afectados por las correcciones no se someten a una nueva revisión de fondo.
+Se comparó el feature con `wip/B-ADV-0020:skills/orquestar/features/orquestacion.feature` para aislar las correcciones: ampliación del reset y dos escenarios nuevos. La comparación con la base release `f7ac5bd` confirma que el bloque BDD recuperado no elimina ni modifica escenarios previos. No se reabrieron escenarios no afectados ni se revisaron diseño, implementación o pruebas.
+
+Se reutiliza la evidencia verde de `orquestar_evidencias.jsonl`: `git diff --check`, código 0, fecha `2026-10-27T09:46:54`, árbol `9b60570ae38189303e640f27024ad9799cea1e25`, identificado por el usuario como el árbol recibido. Corresponde a la verificación documental del triaje. No se relanzó ese chequeo ni se ejecutaron pruebas o suite completa. La evidencia corresponde al árbol de entrada, antes de actualizar este reporte; no acredita comportamiento funcional, pendiente del desarrollo.
 
 ## Obligatorias
 
 | Criterio | Resultado | Evidencia |
 | --- | --- | --- |
-| No regresión | ✅ | El diff frente a la base conserva los escenarios anteriores al bug; las correcciones amplían los escenarios de B-ADV-0020. |
-| Coherencia | ✅ | La recuperación histórica de 1800 segundos y el intervalo configurable siguen el triaje. No se observa contradicción expresa con el contrato; quedan las omisiones y la ambigüedad señaladas abajo. |
-| Trazabilidad | ✅ | El delta lleva `@B-ADV-0020` y corresponde a decisiones del bug; no incorpora etiquetas `@CA-*` sin criterio de origen. |
-| Delta real | ✅ | Los casos añadidos distinguen registros históricos y valores configurados; la aserción del reset pretende proteger pares ajenos. |
+| No regresión | ✅ | Frente a `f7ac5bd`, el feature solo añade el bloque BDD del bug. Frente al WIP, las correcciones se limitan al reset y a los dos casos solicitados. |
+| Coherencia | ✅ | La compatibilidad histórica conserva la recuperación distinta de 1800 segundos; la opción ausente usa 300 segundos; el reset mantiene las restricciones de pares ajenos, conforme al contrato y a DEC-ESP-20-02/03/04. |
+| Trazabilidad | ✅ | Los escenarios correctores llevan `@B-ADV-0020` y corresponden a decisiones explícitas del bug. No introducen etiquetas `@CA-*` sin criterio de origen. |
+| Delta real | ✅ | El histórico sin clasificación y la propiedad ausente cubren ramas distintas de las ya descritas; el reset precisa sus efectos sobre seleccionados y ajenos. |
 
 ## Puntuaciones
 
 | Dimensión | Nota | Motivo |
 | --- | --- | --- |
-| Claridad | 8/10 | El nuevo paso del reset deja ambiguo el referente de «esos perfiles». |
-| Completitud | 7/10 | Se cubre el incidente histórico principal, pero falta la otra rama de compatibilidad y la opción de intervalo omitida. |
-| Testeabilidad | 9/10 | Los nuevos casos aportan valores y resultados observables. |
-| Estructura | 9/10 | El delta permanece en el feature de orquestación. |
+| Claridad | 9/10 | Las aserciones identifican los pares seleccionados y los ajenos y precisan el tratamiento de ambos. |
+| Completitud | 9/10 | Las correcciones cubren las tres carencias de la ronda anterior, incluidos compatibilidad histórica y configuración antigua. |
+| Testeabilidad | 9/10 | Se fijan duración, antigüedad y tiempo restante, ausencia de la propiedad y resultados observables de selección y visualización. |
+| Estructura | 9/10 | Las correcciones permanecen en el feature de orquestación. |
 
-**Media: 8,25/10.** H1 mantiene severidad alta e impide aprobar.
+**Media: 9/10.** Sin hallazgos críticos ni altos pendientes.
 
 ## Reevaluación de hallazgos anteriores
 
-### H1 — 🟠 ALTA — PERSISTE parcialmente: compatibilidad de los demás registros históricos
+### H1 — 🟠 ALTA — RESUELTO: compatibilidad de los demás registros históricos
 
-- **Resuelto:** las líneas 262–265 parten de un registro sin clasificación de 1800 segundos y antigüedad de 60 segundos; exigen comprobar al titular y registrar recuperación sin reescribir el registro antiguo. Cubren la marca que originó el fallo.
-- **Persiste:** no hay un caso de registro histórico sin clasificación con duración distinta de 1800 segundos que conserve su recuperación registrada, como exige expresamente el triaje y pedía H1. El escenario de recuperación confirmada parte de una marca confirmada, sin establecer que proceda de ese formato histórico.
-- **Impacto:** interpretar todos los registros históricos sin clasificación como sospechas seguiría satisfaciendo los escenarios, pero permitiría probar antes de tiempo perfiles cuya recuperación anterior debe respetarse.
-- **para:** especificador.
-- **destino:** resolver.
-- **Corrección requerida:** añadir un registro histórico sin clasificación de duración distinta de 1800 segundos, aún vigente, y exigir que al relanzar conserve su recuperación y no se pruebe el titular antes de ella. Por ejemplo, duración de 3600 segundos y antigüedad de 60 segundos, con reserva disponible.
+- **Evidencia:** el escenario «Conservar la recuperación de una marca histórica distinta del antiguo valor por defecto» parte de un registro sin clasificación de 3600 segundos y antigüedad de 60 segundos, con reserva disponible. Al relanzar exige usar la reserva y no probar `codex/m1` durante los 3540 segundos restantes, conservando el registro sin reescribirlo.
+- **Evaluación:** discrimina el tratamiento incorrecto de todos los registros históricos como sospechas y cumple la compatibilidad exigida por el triaje. La cobertura de 1800 segundos aceptada en la ronda anterior permanece intacta.
+- **para:** especificador (asignación anterior satisfecha).
+- **destino:** resolver — completado; sin acción pendiente.
 
-### H2 — 🟡 MEDIA — PERSISTE parcialmente: intervalo por defecto cuando se omite la opción
+### H2 — 🟡 MEDIA — RESUELTO: intervalo por defecto cuando se omite la opción
 
-- **Resuelto:** las líneas 268–278 incluyen 120 segundos y resultados concretos para cero, un negativo, texto y null. El comportamiento ante valores no positivos ya tiene resultado observable: recurrir a 300 segundos.
-- **Persiste:** ningún ejemplo omite `cuota_reintento_s`. Una propiedad presente con null no establece inequívocamente el comportamiento de una propiedad ausente. El triaje fija 300 segundos por defecto.
-- **Impacto:** los ejemplos no discriminan una configuración antigua sin esa propiedad de una configuración con valor explícito.
-- **para:** especificador.
-- **destino:** resolver.
-- **Corrección requerida:** añadir un caso con la propiedad ausente que establezca 300 segundos como intervalo efectivo.
+- **Evidencia:** el escenario «Usar el intervalo por defecto en una configuración sin la opción de sondeo» establece expresamente que `orchestration.json` no contiene `cuota_reintento_s`. Exige no reintentar antes de 300 segundos en el mismo proceso y probar al titular al alcanzarlos, antes de usar la reserva disponible.
+- **Evaluación:** cubre la propiedad ausente de forma independiente de `null` y fija el intervalo por defecto con un límite temporal observable, conforme al contrato.
+- **para:** especificador (asignación anterior satisfecha).
+- **destino:** resolver — completado; sin acción pendiente.
 
-### H3 — 🟡 MEDIA — PERSISTE parcialmente: elegibilidad ambigua tras conservar pares ajenos
+### H3 — 🟡 MEDIA — RESUELTO: elegibilidad y restricciones tras el reset
 
-- **Resuelto:** la línea 226 exige expresamente que los pares ajenos al selector conserven sus marcas.
-- **Persiste:** inmediatamente después se afirma «Y esos perfiles vuelven a ser elegibles» y «estado y agentes dejan de mostrarlos agotados». Tras insertar la frase sobre los pares ajenos, el referente puede ser tanto los seleccionados como los ajenos. Tampoco se explicita que los ajenos con marca confirmada vigente sigan restringidos hasta su recuperación, solicitado en H3.
-- **Impacto:** la corrección permite lecturas incompatibles sobre qué perfiles recuperan elegibilidad y dejan de aparecer agotados.
-- **para:** especificador.
-- **destino:** resolver.
-- **Corrección requerida:** nombrar explícitamente los pares seleccionados en las aserciones de elegibilidad y visualización; para los ajenos, establecer marcas confirmadas vigentes y que conserven su restricción hasta la recuperación correspondiente.
+- **Evidencia:** el esquema «Recuperar marcas por orden explícita» parte de marcas confirmadas vigentes con recuperación dentro de 3600 segundos. Nombra los pares seleccionados `<pares>` al exigir elegibilidad y desaparición del estado de agotado. Para los ajenos exige conservar marcas confirmadas, restricciones y visualización de agotado hasta su recuperación registrada.
+- **Evaluación:** elimina el referente ambiguo «esos perfiles» y protege explícitamente a los pares ajenos al selector. Los ejemplos de modelo, arnés y reset global conservan su alcance; en el global no quedan pares ajenos entre los establecidos por el escenario.
+- **para:** especificador (asignación anterior satisfecha).
+- **destino:** resolver — completado; sin acción pendiente.
 
 ## Hallazgos nuevos
 
-Ninguno independiente de H1–H3. La ambigüedad introducida por la corrección del reset se trata dentro de H3.
+Ninguno. El delta corrector no introduce contradicciones ni carencias relevantes en el alcance revisado. La verificación documental del triaje es proporcionada a este paso, que solo recupera y corrige BDD; la verificación funcional sigue pendiente de la implementación.
 
 ## Salida para el bucle
 
-**RECHAZADO. para: especificador. destino: resolver.** Completar H1 y las correcciones concretas de H2–H3; reevaluar esos hallazgos y el siguiente delta sin ampliar a código, diseño o pruebas.
+**APROBADO. H1, H2 y H3 resueltos.** Sin hallazgos que enrutar. Puede continuar el siguiente paso de desarrollo previsto en el triaje; este veredicto aprueba únicamente la especificación reevaluada y no declara corregido el fallo funcional.

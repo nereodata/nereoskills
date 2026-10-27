@@ -5,8 +5,7 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.0.0"
-status: blocked
-pendiente_de: especificador
+status: planned
 depende_de: []
 origen: "Reporte del usuario (2026-10-27): con cuota de Codex disponible, el bucle esperaba hasta las 09:07 o pasaba a Claude"
 created_at: 2026-10-27
@@ -49,3 +48,30 @@ Hades rechaza `/review-spec`: H1 (alta), H2/H3 (medias), todos `para: especifica
 El especificador debe concretar los casos históricos sin clasificación y duración distinta de 1800 segundos, el intervalo con opción ausente y la conservación de las restricciones de pares ajenos al reset. Detalle y reporte en `docs/review/versions/v1.0-revision.md` y `docs/review/spec_reviews/B-ADV-0020-spec-review.md`.
 
 Triaje de este cierre por bloqueo: [EXEC] enrutado documental y `adevv orquestar --verificar "git diff --check"`; [SKIP] implementación y pruebas funcionales, pendientes de especificación aprobada. No se ha corregido el fallo ni ejecutado la suite completa.
+
+## Triaje de alcance
+- Subfase A: [EXEC] Requisito y escenarios de recuperación de cuotas supuestas, créditos y reset.
+- Subfase B: [EXEC] Eventos compatibles en métricas y política común de selección/espera.
+- Subfase C1: [EXEC] Regresiones aisladas de selección, reinicio, recuperación, CLI, espera y avisos.
+- Subfase C2: [EXEC] Motor de orquestación, sin modificar la instalación.
+- Subfase D: [EXEC] Hades sobre todo el delta.
+- Subfase E: [EXEC] README y manual de orquestar.
+- Subfase F: [EXEC] Cierre y commit en release/v1.0.
+- Verificación al cierre: `python -m unittest discover -s skills/orquestar -p test_*cuota*.py` y módulos afectados `test_fallos_arnes`, `test_arnes_ausente`, `test_estado_agentes`, `test_informe_agentes`, más `tests.test_orquestar`; cubren persistencia, selección, avisos, CLI y reservas. `git diff --check` y compilación de los Python modificados. No suite completa.
+- DEC: intervalo configurable `cuota_reintento_s` en orchestration.json, por defecto 300 segundos, positivo. El intento de comprobación usa el propio paso/revisión pendiente: evita trabajo artificial y permite aprovechar la respuesta.
+- DEC: los registros históricos de 1800 segundos sin clasificación son supuestos (antiguo valor por defecto); los demás conservan la recuperación registrada por compatibilidad. Nuevos registros declaran explícitamente el origen.
+- DEC: un nuevo proceso puede comprobar una sospecha aunque no hayan transcurrido los 300 segundos; dentro del proceso se respeta el intervalo. El reset y un éxito agregan recuperación al histórico; no alteran tokens ni datos previos.
+- Cambio de contrato autorizado: las aserciones antiguas de espera fija 1800 s ante `quota` sin hora pasarán a 300 s. Los escenarios anteriores se conservan; el requisito humano de este bug sustituye la espera fija descrita en el manual de orquestar.
+
+- Verificación de este intento interrumpido en especificación: solo `git diff --check`; no hay código ni pruebas nuevas, por lo que la verificación funcional del triaje queda pendiente del desarrollo.
+
+
+## Especificar · 2026-10-27
+
+- DEC-ESP-20-01: recuperar solo el bloque BDD y el triaje del WIP, sin fusionar diseño ni otros artefactos. Se descarta reanudar desarrollo dentro de este paso: Atenea concreta el contrato y Artemisa implementará después.
+- DEC-ESP-20-02 (H1): el caso histórico de 3600 segundos, con 60 transcurridos, mantiene 3540 segundos de restricción al relanzar. Se descarta tratar todo registro sin clasificación como supuesto: solo el antiguo valor por defecto de 1800 segundos se interpreta así.
+- DEC-ESP-20-03 (H2): la ausencia de cuota_reintento_s tiene un escenario propio y fija 300 segundos, igual que los valores inválidos. Se descarta equiparar cobertura de null a propiedad ausente.
+- DEC-ESP-20-04 (H3): el reset recupera exclusivamente los pares seleccionados. Los ajenos parten de marcas confirmadas vigentes y conservan restricción y visualización hasta su recuperación. Se descarta el pronombre ambiguo «esos perfiles».
+- Triaje de este paso: [EXEC] especificación, revisión aislada de Hades y `adevv orquestar --verificar "git diff --check"`; [SKIP] diseño, implementación y pruebas funcionales hasta el siguiente paso de desarrollo. La suite completa corresponde al bucle al cerrar versión.
+
+- Cierre de especificación: Hades APROBADO, 9/10, ronda 3; H1, H2 y H3 resueltos, sin hallazgos nuevos. Desarrollo funcional pendiente. Véase docs/review/spec_reviews/B-ADV-0020-spec-review.md.

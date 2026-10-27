@@ -198,3 +198,97 @@ Característica: Continuidad con arneses ausentes
     Y si configuro 4 reintentos la cuarta espera también es de 900 segundos
     Y un límite negativo o no entero se rechaza antes de arrancar el bucle
     Y si la salida es un prefijo de 3000 letras A seguido de 1997 letras B y FIN, el fragmento del aviso contiene exactamente las 1997 letras B y FIN del último arnés ejecutado
+
+  @B-ADV-0020
+  Escenario: Comprobar una sospecha al relanzar y borrar la marca al responder
+    Dado un titular con una marca supuesta de hace 60 segundos y una reserva disponible
+    Cuando relanzo el bucle y el titular responde al paso pendiente
+    Entonces utilizo el titular y registro su recuperación sin borrar el histórico
+
+  @B-ADV-0020
+  Escenario: Respetar la recuperación confirmada
+    Dado un titular con reinicio confirmado dentro de 3600 segundos y una reserva disponible
+    Cuando relanzo el bucle
+    Entonces utilizo la reserva y no pruebo el titular antes del reinicio
+
+  @B-ADV-0020
+  Escenario: Limitar comprobaciones de una sospecha
+    Dado un intervalo cuota_reintento_s de 300 segundos y una marca sin hora confirmada
+    Cuando el titular sigue sin cuota
+    Entonces no lo vuelvo a probar en este proceso antes de 300 segundos
+    Y al alcanzar los 300 segundos lo pruebo antes de usar la reserva
+
+  @B-ADV-0020
+  Esquema del escenario: Recuperar marcas por orden explícita
+    Dado marcas confirmadas vigentes de codex/m1, codex/m2 y claude/m1 con recuperación dentro de 3600 segundos
+    Cuando ejecuto adevv orquestar --cuota-reset <selector>
+    Entonces registro recuperación para <pares> sin reescribir el histórico
+    Y los pares seleccionados <pares> vuelven a ser elegibles
+    Y estado y agentes dejan de mostrar agotados los pares seleccionados <pares>
+    Y los pares ajenos al selector conservan sus marcas confirmadas y siguen restringidos hasta su recuperación registrada
+    Y estado y agentes siguen mostrando agotados los pares ajenos al selector hasta esa recuperación
+    Ejemplos:
+      | selector | pares |
+      | codex/m1 | codex/m1 |
+      | codex | codex/m1 y codex/m2 |
+      | | codex/m1 y codex/m2 y claude/m1 |
+
+  @B-ADV-0020
+  Escenario: Despertar una espera después de un reset
+    Dado un bucle esperando 3600 segundos por cuota real de codex/m1
+    Cuando otra orden ejecuta --cuota-reset codex/m1
+    Entonces el bucle continúa en su siguiente comprobación de como máximo 30 segundos
+    Y no necesita relanzarse
+
+  @B-ADV-0020
+  Esquema del escenario: Avisar de créditos una vez por episodio
+    Dado Telegram habilitado y un titular cuya respuesta contiene <error>
+    Cuando falla por créditos y vuelve a fallar en la siguiente comprobación
+    Entonces envío una sola vez el aviso "Sin créditos en codex: recarga y el bucle lo reintentará"
+    Y conservo una marca supuesta que permite reintentar cada 300 segundos
+    Y agentes y estado indican "supuesto" y el origen "sin créditos"
+    Ejemplos:
+      | error |
+      | out of credits |
+      | credit balance |
+      | billing_hard_limit |
+
+  @B-ADV-0020
+  Escenario: Identificar el origen de una marca real
+    Dado un titular que responde "usage limit resets in 1 hour"
+    Cuando consulto estado o agentes
+    Entonces veo la hora de recuperación y "real" y "hora en la respuesta"
+
+  @B-ADV-0020
+  Escenario: Recuperar la marca histórica que originó el fallo
+    Dado un registro histórico sin clasificación de cuota con espera 1800 segundos de hace 60 segundos
+    Cuando relanzo el bucle y el titular responde
+    Entonces compruebo el titular y registro recuperación sin reescribir el registro antiguo
+
+  @B-ADV-0020
+  Esquema del escenario: Configurar el intervalo de sondeo
+    Dado cuota_reintento_s con valor <valor> en orchestration.json
+    Cuando el titular responde sin cuota y sin hora de reinicio
+    Entonces el siguiente sondeo del mismo proceso se permite tras <segundos> segundos
+    Ejemplos:
+      | valor | segundos |
+      | 120 | 120 |
+      | 0 | 300 |
+      | -5 | 300 |
+      | texto | 300 |
+      | null | 300 |
+
+  @B-ADV-0020
+  Escenario: Conservar la recuperación de una marca histórica distinta del antiguo valor por defecto
+    Dado un titular codex/m1 con un registro histórico sin clasificación de cuota con espera 3600 segundos de hace 60 segundos
+    Y una reserva claude/m2 disponible
+    Cuando relanzo el bucle
+    Entonces utilizo la reserva y no pruebo codex/m1 durante los 3540 segundos restantes hasta su recuperación registrada
+    Y conservo el registro histórico sin reescribirlo
+
+  @B-ADV-0020
+  Escenario: Usar el intervalo por defecto en una configuración sin la opción de sondeo
+    Dado un orchestration.json que no contiene la propiedad cuota_reintento_s
+    Cuando el titular responde sin cuota y sin hora de reinicio
+    Entonces no vuelvo a probarlo en este proceso antes de 300 segundos
+    Y al alcanzar los 300 segundos lo pruebo antes de usar la reserva disponible
