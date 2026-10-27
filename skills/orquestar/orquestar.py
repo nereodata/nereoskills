@@ -1827,6 +1827,28 @@ def parar(root, evento, texto):
     return 2
 
 
+def cambiar_de_rama(root, rama):
+    """Cambia a `rama` resolviendo sin persona los cambios pendientes: Clio los commitea o descarta; si quedan, `git stash`."""
+    actual = git('branch', '--show-current')
+    if git('status', '--porcelain'):
+        prompt = (f'El árbol de la rama {actual} tiene cambios sin commitear y el bucle debe cambiar a {rama}. '
+                  'Revisa `git status`: commitea (commit semántico) lo que pertenezca al trabajo hecho y '
+                  'descarta solo los restos (temporales o ignorables). No cambies de rama ni toques nada más.')
+        try:
+            agente(root, 'clio', prompt)
+        except (Exception, SystemExit) as exc:
+            print(f'[orquestar] Clio no pudo resolver los cambios: {exc}', flush=True)
+    if git('status', '--porcelain'):
+        nombre = f'orquestar: {actual} {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}'
+        subprocess.run(['git', 'stash', 'push', '-u', '-m', nombre], cwd=root, capture_output=True)
+        if git('status', '--porcelain'):
+            return False
+        print(f'[orquestar] cambios guardados en el stash «{nombre}»', flush=True)
+        avisar(root, 'error', f'🗃 Cambios sin commitear de {actual} guardados en el stash «{nombre}»; sigo en {rama}.')
+    git('checkout', '-q', rama)
+    return git('branch', '--show-current') == rama
+
+
 def evento_de(e):
     """Evento de aviso de un estado final: cierre de versión o producto terminado, o respuesta del humano."""
     return 'version' if e[0] == 'FIN' or cierre_de_version(e) else 'respuesta'
@@ -2525,9 +2547,8 @@ def bucle(a, root):
             version = e[2] if e[0] == 'PASO' else re.search(r'\bv\d+\.\d+(?:\.\d+)?', e[1])[0]
             rama_cierre = e[3] if e[0] == 'PASO' else f'release/{version}'
             if rama_cierre and git('branch', '--show-current') != rama_cierre:
-                if git('status', '--porcelain'):
-                    return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama_cierre}.')
-                subprocess.run(['git', 'checkout', '-q', rama_cierre], cwd=root, check=True)
+                if not cambiar_de_rama(root, rama_cierre):
+                    return parar(root, 'error', f'no puedo cambiar a {rama_cierre}.')
             if verificar(root, cmd_suite):
                 iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
                 if motivo:
@@ -2542,9 +2563,8 @@ def bucle(a, root):
             return parar(root, evento_de(e), e[1])
         _, paso, arg, rama = e
         if rama and git('branch', '--show-current') != rama:
-            if git('status', '--porcelain'):
-                return parar(root, 'error', f'cambios sin commitear; no puedo cambiar a {rama}.')
-            git('checkout', '-q', rama)
+            if not cambiar_de_rama(root, rama):
+                return parar(root, 'error', f'no puedo cambiar a {rama}.')
 
         dif = dificultad_de(root, arg) if arg else None
         if paso in ('task-dev', 'bug-fix') and arg:

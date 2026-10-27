@@ -5,7 +5,7 @@ type: bug
 weight: 40
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Revisión humana de los puntos de parada de orquestar.py (2026-10-27): para sin necesitar al humano"
 created_at: 2026-10-27
@@ -25,3 +25,13 @@ updated_at: 2026-10-27
 
 ## 🔓 Alcance (decisión humana, 2026-10-27)
 El usuario ha pedido este cambio expresamente: el bucle solo debe pararse cuando haga falta una decisión humana. Si hay que cambiar requisitos o escenarios del bucle (orquestar), forma parte del alcance de este bug. Se puede tocar cualquier ruta necesaria.
+
+## Triaje
+- A Definición `[SKIP]`: el comportamiento esperado ya está en el bug.
+- B Diseño `[SKIP]`: helper único `cambiar_de_rama`.
+- C1 Pruebas `[EXEC]`: `skills/orquestar/test_cambio_rama_sucia.py` y ajuste de `tests/test_orquestar.py`.
+- C2 Corrección `[EXEC]`: `cambiar_de_rama` en `orquestar.py`.
+- D QA `[EXEC]`: Hades APROBADO (`docs/review/code_reviews/B-ADV-0015-code-review.md`).
+- E Documentación `[EXEC]`: `skills/orquestar/SKILL.md`, `CHANGELOG.md`.
+- F Cierre `[EXEC]`.
+- Verificación: `python -m unittest skills.orquestar.test_cambio_rama_sucia tests.test_orquestar`.

@@ -972,6 +972,7 @@ class DificultadTests(unittest.TestCase):
         with (patch.object(motor, 'config', return_value=cfg),
               patch.object(motor, 'ejecutar', side_effect=fake_ejecutar),
               patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'cambiar_de_rama', return_value=True),
               patch.object(motor, 'enviar', return_value=True) as enviar,
               patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'token-de-prueba', 'TELEGRAM_ALLOWED_USER_IDS': '1'}),
               patch('urllib.request.urlopen') as urlopen,
@@ -1491,21 +1492,21 @@ class SuiteRecoveryTests(unittest.TestCase):
     def test_checkout_precedes_suite_for_final_stop(self):
         self.check_checkout_before_suite(('PARAR', 'Versión v0.1 terminada. Revisa'))
 
-    def test_dirty_tree_prevents_checkout_suite_and_bug_registration(self):
+    def test_dirty_tree_is_stashed_before_checkout_and_suite(self):
         self.git('checkout', '-qb', 'another')
         (self.root / 'pending.txt').write_text('pending work', encoding='utf-8')
         args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
                                        max_pasos=1, reintentos=2, espera_max=0, cmd=None)
-        for closing in (('PASO', 'revisar-version', 'v0.1', 'release/v0.1'),
-                        ('PARAR', 'Versión v0.1 terminada. Revisa')):
-            with (self.subTest(closing=closing), patch.object(motor, 'estado', return_value=closing),
-                  patch.object(motor, 'verificar') as verify, patch.object(motor, 'ejecutar') as execute,
-                  patch.object(motor, 'registrar_fallo_suite') as register, patch.object(motor, 'avisar')):
-                self.assertEqual(motor.bucle(args, self.root), 2)
-            verify.assert_not_called()
-            execute.assert_not_called()
-            register.assert_not_called()
-            self.assertEqual(self.git('branch', '--show-current'), 'another')
+        closing = ('PASO', 'revisar-version', 'v0.1', 'release/v0.1')
+        with (patch.object(motor, 'estado', return_value=closing), patch.object(motor, 'agente'),
+              patch.object(motor, 'verificar', return_value=0) as verify,
+              patch.object(motor, 'ejecutar', return_value=(0, {}, '')),
+              patch.object(motor, 'avisar')):
+            motor.bucle(args, self.root)
+        verify.assert_called_once()
+        self.assertEqual(self.git('branch', '--show-current'), 'release/v0.1')
+        self.assertIn('orquestar: another', self.git('stash', 'list'))
+        self.assertFalse((self.root / 'pending.txt').exists())
 
 
 class BloqueoSinProgresoTests(unittest.TestCase):

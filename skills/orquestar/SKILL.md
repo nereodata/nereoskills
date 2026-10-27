@@ -110,6 +110,8 @@ Si la suite completa falla al cerrar una versión (`--test`), el bucle registra 
 
 El bucle para al llegar a `--max-pasos`. Los siete pasos de análisis descritos en «Recuperación de análisis sin progreso» agotan primero su cadena, con `--reintentos` intentos por perfil (2 por defecto): `especificar` y `revisar-tarea` bloquean solo su ID y continúan; los otros cinco paran con diagnóstico. Los demás pasos sin recuperación específica paran tras `--reintentos` intentos sin progreso. Un `task-dev` o `bug-fix` que no avanza tras agotar la subida de dificultad bloquea la tarea con `pendiente_de: humano`, persiste el motivo en tarea y revisión, avisa y sigue con las independientes; sus dependientes esperan. El bug de cierre de suite mantiene su regla propia.
 
+**Cambio de rama con el árbol sucio.** Antes de cambiar de rama, si hay cambios sin commitear, un paso corto de Clio los commitea en la rama actual o descarta los restos. Si siguen ahí, se guardan con `git stash push -u -m "orquestar: <rama> <fecha>"`, se avisa por Telegram (evento `error`) con el nombre del stash y el bucle sigue. Solo para si ni el stash consigue dejar el árbol limpio.
+
 **Sin cuota** (Claude, Codex u otro arnés): si un paso o subagente falla y su salida indica límite de uso, el bucle conmuta inmediatamente a la siguiente `reserva` configurada (iniciando sesión nueva si cambia de arnés) y registra cada intento en métricas. Si se agotan el principal y todas las reservas, el bucle no para: espera hasta la hora de recuperación más temprana entre las cuotas reportadas (o el intervalo de sondeo de la marca supuesta si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Los fallos ajenos a cuota de los pasos siguen la recuperación de arnés descrita abajo; los roles conservan su tratamiento previo.
 
 Antes de lanzar un rol o un paso, se omiten las configuraciones cuyo par arnés/modelo conserva un agotamiento real vigente en las métricas. Las marcas supuestas permiten un intento del trabajo pendiente al relanzar y después cada `cuota_reintento_s` segundos (positivo finito en `orchestration.json`; por defecto 300, también si es inválido). Se mantiene el orden de las disponibles; si ninguna puede ejecutarse, se conserva la espera sin lanzar arneses. Esto también se aplica sin reservas. Al caducar su agotamiento, el titular recupera su prioridad. En pasos con `--harness` o `--cmd` explícitos se conserva la selección anterior porque el comando puede ignorar los modelos del perfil.
@@ -127,7 +129,7 @@ El `.env` del proyecto tiene precedencia independiente para el token y los IDs, 
 | `version` | La versión no tiene más tareas elegibles (terminada, con bloqueos o con la suite en rojo) y FIN del producto |
 | `cuota` | Empieza una espera por falta de cuota, o el bucle para porque la espera supera `--espera-max` |
 | `respuesta` | Cualquier otra parada que necesita al humano: requisitos con preguntas, plataforma rechazada, dependencias inválidas, decisiones de producto pendientes |
-| `error` | Fallo del arnés, paso sin progreso, cambios sin commitear o `--max-pasos` |
+| `error` | Fallo del arnés, paso sin progreso, cambios guardados en un stash al cambiar de rama o `--max-pasos` |
 | `arnes` | Ejecutable ausente en una configuración: warning y salto a la siguiente reserva |
 
 ```json
