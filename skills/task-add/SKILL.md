@@ -38,6 +38,7 @@ Una **tarea padre representa una única capacidad, mejora o cambio que un usuari
   - `media`: funcionalidad o corrección estándar en uno o pocos módulos.
   - `dificil`: algoritmos complejos, concurrencia, seguridad crítica o cambio transversal multi-componente.
   Si una tarea preexistente no declara `dificultad`, se trata por defecto como `media`.
+- `perfil`: (Opcional, solo lo fija una persona) arnés, modelo y esfuerzo con que se ejecuta esta tarea, en lugar del perfil por dificultad. Perfil único, para el rol que ejecuta el paso (Artemisa en `task-dev` y `bug-fix`): `perfil: {harness: claude, model: claude-opus-5-5, effort: high}`. Por rol, para fijar también la revisión, la especificación o la documentación de esta tarea: `perfil: {artemisa: {...}, hades: {...}, atenea: {...}}`. Lo que falte se toma del perfil por dificultad. Con `estricto: true` no se cambia de modelo: se espera la cuota y, si el arnés no existe o no avanza, se bloquea. Sin el campo manda `orchestration.json`. Un `perfil` inválido (arnés, esfuerzo o rol desconocidos) para el bucle con el error.
 - Establecer fechas `created_at` y `updated_at`.
 
 ### 3. Plantillas de Archivos
@@ -51,6 +52,7 @@ title: "Título descriptivo"
 type: funcional | despliegue | diseño | tools | infra
 weight: [integer]
 dificultad: sencilla | media | dificil
+# perfil: {harness: claude, model: claude-opus-5-5, effort: high}  (opcional, solo una persona)
 version: ""
 status: backlog
 depende_de: []

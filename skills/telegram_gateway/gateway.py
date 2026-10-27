@@ -298,9 +298,13 @@ def responder(root, usuario, texto, autorizados):
     elif comando in ('/metricas', '/metrics'):
         resp = resumen_metricas(root, argumento or 'ultima')
     elif comando in ALTAS:
-        if not argumento:
+        titulo, perfil, error = motor.extraer_perfil(argumento or '')
+        if not titulo:
             return firmar(f'Uso: {comando} <título>')
-        motor.apuntar(root, ALTAS[comando], argumento, str(usuario))
+        if error:
+            return firmar(f'Perfil no válido: {error}')
+        argumento = titulo
+        motor.apuntar(root, ALTAS[comando], argumento, str(usuario), perfil)
         if (root / motor.PID).exists():
             return firmar(f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.')
         hechos = motor.ingerir(root)

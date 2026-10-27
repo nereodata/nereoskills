@@ -353,7 +353,7 @@ def construir_prompt_paso(root, paso, arg):
     """Construye el prompt de un paso para el arnés con rutas absolutas instaladas."""
     version_dir = get_active_version_dir()
     dif = dificultad_de(root, arg) if arg else None
-    rol, cfg_rol = rol_de(root, paso, dificultad=dif)
+    rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
     persona = version_dir / "agents" / f"{rol}.md"
     skill_file = version_dir / "skills" / "orquestar" / "SKILL.md"
     skills_dir = version_dir / "skills"
@@ -613,7 +613,9 @@ def backlog(root):
             dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
             if dif not in ('sencilla', 'media', 'dificil'):
                 dif = 'media'
+            perfil, perfil_errores = perfil_del_fichero(f)
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
+                        'perfil': perfil, 'perfil_errores': perfil_errores,
                         'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
                         'weight': int(peso) if peso.lstrip('-').isdigit() else 0,
@@ -636,6 +638,205 @@ def dificultad_de(root, iid):
                     dif = str(fm.get('dificultad', '')).strip().lower().replace('í', 'i')
                     return dif if dif in ('sencilla', 'media', 'dificil') else 'media'
     return 'media'
+
+
+ROLES_PERFIL = ('artemisa', 'hades', 'atenea', 'clio', 'cronos')
+ESFUERZOS = ('minimal', 'low', 'medium', 'high', 'xhigh', 'max')
+AVISOS_PERFIL = set()
+
+
+def mapa_flujo(texto):
+    """Interpreta un mapa YAML de flujo (`{a: b, c: {d: e}}`) como dict de cadenas."""
+    def citar(m):
+        t = m[0]
+        return json.dumps(t[1:-1] if t[0] in '"\'' else t)
+    return json.loads(re.sub(r'"[^"]*"|\'[^\']*\'|[^\s{}:,]+', citar, texto))
+
+
+def mapa_bloque(lineas):
+    """Mapa YAML anidado por sangría; los valores de flujo `{...}` se interpretan con `mapa_flujo`."""
+    res, i = {}, 0
+    while i < len(lineas):
+        sangria = len(lineas[i]) - len(lineas[i].lstrip())
+        clave, _, valor = lineas[i].strip().partition(':')
+        i += 1
+        hijos = []
+        while i < len(lineas) and len(lineas[i]) - len(lineas[i].lstrip()) > sangria:
+            hijos.append(lineas[i])
+            i += 1
+        valor = valor.strip()
+        if hijos:
+            res[clave.strip()] = mapa_bloque(hijos)
+        elif valor.startswith('{'):
+            res[clave.strip()] = mapa_flujo(valor)
+        else:
+            res[clave.strip()] = valor.strip('"\'')
+    return res
+
+
+def sin_comentario(linea):
+    """La línea sin su comentario YAML final (el `#` fuera de comillas y precedido de espacio)."""
+    comilla = ''
+    for i, c in enumerate(linea):
+        if comilla:
+            comilla = '' if c == comilla else comilla
+        elif c in '"\'':
+            comilla = c
+        elif c == '#' and (i == 0 or linea[i - 1] in ' \t'):
+            return linea[:i].rstrip()
+    return linea.rstrip()
+
+
+def perfil_crudo(path):
+    """Valor del campo `perfil` del frontmatter (None si falta); ValueError si no se puede leer."""
+    m = re.match(r'---\s*\n(.*?)\n---', path.read_text(encoding='utf-8'), re.S)
+    lineas = [sin_comentario(l) for l in (m[1].splitlines() if m else [])]
+    lineas = [l for l in lineas if l.strip()]
+    for i, linea in enumerate(lineas):
+        if not re.match(r'perfil\s*:', linea):
+            continue
+        valor = linea.split(':', 1)[1].strip()
+        if valor.startswith('{'):
+            return mapa_flujo(valor)
+        if valor and valor not in ('null', '~'):
+            raise ValueError('debe ser un mapa con harness, model, effort o roles')
+        hijos = []
+        for resto in lineas[i + 1:]:
+            if resto[0] not in ' \t':
+                break
+            hijos.append(resto)
+        return mapa_bloque(hijos) if hijos else None
+    return None
+
+
+def normalizar_perfil(crudo):
+    """(perfil, errores): `{'unico': {...}|None, 'roles': {rol: {...}}, 'estricto': bool}` validado."""
+    if crudo is None:
+        return None, []
+    if not isinstance(crudo, dict) or not crudo:
+        return None, ['perfil debe ser un mapa con harness, model, effort o roles']
+    errores = []
+    admitidos = ', '.join(ROLES_PERFIL)
+
+    def campos(datos, donde):
+        out = {}
+        for clave, valor in datos.items():
+            if isinstance(valor, dict):
+                errores.append(f'perfil: rol desconocido "{clave}" (admitidos: {admitidos})')
+            elif clave not in ('harness', 'model', 'effort'):
+                errores.append(f'{donde}: campo desconocido "{clave}"')
+            elif not str(valor).strip():
+                errores.append(f'{donde}: "{clave}" vacío')
+            else:
+                out[clave] = str(valor).strip()
+        if out.get('harness') and out['harness'] not in HARNESS:
+            errores.append(f'{donde}: arnés no soportado "{out["harness"]}" (admitidos: {", ".join(HARNESS)})')
+        if out.get('effort') and out['effort'] not in ESFUERZOS:
+            errores.append(f'{donde}: esfuerzo no válido "{out["effort"]}" (admitidos: {", ".join(ESFUERZOS)})')
+        return out
+
+    estricto = crudo.get('estricto', False)
+    if isinstance(estricto, str) and estricto.strip().lower() in ('true', 'false'):
+        estricto = estricto.strip().lower() == 'true'
+    if not isinstance(estricto, bool):
+        errores.append('perfil: "estricto" debe ser true o false')
+        estricto = False
+    resto = {k: v for k, v in crudo.items() if k != 'estricto'}
+    roles = {k: v for k, v in resto.items() if k in ROLES_PERFIL}
+    unico, porrol = None, {}
+    if roles:
+        sueltos = [k for k, v in resto.items() if k not in roles and not isinstance(v, dict)]
+        if sueltos:
+            errores.append(f'perfil: mezcla campos sueltos ({", ".join(sueltos)}) con perfiles por rol')
+        for k, v in resto.items():
+            if k not in roles and isinstance(v, dict):
+                errores.append(f'perfil: rol desconocido "{k}" (admitidos: {admitidos})')
+        for rol, datos in roles.items():
+            if isinstance(datos, dict):
+                porrol[rol] = campos(datos, f'perfil.{rol}')
+            else:
+                errores.append(f'perfil.{rol}: debe ser un mapa con harness, model o effort')
+    else:
+        unico = campos(resto, 'perfil')
+    if not errores and not unico and not any(porrol.values()):
+        errores.append('perfil: indica al menos harness, model o effort')
+    return (None if errores else {'unico': unico or None, 'roles': porrol, 'estricto': estricto}), errores
+
+
+def perfil_del_fichero(path):
+    """(perfil normalizado | None, errores) del frontmatter de una tarea o bug."""
+    try:
+        return normalizar_perfil(perfil_crudo(path))
+    except ValueError as error:
+        return None, [f'perfil ilegible ({error}); entrecomilla los valores que llevan ":" o "#"']
+
+
+def errores_perfil(items):
+    """Errores de `perfil` en tareas y bugs pendientes, con su ID."""
+    return [f'{i["id"]}: {e}' for i in items if i['status'] not in CERRADO for e in i.get('perfil_errores') or []]
+
+
+def perfil_de(root, iid):
+    """Perfil fijado de una tarea o bug maestro, o None."""
+    for it in backlog(root) if iid else []:
+        if it['id'] == iid:
+            return it.get('perfil')
+    return None
+
+
+def perfil_fijado_de(root, iid, rol):
+    """(campos, estricto) que la tarea fija para un rol; el perfil único es del rol que ejecuta task-dev y bug-fix."""
+    perfil = perfil_de(root, iid)
+    if not perfil:
+        return None, False
+    return perfil['roles'].get(rol) or (perfil['unico'] if rol == 'artemisa' else None), perfil['estricto']
+
+
+def aplicar_perfil(root, iid, rol, cfg):
+    """Perfil por dificultad con lo que fije la tarea para el rol encima; `estricto` quita las reservas."""
+    fijado, estricto = perfil_fijado_de(root, iid, rol)
+    if not fijado:
+        return cfg
+    nuevo = {**cfg, **fijado, 'fijado': True}
+    if cfg.get('reserva'):
+        nuevo['reserva'] = lista_reservas(cfg)
+    if estricto:
+        nuevo['estricto'] = True
+        nuevo.pop('reserva', None)
+    return nuevo
+
+
+def marca_fijado(cfg):
+    """Marca de las métricas para lo ejecutado con el perfil fijado por la tarea."""
+    return {'perfil_fijado': True} if cfg.get('fijado') else {}
+
+
+def clave_perfil(cfg):
+    """`arnés/modelo` de un perfil, para los avisos."""
+    return f'{cfg.get("harness") or "claude"}/{cfg.get("model") or "predeterminado"}'
+
+
+def avisar_perfil(root, iid, fijado, motivo, destino):
+    """Avisa una sola vez de que el perfil fijado por la tarea cede ante una reserva."""
+    clave = (str(root), iid, motivo)
+    if clave in AVISOS_PERFIL:
+        return
+    AVISOS_PERFIL.add(clave)
+    texto = f'{iid}: perfil fijado {clave_perfil(fijado)} {motivo}; uso la reserva {clave_perfil(destino)}'
+    print(f'[orquestar] {texto}', flush=True)
+    avisar(root, 'cuota' if motivo == 'sin cuota' else 'arnes', texto)
+
+
+def agotado_estricto(root, iid):
+    """Motivo por el que una tarea de perfil estricto ya no se reintenta (lo que subiría o escalaría), o ''."""
+    debe, motivo = comprobar_promocion(root, iid)
+    if debe:
+        return motivo
+    cfg_dev = config(root).get('artemisa') or config(root).get('development') or {}
+    esc = cfg_dev.get('escalada') or {}
+    if esc and rechazos(root, iid) >= esc.get('rechazos', 2):
+        return f'{rechazos(root, iid)} rechazos seguidos de Hades'
+    return ''
 
 
 def siguiente_dificultad(dif):
@@ -802,7 +1003,7 @@ def slug(texto):
     return re.sub(r'[^a-z0-9]+', '-', plano.lower()).strip('-')[:60].strip('-')
 
 
-def alta(root, tipo, titulo, autor=''):
+def alta(root, tipo, titulo, autor='', perfil=None):
     """Crea una tarea o un bug maestro sin versión (`backlog`): el bucle no lo trabaja hasta que alguien le pone versión.
 
     Las tareas van sin `depende_de`: se calculan cuando entren en una versión.
@@ -816,7 +1017,8 @@ def alta(root, tipo, titulo, autor=''):
     origen = f'Telegram{f" (usuario {autor})" if autor else ""}, {hoy}'
     cabecera = (f'---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n'
                 f'type: {"bug" if letra == "B" else "funcional"}\nweight: 100\nversion: ""\nstatus: backlog\n'
-                f'created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n')
+                + (f'perfil: {{{", ".join(f"{k}: {v}" for k, v in perfil.items())}}}\n' if perfil else '')
+                + f'created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n')
     cuerpo = (f'## 🎯 Descripción del Fallo\n{titulo}\n\n## 📋 Reproducir\n1. Por detallar.\n\n'
               f'## 📋 Evidencias\n- Registrado desde {origen}.\n') if letra == 'B' else \
              (f'## 🎯 Objetivo de Negocio\n{titulo}\n\n## 📋 Criterios de Aceptación (Nivel Máster)\n'
@@ -826,11 +1028,27 @@ def alta(root, tipo, titulo, autor=''):
     return iid, f
 
 
-def apuntar(root, tipo, titulo, autor=''):
+def extraer_perfil(argumento):
+    """(título, perfil, error) de `<título> [--perfil arnés/modelo[/esfuerzo]] [--estricto]` (órdenes de Telegram)."""
+    m = re.search(r'--perfil\s+(\S+)', argumento)
+    estricto = re.search(r'--estricto\b', argumento) is not None
+    titulo = ' '.join(re.sub(r'--perfil\s+\S+|--estricto\b', ' ', argumento).split())
+    if not m:
+        return titulo, None, ('--estricto solo se usa junto a --perfil' if estricto else None)
+    perfil = dict(zip(('harness', 'model', 'effort'), m[1].split('/')))
+    perfil = {k: v for k, v in perfil.items() if v}
+    if estricto:
+        perfil['estricto'] = 'true'
+    valido, errores = normalizar_perfil(perfil)
+    return titulo, (perfil if valido else None), ('; '.join(errores) if errores else None)
+
+
+def apuntar(root, tipo, titulo, autor='', perfil=None):
     """Deja en el buzón una tarea o un bug pedido desde fuera; el bucle lo registra entre pasos."""
     excluir(root)
     with (root / BUZON).open('a', encoding='utf-8') as f:
-        f.write(json.dumps({'tipo': tipo, 'titulo': titulo, 'autor': autor, 'fecha': ahora()}, ensure_ascii=False) + '\n')
+        f.write(json.dumps({'tipo': tipo, 'titulo': titulo, 'autor': autor, 'fecha': ahora(),
+                            **({'perfil': perfil} if perfil else {})}, ensure_ascii=False) + '\n')
 
 
 def ingerir(root):
@@ -845,7 +1063,7 @@ def ingerir(root):
     for linea in tmp.read_text(encoding='utf-8').splitlines():
         if linea.strip():
             e = json.loads(linea)
-            iid, fichero = alta(root, e['tipo'], e['titulo'], e.get('autor', ''))
+            iid, fichero = alta(root, e['tipo'], e['titulo'], e.get('autor', ''), e.get('perfil'))
             hechos.append((iid, e['titulo'], fichero))
     if hechos:
         rutas = [str(x[2].relative_to(root)) for x in hechos]
@@ -908,6 +1126,9 @@ def estado(root, docs):
     items = backlog(root)
     if not (d / 'work_plan.md').exists() or not items:
         return ('PASO', 'work-plan', '', None)
+    errores = errores_perfil(items)
+    if errores:
+        return ('PARAR', 'Perfil inválido en el backlog (solo una persona lo corrige): ' + '; '.join(errores))
     if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None and vkey(i['version'])
            for i in items):
         return ('PASO', 'calcular-dependencias', '', None)
@@ -985,15 +1206,17 @@ def config(root):
     return json.loads(f.read_text(encoding='utf-8')) if f.exists() else {}
 
 
-def rol_de(root, paso, dificultad=None):
+def rol_de(root, paso, dificultad=None, iid=None):
     """(rol, configuración) que ejecuta un paso del bucle: Artemisa desarrolla, Atenea analiza y decide.
 
     Sin la clave del rol en orchestration.json se usa `development` (y Atenea, sin ella, la de Artemisa).
+    El `perfil` de la tarea (`iid`) sustituye al que tocaría por dificultad.
     """
     cfg = config(root)
     dev = cfg.get('artemisa') or cfg.get('development', {})
     rol = 'artemisa' if paso in DESARROLLO else 'atenea'
-    return rol, ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso, dificultad=dificultad)
+    base = ajustes(dev if rol == 'artemisa' else cfg.get('atenea') or dev, paso, dificultad=dificultad)
+    return rol, aplicar_perfil(root, iid, rol, base)
 
 
 def ajustes(cfg, paso='', dificultad=None):
@@ -1024,10 +1247,12 @@ PASOS_ANALISIS = frozenset(('especificar', 'revisar-tarea', 'revisar-version',
                            'calcular-dependencias', 'work-plan', 'revisar-deuda', 'aplicar-producto'))
 
 
-def cadena_analisis(root, paso, dificultad='media'):
+def cadena_analisis(root, paso, dificultad='media', iid=None):
     """Perfiles de recuperación finitos y efectivos, sin expandir reservas de niveles."""
     dificultad = dificultad or 'media'
-    rol, inicial = rol_de(root, paso, dificultad=dificultad)
+    rol, inicial = rol_de(root, paso, dificultad=dificultad, iid=iid)
+    if inicial.get('estricto'):
+        return [inicial]
     cfg = config(root)
     dev = cfg.get('artemisa') or cfg.get('development', {})
     base = dev if rol == 'artemisa' else cfg.get('atenea') or dev
@@ -1416,7 +1641,7 @@ def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
         iid = (env or {}).get('ORQUESTAR_ID') or os.environ.get('ORQUESTAR_ID', '')
         paso = (env or {}).get('ORQUESTAR_PASO') or os.environ.get('ORQUESTAR_PASO', 'task-dev')
         dif = dificultad_de(root, iid) if iid else None
-        rol = rol_de(root, paso, dificultad=dif)[1]
+        rol = rol_de(root, paso, dificultad=dif, iid=iid)[1]
     harness = arnes(a, rol)
     if sesion:
         cmd = comando(a, prompt, root, rol, sesion=sesion)
@@ -1450,7 +1675,7 @@ def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
     dif = dificultad_de(root, iid) if iid else None
-    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
+    cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
     if 'instructions' in cfg:
         p_inst = Path(cfg['instructions'])
         if not p_inst.is_absolute():
@@ -1464,6 +1689,7 @@ def agente(root, rol, prompt):
     cuotas_acumuladas = []
     ultima_cuota = None
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
+    cede = 'sin cuota' if cfg.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg else ''
 
     for idx_cfg, cfg_actual in enumerate(configs_a_probar):
         harness = cfg_actual.get('harness', 'claude')
@@ -1478,9 +1704,14 @@ def agente(root, rol, prompt):
         if not exe:
             posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
             registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid)
+            if cfg_actual is cfg and cfg.get('fijado'):
+                cede = 'sin arnés'
             continue
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+        if cede and cfg_actual is not cfg:
+            avisar_perfil(root, iid, cfg, cede, cfg_actual)
+            cede = ''
         if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
             prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
@@ -1497,16 +1728,18 @@ def agente(root, rol, prompt):
                 ultima_cuota = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
                                 'paso': paso, 'id': iid, 'arnes': harness, 'codigo': codigo}
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                 'arnes': harness, 'codigo': codigo,
+                                 'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                                  **({'escalado': True} if escalado else {}), **m})
                 print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
                       f'conmutando a reserva...', flush=True)
+                if cfg_actual is cfg and cfg.get('fijado'):
+                    cede = 'sin cuota'
                 continue
             else:
                 menor_cuota = min(cuotas_acumuladas)
                 veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                 'arnes': harness, 'codigo': codigo,
+                                 'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                                  **({'veredicto': veredicto[-1]} if veredicto else {}),
                                  'sin_cuota': True, 'espera_s': menor_cuota,
                                  **({'escalado': True} if escalado else {}), **m})
@@ -1518,7 +1751,7 @@ def agente(root, rol, prompt):
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
         veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
         registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                         'arnes': harness, 'codigo': codigo,
+                         'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                          **({'veredicto': veredicto[-1]} if veredicto else {}),
                          **({'escalado': True} if escalado else {}), **m})
         if veredicto and veredicto[-1] == 'RECHAZADO':
@@ -1911,16 +2144,20 @@ def verificar(root, cmd):
     return codigo
 
 
-def bloquear_sin_progreso(root, iid, intentos, salida, contexto=''):
-    """Bloquea para el humano y persiste el motivo en tarea y revisión de versión."""
+def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
+    """Bloquea para el humano y persiste el motivo en tarea y revisión de versión.
+
+    `causa` sustituye la frase de los intentos sin progreso cuando el bloqueo es por otro motivo.
+    """
     fichero = fichero_de(root, iid)
     version = vkey(frontmatter(fichero).get('version'))
     dificultad = dificultad_de(root, iid)
     hoy = datetime.now().strftime('%Y-%m-%d')
     cola = (salida or '(el arnés no produjo salida)')[-2000:]
     detalle = '\n'.join('    ' + linea for linea in cola.splitlines())
+    frase = causa or f'{iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}'
     motivo = ((f'- {contexto}\n' if contexto else '')
-              + f'- {iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}; fecha: {ahora()}\n'
+              + f'- {frase}; fecha: {ahora()}\n'
               f'- Cola de la última salida:\n\n{detalle}\n')
     cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', fichero.read_text(encoding='utf-8'), maxsplit=1)
     for clave, valor in {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy}.items():
@@ -1942,8 +2179,8 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto=''):
     subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): bloquear tarea sin progreso', '--', *rutas],
                    cwd=root, capture_output=True, check=True)
     avisar(root, 'respuesta', (f'{contexto}\n' if contexto else '')
-           + f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; '
-                              f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
+           + (f'⏸ {causa}; ' if causa else f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; ')
+           + f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
 
 
 def registrar_fallo_suite(root, version, cmd):
@@ -2215,13 +2452,15 @@ def informe_agentes(root, docs='docs/requirements'):
     if e[0] == 'PASO':
         paso, iid = e[1:3]
         dificultad = dificultad_de(root, iid) if iid else None
-        rol, perfil = rol_de(root, paso, dificultad=dificultad)
+        rol, perfil = rol_de(root, paso, dificultad=dificultad, iid=iid)
         perfil, escalado = escalada(root, rol, perfil, iid)
-        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
+        hades = aplicar_perfil(root, iid, 'hades',
+                               ajustes(config(root).get('hades', {}), paso, dificultad=dificultad))
         lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
         for nombre, efectivo in ((rol, perfil), ('hades', hades)):
             lineas.append(f'{nombre}: {perfil_estado(efectivo)}'
-                          + (' [escalada]' if nombre == rol and escalado else ''))
+                          + (' [escalada]' if nombre == rol and escalado else '')
+                          + (' [fijado por la tarea]' if efectivo.get('fijado') else ''))
     limites = {}
     for _, _, perfil in perfiles:
         clave = (perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado')
@@ -2567,18 +2806,31 @@ def bucle(a, root):
                 return parar(root, 'error', f'no puedo cambiar a {rama}.')
 
         dif = dificultad_de(root, arg) if arg else None
-        if paso in ('task-dev', 'bug-fix') and arg:
+        fijado, estricto = perfil_fijado_de(root, arg, 'artemisa') if arg else (None, False)
+        estricto = bool(fijado and estricto)
+        if paso in ('task-dev', 'bug-fix') and arg and estricto:
+            motivo = agotado_estricto(root, arg)
+            if motivo:
+                print(f'[orquestar] {arg}: {motivo} con el perfil fijado estricto; no cambio de modelo.', flush=True)
+                registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': arg, 'de': dif,
+                                 'dificultad': dif, 'estricto': True})
+                bloquear_sin_progreso(root, arg, 0, '', causa=(
+                    f'{arg} bloqueada para el humano: {motivo} con el perfil fijado estricto, que impide '
+                    'subir de dificultad o escalar a otro modelo'))
+                continue
+        if paso in ('task-dev', 'bug-fix') and arg and not estricto:
             debe, motivo = comprobar_promocion(root, arg)
             if debe:
                 nueva_dif = promover_dificultad(root, arg, motivo=motivo)
                 if nueva_dif:
                     dif = nueva_dif
         antes = firma(root, a.docs)
-        rol, cfg_rol = rol_de(root, paso, dificultad=dif)
+        rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
         escalado = False
         if paso not in PASOS_ANALISIS:
             cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
+            cfg_rol = {k: v for k, v in cfg_rol.items() if k != 'fijado'}
             print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '
                   f'escalo a {cfg_rol.get("model") or cfg_rol.get("harness")}', flush=True)
         clave_analisis = (paso, arg or '')
@@ -2587,7 +2839,7 @@ def bucle(a, root):
             if clave_analisis not in recuperaciones_analisis:
                 recuperaciones_analisis[clave_analisis] = {
                     'paso': paso, 'arg': arg or '', 'indice': 0, 'intentos': 0,
-                    'perfiles': cadena_analisis(root, paso, dif)}
+                    'perfiles': cadena_analisis(root, paso, dif, arg)}
             recuperacion = recuperaciones_analisis[clave_analisis]
             cfg_rol = recuperacion['perfiles'][recuperacion['indice']]
         prompt = construir_prompt_paso(root, paso, arg)
@@ -2603,6 +2855,8 @@ def bucle(a, root):
         configs_a_probar = configs_originales
         if not a.cmd and not a.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
+        cede = 'sin cuota' if cfg_rol.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg_rol else ''
+        ausencia_fijada = False
         cuotas_paso = []
         recuperaciones_paso = []
         sesion_anterior = None
@@ -2645,9 +2899,15 @@ def bucle(a, root):
                     posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
                     registrar_ausencia(root, 'paso', posicion,
                                        {**cfg_actual, 'harness': arnes_paso}, rol=rol, paso=paso, id=arg)
+                    if cfg_actual is cfg_rol and cfg_rol.get('fijado'):
+                        ausencia_fijada = True
+                        cede = 'sin arnés'
                     ausente = True
                     break
                 codigo, m, salida = resultado
+                if cede and cfg_actual is not cfg_rol:
+                    avisar_perfil(root, arg, cfg_rol, cede, cfg_actual)
+                    cede = ''
                 ultimo_registrado = False
                 hubo_ejecucion = True
                 pendiente_cuota = False
@@ -2667,7 +2927,7 @@ def bucle(a, root):
                 registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                  'rama': git('branch', '--show-current'), 'rol': rol,
                                  'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
-                                 'codigo': codigo, **m,
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
                                  **({'escalado': True} if escalado else {})})
                 demora = (60, 300, 900)[min(intento, 2)]
                 inicio = time.monotonic()
@@ -2699,11 +2959,13 @@ def bucle(a, root):
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
                                      'rol': rol, 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
-                                 'codigo': codigo, **m,
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
                                      **({'escalado': True} if escalado else {}),
                                      'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
                           f'conmutando a reserva...', flush=True)
+                    if cfg_actual is cfg_rol and cfg_rol.get('fijado'):
+                        cede = 'sin cuota'
                     arnes_anterior = arnes_paso
                     sesion_anterior = m.get('sesion')
                     pendiente_cuota = True
@@ -2715,7 +2977,7 @@ def bucle(a, root):
                 registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                  'rama': git('branch', '--show-current'), 'rol': rol,
                                  'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
-                                 'codigo': codigo, **m,
+                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
                                  **({'escalado': True} if escalado else {})})
                 ultimo_registrado = True
                 print(f'[orquestar] fallo persistente en {rol} ({cfg_actual.get("model") or arnes_paso}); '
@@ -2726,6 +2988,12 @@ def bucle(a, root):
             else:
                 break
 
+        if not hubo_ejecucion and ausencia_fijada and cfg_rol.get('estricto'):
+            motivo = (f'perfil fijado estricto {clave_perfil(cfg_rol)}: el arnés '
+                      f'"{cfg_rol.get("harness") or "claude"}" no está disponible y no se cambia de modelo')
+            print(f'[orquestar] {arg}: {motivo}', flush=True)
+            bloquear_sin_progreso(root, arg, 0, '', causa=f'{arg} bloqueada para el humano: {motivo}')
+            continue
         if not hubo_ejecucion:
             cuota, cfg_omitida = cuota_descartada(root, [cfg_rol] + reservas, configs_a_probar)
             if cuota is None:
@@ -2748,7 +3016,7 @@ def bucle(a, root):
                                          'rama': git('branch', '--show-current'), 'rol': rol,
                                          'arnes': a.cmd or arnes(a, cfg_usada),
                                          'modelo': cfg_usada.get('model') or 'predeterminado',
-                                         'codigo': codigo, **m,
+                                         'codigo': codigo, **m, **marca_fijado(cfg_usada),
                                          **({'sin_cuota': True} if 'cuota_espera_s' in m else {}),
                                          **({'escalado': True} if escalado else {})})
                     cfg_usada = cfg_recuperable
@@ -2759,6 +3027,7 @@ def bucle(a, root):
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada),
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
+                             **marca_fijado(cfg_usada),
                              **({'escalado': True} if escalado else {}),
                              **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
         if paso_completado:
@@ -2828,7 +3097,7 @@ def bucle(a, root):
             if sin_progreso >= a.reintentos:
                 if paso in ('task-dev', 'bug-fix') and arg:
                     dif_actual = dificultad_de(root, arg)
-                    if dif_actual in ('sencilla', 'media'):
+                    if dif_actual in ('sencilla', 'media') and not estricto:
                         nueva_dif = promover_dificultad(root, arg, motivo=f'tras {sin_progreso} intentos sin progreso')
                         if nueva_dif:
                             sin_progreso = 0

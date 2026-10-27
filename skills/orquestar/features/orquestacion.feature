@@ -292,3 +292,67 @@ Característica: Continuidad con arneses ausentes
     Cuando el titular responde sin cuota y sin hora de reinicio
     Entonces no vuelvo a probarlo en este proceso antes de 300 segundos
     Y al alcanzar los 300 segundos lo pruebo antes de usar la reserva disponible
+
+  @T-ADV-0031
+  Escenario: Sin perfil fijado nada cambia
+    Dado una tarea sin el campo perfil y con dificultad dificil
+    Cuando el bucle resuelve el perfil del paso task-dev
+    Entonces se usa exactamente el perfil que corresponde a la dificultad
+
+  @T-ADV-0031
+  Esquema del escenario: Fijar el perfil de una tarea
+    Dado una tarea con <perfil> y un perfil por dificultad con model sonnet y effort medium
+    Cuando el bucle resuelve el perfil del paso <paso>
+    Entonces el rol <rol> usa model <modelo> y effort <esfuerzo>
+    Y los campos que el perfil no declara se toman del perfil por dificultad
+    Y las métricas y --agentes lo muestran como fijado por la tarea
+    Ejemplos:
+      | perfil | paso | rol | modelo | esfuerzo |
+      | perfil único {model: opus} | task-dev | artemisa | opus | medium |
+      | perfil único {model: opus, effort: high} | bug-fix | artemisa | opus | high |
+      | perfil único {model: opus} | especificar | atenea | sonnet | medium |
+      | perfil por rol {atenea: {effort: max}} | especificar | atenea | sonnet | max |
+      | perfil por rol {hades: {model: haiku}} | task-dev | artemisa | sonnet | medium |
+
+  @T-ADV-0031
+  Escenario: Reserva con aviso cuando el perfil fijado no está disponible
+    Dado una tarea con perfil fijado claude/opus y una reserva en el perfil por dificultad
+    Cuando el perfil fijado no tiene cuota o su arnés no existe
+    Entonces el paso se ejecuta con la reserva del perfil por dificultad
+    Y se avisa una sola vez "T-XXX: perfil fijado claude/opus sin cuota; uso la reserva claude/haiku"
+
+  @T-ADV-0031
+  Esquema del escenario: Perfil estricto
+    Dado una tarea con perfil fijado claude/opus y estricto true
+    Cuando <situación>
+    Entonces <resultado>
+    Y no se usa ninguna reserva ni otro modelo
+    Ejemplos:
+      | situación | resultado |
+      | el perfil fijado no tiene cuota | el bucle espera la cuota |
+      | el arnés del perfil fijado no existe | la tarea se bloquea para la persona con el motivo |
+      | los rechazos de Hades alcanzan el tope de escalada o promoción | la tarea se bloquea en lugar de escalar o subir de dificultad |
+
+  @T-ADV-0031
+  Esquema del escenario: Rechazar un perfil inválido
+    Dado una tarea pendiente con <perfil>
+    Cuando el bucle lee el backlog
+    Entonces para con el error del backlog que cita el ID y <motivo>
+    Y no lanza ningún paso
+    Ejemplos:
+      | perfil | motivo |
+      | harness nube | arnés no soportado |
+      | effort enorme | esfuerzo no válido |
+      | un rol artemis | rol desconocido |
+
+  @T-ADV-0031
+  Escenario: Solo una persona fija el perfil
+    Dado una tarea con perfil fijado
+    Cuando el bucle promueve su dificultad
+    Entonces el campo perfil queda intacto
+
+  @T-ADV-0031
+  Escenario: Fijar el perfil al crear una tarea desde Telegram
+    Cuando envío "/tarea Arreglar login --perfil claude/opus/high --estricto"
+    Entonces la tarea se crea sin versión con perfil {harness: claude, model: opus, effort: high, estricto: true}
+    Y un perfil inválido se rechaza sin crear la tarea

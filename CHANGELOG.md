@@ -6,6 +6,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Añadido
 
+- **T-ADV-0031** — Perfil de arnés, modelo y esfuerzo fijado por tarea o bug (único o por rol), con reservas y aviso, modo `estricto`, validación del backlog y alta desde Telegram.
 - **T-ADV-0024** — Registro por proyecto del gateway en Inicio de Windows mediante `adevv telegram --autoarranque on|off|estado`, ejecución oculta y diagnóstico de arranques inválidos.
 - **T-ADV-0022** — Formato y lint por tarea sobre el delta Git estable, comandos explícitos o deducción conservadora y evidencia reutilizable por Hades.
 - **T-ADV-0026** — Reservas conversacionales de Telegram por cuota o fallo de arranque, continuidad de sesiones propias, retorno al titular y diagnóstico por modelo con cuotas compartidas.
