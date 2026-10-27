@@ -142,7 +142,7 @@ class CierreTests(unittest.TestCase):
 
     def test_reject_each_precondition(self):
         cases = {
-            'pid': 'PID', 'main': 'release/v1.0', 'version': 'revisión final',
+            'pid': 'bucle vivo', 'main': 'release/v1.0', 'version': 'revisión final',
             'planned': 'planned', 'in_progress': 'in_progress', 'blocked': 'bloqueo',
             'manual': 'revisión final', 'architecture': 'arquitectura',
             'product_pending': 'producto', 'product_apply': 'aplicar',
@@ -154,7 +154,7 @@ class CierreTests(unittest.TestCase):
                 self.git('checkout', 'release/v1.0')
                 self.git('reset', '--hard', 'HEAD')
                 base = self.git('rev-parse', 'HEAD')
-                if case == 'pid': self.write(motor.PID, '999999')
+                if case == 'pid': self.write(motor.PID, str(os.getpid()))
                 elif case == 'main': self.git('checkout', 'main')
                 elif case in ('planned', 'in_progress', 'blocked'): self.task(case)
                 elif case == 'manual': self.write(motor.PARADA, '')

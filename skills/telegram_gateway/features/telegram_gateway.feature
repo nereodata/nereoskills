@@ -16,7 +16,7 @@ Característica: Continuidad de la conversación de Telegram con reservas
   @T-ADV-0023 @CA-M-2 @CA-M-3 @CA-M-5
   Esquema del escenario: Cerrar una versión confirmada y continuar
     Dado un repositorio temporal limpio con main, release/v1.0 y remoto bare local sin red
-    Y la rama activa es release/v1.0, no existe PID del bucle y el estado es PARAR por revisión final de v1.0
+    Y la rama activa es release/v1.0, no existe un bucle vivo y el estado es PARAR por revisión final de v1.0
     Y todos los ítems de v1.0.0 están completed salvo la tarea T-DEMO-0002 con estado <estado_permitido>
     Y existen las revisiones de versión y arquitectura, no hay informe de producto y versiones y manifiestos están alineados en 1.0.0
     Y el changelog de 1.0.0 está presente, el preflight es satisfactorio y no existe etiqueta v1.0.0 local ni remota
@@ -35,7 +35,7 @@ Característica: Continuidad de la conversación de Telegram con reservas
   @T-ADV-0023 @CA-M-2 @CA-M-4
   Esquema del escenario: Rechazar cierres no elegibles sin alterar el repositorio
     Dado un repositorio temporal limpio en release/v1.0 con main y remoto bare local sin red
-    Y no existe PID del bucle y su estado es PARAR por revisión final de v1.0
+    Y no existe un bucle vivo y su estado es PARAR por revisión final de v1.0
     Y todos los ítems de v1.0.0 están completed, existen las revisiones de versión y arquitectura y no hay informe de producto
     Y versiones y manifiestos están alineados en 1.0.0, el changelog está presente y el preflight es satisfactorio
     Y no existe etiqueta v1.0.0 local ni remota y el cierre sería elegible para un remitente autorizado
@@ -46,7 +46,7 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Ejemplos:
       | remitente | impedimento | respuesta |
       | no autorizado | remitente ajeno a TELEGRAM_ALLOWED_USER_IDS | no se responde al remitente |
-      | autorizado | PID del bucle existente | se informa que existe un PID del bucle |
+      | autorizado | bucle vivo existente | se informa que existe un bucle vivo |
       | autorizado | rama activa main | se informa que la rama activa no es release/v1.0 |
       | autorizado | revisión final correspondiente a v0.9 en vez de v1.0 | se informa que la versión solicitada no coincide con la revisión final |
       | autorizado | tarea T-DEMO-0001 de v1.0.0 en estado planned | se informa del trabajo pendiente T-DEMO-0001 con estado planned |
@@ -67,7 +67,7 @@ Característica: Continuidad de la conversación de Telegram con reservas
   @T-ADV-0023 @CA-M-4 @CA-M-5
   Esquema del escenario: Recuperar fallos de publicación sin cierre parcial
     Dado un repositorio temporal limpio en release/v1.0 con main y remoto bare local sin red
-    Y no existe PID del bucle, el estado es PARAR por revisión final de v1.0 y todos sus ítems están completed
+    Y no existe un bucle vivo, el estado es PARAR por revisión final de v1.0 y todos sus ítems están completed
     Y existen las revisiones de versión y arquitectura, no hay informe de producto y los manifiestos están alineados en 1.0.0
     Y el changelog está presente, el preflight es satisfactorio y no existe etiqueta v1.0.0 local ni remota
     Y se introduce únicamente <fallo>, manteniendo las demás precondiciones de cierre

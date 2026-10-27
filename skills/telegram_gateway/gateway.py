@@ -280,13 +280,13 @@ def responder(root, usuario, texto, autorizados):
     elif comando in ('/agentes', '/agents'):
         resp = motor.informe_agentes(root)
     elif comando in ('/parar', '/stop'):
-        if not (root / motor.PID).exists():
+        if not motor.pid_vivo(root):
             return firmar('El bucle ya está parado.')
         motor.excluir(root)
         (root / motor.PARADA).touch()
         return firmar('El bucle se detendrá al terminar el paso en curso.')
     elif comando in ('/lanzar', '/run'):
-        if (root / motor.PID).exists():
+        if motor.pid_vivo(root):
             return firmar('El bucle ya está en marcha.')
         estado = motor.estado(root, 'docs/requirements')
         try:
@@ -305,7 +305,7 @@ def responder(root, usuario, texto, autorizados):
             return firmar(f'Perfil no válido: {error}')
         argumento = titulo
         motor.apuntar(root, ALTAS[comando], argumento, str(usuario), perfil)
-        if (root / motor.PID).exists():
+        if motor.pid_vivo(root):
             return firmar(f'Apuntado: «{argumento}». El bucle lo registra al terminar el paso en curso y te avisa.')
         hechos = motor.ingerir(root)
         return firmar('\n'.join(f'Registrada {iid}: {t} (backlog, sin versión).' for iid, t in hechos) \

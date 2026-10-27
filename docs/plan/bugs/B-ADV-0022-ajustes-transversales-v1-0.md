@@ -5,7 +5,7 @@ type: bug
 weight: 50
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: [B-ADV-0021]
 origen: "revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), hallazgos 🟡/🔵 con destino resolver: H-04, H-05, H-06, H-09 y H-12"
 created_at: 2026-10-27
@@ -31,3 +31,13 @@ Hallazgos de la revisión transversal de v1.0 con destino `resolver`, que se cor
 
 ## 📋 Evidencias
 - `docs/review/versions/v1.0-arquitectura.md`, hallazgos H-04, H-05, H-06, H-09 y H-12.
+
+## Triaje
+- A Definición: [SKIP] hallazgos ya especificados
+- B Diseño: [SKIP] cambios locales sin decisiones nuevas
+- C1 Pruebas: [EXEC] `skills/orquestar/test_ajustes_transversales.py` y ajuste de tests de gateway/cierre
+- C2 Corrección: [EXEC] orquestar.py, gateway.py, cierre_version.py
+- D QA: [EXEC] Hades: APROBADO (docs/review/code_reviews/B-ADV-0022-code-review.md)
+- E Documentación: [EXEC] SKILL.md, feature y CHANGELOG
+- F Cierre: [EXEC]
+- Verificación: `python -m unittest` de los módulos tocados (91 tests), en verde.

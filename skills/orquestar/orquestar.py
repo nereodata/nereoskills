@@ -1952,11 +1952,20 @@ def espera_cuota(salida, ahora=None, sin_hora=1800):
     return sin_hora
 
 
+def leer_espera(root):
+    """Devuelve (hora de fin, motivo) de la espera en curso; (None, '') si no hay marca legible."""
+    try:
+        primera, _, motivo = (root / ESPERA).read_text(encoding='utf-8').partition('\n')
+        return fecha_estado(primera.strip()), motivo.strip() or 'sin cuota'
+    except (OSError, ValueError):
+        return None, ''
+
+
 def esperar(root, segundos, motivo='sin cuota', cuotas_esperadas=None):
     """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
     hasta = datetime.now() + timedelta(seconds=segundos)
     pendientes = set(marcas_cuota(root, fecha_estado(ahora()))) if motivo == 'sin cuota' else set()
-    (root / ESPERA).write_text(hasta.isoformat(timespec='minutes'), encoding='utf-8')
+    (root / ESPERA).write_text(f"{hasta.isoformat(timespec='minutes')}\n{motivo}", encoding='utf-8')
     print(f'[orquestar] {motivo}: espero hasta las {hasta:%H:%M} y reintento el paso.', flush=True)
     try:
         while datetime.now() < hasta:
@@ -2176,8 +2185,20 @@ def verificar(root, cmd):
             'salida': salida, 'duracion_s': round(time.monotonic() - inicio)}
     with f.open('a', encoding='utf-8') as out:
         out.write(json.dumps(fila, ensure_ascii=False) + '\n')
-    registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **fila})
+    metrica = {c: v for c, v in fila.items() if c != 'salida'}
+    registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **metrica})
     return codigo
+
+
+def reescribir_frontmatter(texto, cambios):
+    """Aplica `cambios` (clave: valor) a la cabecera de un fichero con frontmatter y devuelve (cabecera, cuerpo)."""
+    cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', texto, maxsplit=1)
+    for clave, valor in cambios.items():
+        if re.search(rf'^{clave}:', cabecera, re.M):
+            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
+        else:
+            cabecera += f'\n{clave}: {valor}'
+    return cabecera, cuerpo
 
 
 def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
@@ -2195,12 +2216,8 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
     motivo = ((f'- {contexto}\n' if contexto else '')
               + f'- {frase}; fecha: {ahora()}\n'
               f'- Cola de la última salida:\n\n{detalle}\n')
-    cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', fichero.read_text(encoding='utf-8'), maxsplit=1)
-    for clave, valor in {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy}.items():
-        if re.search(rf'^{clave}:', cabecera, re.M):
-            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
-        else:
-            cabecera += f'\n{clave}: {valor}'
+    cabecera, cuerpo = reescribir_frontmatter(
+        fichero.read_text(encoding='utf-8'), {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy})
     cuerpo = re.sub(r'\n## Bloqueo sin progreso\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
     fichero.write_text(cabecera + '\n---\n' + cuerpo.rstrip('\n') + '\n\n## Bloqueo sin progreso\n' + motivo,
                        encoding='utf-8')
@@ -2271,12 +2288,7 @@ def registrar_fallo_suite(root, version, cmd):
                'suite_dificultad': dificultad, 'suite_intentos': str(intentos)}
     if motivo:
         cambios['pendiente_de'] = 'humano'
-    cabecera, cuerpo = texto.split('\n---\n', 1)
-    for clave, valor in cambios.items():
-        if re.search(rf'^{clave}:', cabecera, re.M):
-            cabecera = re.sub(rf'^{clave}:.*$', f'{clave}: {valor}', cabecera, flags=re.M)
-        else:
-            cabecera += f'\n{clave}: {valor}'
+    cabecera, cuerpo = reescribir_frontmatter(texto, cambios)
     cuerpo = re.sub(r'\n## Último fallo de suite\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
     detalle = '\n'.join('    ' + linea for linea in salida.splitlines())
     cuerpo += (f'\n## Último fallo de suite\n- Comando: {json.dumps(cmd, ensure_ascii=False)}\n'
@@ -2518,8 +2530,7 @@ def informe_agentes(root, docs='docs/requirements'):
             porcentaje = min(100.0, round(tokens * 100.0 / limite, 1))
             detalle = f'{porcentaje:.1f}% consumido ({tokens} / {limite} tokens en 5 h)'
         lineas.append(f'{clave[0]}/{clave[1]}: {detalle}')
-    espera = root / ESPERA
-    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
+    hasta, _ = leer_espera(root)
     if hasta and hasta > instante:
         lineas.append(f'Espera global: hasta {hasta:%H:%M %z} '
                       f'({math.ceil((hasta - instante).total_seconds() / 60)} min restantes)')
@@ -2562,9 +2573,9 @@ def resumen(root):
 
 def parte(root, docs='docs/requirements'):
     """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
-    hasta = fecha_estado((root / ESPERA).read_text(encoding='utf-8').strip()) if (root / ESPERA).exists() else None
+    hasta, motivo = leer_espera(root)
     if hasta and hasta > fecha_estado(ahora()):
-        marcha = f'esperando cuota hasta {hasta:%H:%M}'
+        marcha = f'esperando ({motivo}) hasta {hasta:%H:%M}'
     else:
         marcha = 'en marcha' if pid_vivo(root) else 'parado'
     e = estado(root, docs)

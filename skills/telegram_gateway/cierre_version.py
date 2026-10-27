@@ -39,8 +39,8 @@ def validar(root, version, motor):
     """Rechaza toda precondición incumplida antes de preparar la publicación."""
     if not re.fullmatch(r'v\d+\.\d+', version):
         raise ValueError('Uso: /cerrar vX.Y [confirmo]')
-    if (root / motor.PID).exists():
-        raise ValueError('Existe un PID del bucle; espera su parada.')
+    if motor.pid_vivo(root):
+        raise ValueError('Existe un bucle vivo; espera su parada.')
     rama = 'release/' + version
     if git(root, 'branch', '--show-current') != rama:
         raise ValueError(f'La versión solicitada no coincide con la revisión final o la rama activa no es {rama}.')
