@@ -149,3 +149,28 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
       | version | comando |
       | v0.1    | suite-b |
       | v0.2    | suite-a |
+
+  @B-ADV-0012
+  Esquema del escenario: Una tarea atascada queda aislada y permite avanzar a otra independiente
+    Dado una release con un <paso> dificil sin progreso y otra tarea independiente
+    Y una tercera tarea depende de la atascada
+    Y el límite de intentos sin progreso está configurado con "--reintentos=2"
+    Cuando la atascada alcanza 2 intentos sin progreso y no puede promocionar
+    Entonces queda blocked con pendiente_de humano
+    Y su motivo conserva los 2 intentos, la dificultad dificil y los últimos 2000 caracteres de salida
+    Y el motivo queda en la revisión humana de la versión y se avisa por Telegram
+    Y el bucle completa la tarea independiente sin ejecutar la dependiente
+    Y al terminar las elegibles informa del bloqueo de versión
+
+    Ejemplos:
+      | paso     |
+      | task-dev |
+      | bug-fix  |
+
+  @B-ADV-0012
+  Escenario: La promoción disponible precede al bloqueo local
+    Dado una tarea media sin progreso
+    Y el límite de intentos sin progreso está configurado con "--reintentos=2"
+    Y la tarea alcanza 2 intentos sin progreso
+    Cuando el bucle puede promocionarla a dificil
+    Entonces la promociona y vuelve a intentarla antes de bloquearla

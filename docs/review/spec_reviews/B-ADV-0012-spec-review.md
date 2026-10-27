@@ -1,59 +1,48 @@
 # Revisión de especificación — B-ADV-0012
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO**
 
-Fecha: 2026-10-27. Revisor: Hades.
+Fecha: 2026-10-27. Revisor: Hades. Paso: especificar. Reevaluación de H-01/H-02.
 
 ## Alcance
 
-Se revisan exclusivamente los tres escenarios añadidos en `tests/features/uso_sin_rutas.feature:153-179`, contra el contrato de `docs/plan/bugs/B-ADV-0012-tarea-atascada-en-dificil-para-todo-el-bucle.md`. El diff se usa para comprobar que los escenarios previos permanecen intactos; no se reevalúan. Se aplican el agente Hades y la skill `review-spec` de la instalación 0.6.1, ignorando el modelo del frontmatter.
+Exclusivamente el delta respecto a HEAD de `tests/features/uso_sin_rutas.feature` (líneas 153-176), contrastado con `docs/plan/bugs/B-ADV-0012-tarea-atascada-en-dificil-para-todo-el-bucle.md`. Se aplican el agente Hades y la skill `review-spec` de la instalación 0.6.1, ignorando el modelo del frontmatter. No se revisan implementación ni diseño.
 
-La decisión humana del contrato autoriza cambiar la parada global por bloqueo local y continuidad con otras tareas elegibles. No se considera ese cambio una contradicción. No se revisan código ni diseño, ni se ejecutan pruebas de implementación.
+El delta añade un esquema con ejemplos para `task-dev` y `bug-fix`, y un escenario de promoción. Los escenarios anteriores se comprueban únicamente para asegurar su conservación; no se reevalúan. La decisión humana del contrato autoriza el bloqueo local y la continuidad con otras tareas elegibles.
 
 ## Comprobaciones obligatorias
 
 | Comprobación | Resultado | Evidencia |
 | --- | --- | --- |
-| No regresión | ✅ | El delta solo añade escenarios; no elimina ni modifica los anteriores. |
-| Coherencia | ✅ | El bloqueo local, la espera de dependientes, Telegram y la revisión humana corresponden al contrato. La excepción de cierre de suite está expresamente conservada en su punto 4. |
-| Trazabilidad | ✅ | Los escenarios se vinculan al bug existente mediante `@B-ADV-0012`. No introducen etiquetas `@CA-*` sin criterio de origen. |
-| Delta real | ❌ | El último escenario repite el caso de parada tras tres arreglos fallidos en dificultad máxima ya especificado por B-ADV-0006; véase H-01. |
+| No regresión | ✅ | El diff respecto a HEAD solo añade los dos escenarios de B-ADV-0012. Todos los escenarios previos de B-ADV-0006 permanecen intactos, incluida la fila de parada al tercer fallo en dificil. |
+| Coherencia | ✅ | El esquema exige blocked, pendiente_de humano, motivo, aviso por Telegram, espera de dependientes, avance de la independiente e informe al agotar elegibles. La promoción disponible precede al bloqueo. El contrato conserva expresamente la regla propia del cierre de suite. |
+| Trazabilidad | ✅ | Ambos escenarios llevan `@B-ADV-0012` y corresponden al contrato de origen. No se añaden etiquetas `@CA-*` sin criterio documentado. |
+| Delta real | ✅ | Los añadidos especifican bloqueo local y precedencia de la promoción; no se recupera el escenario duplicado de cierre de suite de WIP be865c1. |
 
 ## Puntuaciones
 
 | Criterio | Nota | Justificación |
 | --- | --- | --- |
-| Claridad | 8/10 | Se distingue el bloqueo de la tarea de la continuidad del bucle; falta declarar la configuración del umbral de intentos. |
-| Completitud | 9/10 | Cubre task-dev y bug-fix, dependencias, tarea independiente, motivo persistido, aviso, fin de elegibles y promoción disponible. |
-| Testeabilidad | 8/10 | Hay estados y efectos observables, con dos intentos y una cola de 2000 caracteres; el umbral necesita una precondición explícita. |
-| Estructura | 9/10 | Los escenarios amplían el archivo funcional existente del uso de Adevv y su bucle, sin crear un archivo por bug o versión. |
+| Claridad | 9/10 | Ambos escenarios declaran explícitamente `--reintentos=2`, distinguiendo configuración del ejemplo y umbral fijo. El bloqueo de la tarea y la continuidad del bucle quedan diferenciados. |
+| Completitud | 9/10 | Cubre ambos pasos afectados, agotamiento sin promoción, dependientes, trabajo independiente, motivo persistido, aviso, fin de elegibles y promoción disponible. La excepción de suite mantiene su cobertura previa. |
+| Testeabilidad | 9/10 | Precondiciones concretas, estados y efectos observables: dos intentos configurados, dificultad, cola de 2000 caracteres, revisión humana, aviso y selección de tareas. |
+| Estructura | 9/10 | Amplía el archivo funcional existente, sin crear una especificación por bug o versión. |
 
-**Media: 8,5/10.** El fallo de una comprobación obligatoria impide aprobar aunque la media supere 8.
+**Media: 9/10.** Todas las comprobaciones obligatorias satisfechas; sin hallazgos críticos ni altos.
 
-## Hallazgos
+## Seguimiento de hallazgos anteriores
 
-### H-01 — 🔴 CRÍTICO — Escenario añadido sin delta de comportamiento
+| Hallazgo | Estado | Evidencia de resolución |
+| --- | --- | --- |
+| H-01 — 🔴 CRÍTICO — Escenario añadido sin delta de comportamiento; para: especificador | **Resuelto** | No figura entre los añadidos «El cierre de suite conserva su regla de tres arreglos fallidos». Se conservan íntegros los escenarios de B-ADV-0006; no se duplica su regla. La decisión DEC-12-E1 del contrato mantiene la excepción en su cobertura existente. |
+| H-02 — 🟡 MEDIA — Umbral de dos intentos sin configuración declarada; destino: resolver; responsable: especificador | **Resuelto** | Las líneas 157 y 172 declaran «el límite de intentos sin progreso está configurado con "--reintentos=2"». La resolución H-02 del contrato confirma que dos es la configuración del ejemplo. |
 
-**Ubicación:** `tests/features/uso_sin_rutas.feature:175-179`.
+**Hallazgos nuevos: ninguno.** La corrección no altera los escenarios anteriores ni introduce otra duplicación.
 
-**Para:** especificador.
+## Evidencia y límites
 
-El escenario «El cierre de suite conserva su regla de tres arreglos fallidos» reproduce el caso ya cubierto por el esquema de B-ADV-0006 «Recaídas del mismo cierre reutilizan el bug y suben la dificultad»: su fila `dificil | 2` exige el tercer fallo, el bloqueo y la parada con aviso, ID y última salida. El nuevo escenario no introduce una condición que distinga el comportamiento y ofrece menos detalle que el existente.
+La aprobación procede de la lectura del contrato y del diff de especificación respecto a HEAD. No acredita que el comportamiento esté implementado ni que los escenarios nuevos estén automatizados.
 
-Esto incumple la obligación de delta real sin duplicados. Conservar una regla anterior en el contrato del bug es correcto, pero no requiere volver a añadir su escenario aprobado.
+Se intentó únicamente `adevv orquestar --verificar "python -m unittest tests.test_orquestar.SuiteRecoveryTests tests.test_orquestar.DificultadTests"`. Terminó con código 1 antes de ejecutar o reutilizar las pruebas: al calcular la huella del árbol, `git add -A .` devolvió 128. No se acredita un verde del árbol actual ni se atribuye a este intento un registro nuevo de pruebas. El registro verde anterior de ese comando en `orquestar_evidencias.jsonl` corresponde a la huella `4cc5d5fdacaf3bb9a8f0874342cef2e033eb0a77`; no se ha podido comprobar su coincidencia con el árbol revisado. Es una limitación de verificación, no un defecto demostrado de la especificación.
 
-**Corrección requerida:** retirar únicamente este escenario nuevo y conservar intacto el esquema previo de B-ADV-0006. Si se pretende especificar una interacción nueva entre el bloqueo local y el cierre de suite, explicitar esa condición diferencial y su resultado observable.
-
-### H-02 — 🟡 MEDIA — Umbral de dos intentos sin configuración declarada
-
-**Ubicación:** `tests/features/uso_sin_rutas.feature:155-157` y `:171-173`.
-
-**Destino:** resolver. **Responsable:** especificador.
-
-El contrato describe el agotamiento de `--reintentos`, mientras los dos escenarios nuevos fijan dos intentos sin declarar el valor configurado. Así no queda inequívoco si dos es una configuración del ejemplo o un umbral fijo que sustituye al configurable.
-
-**Corrección propuesta:** añadir a ambos escenarios la precondición de que el límite de intentos sin progreso está configurado en 2. No hace falta modificar el contrato ni pedir una decisión humana adicional.
-
-## Condición de aprobación
-
-Resolver H-01 y aclarar H-02; reevaluar el delta resultante. No se solicitan cambios de código ni diseño, ni un cambio adicional de alcance.
+No se ejecuta la suite completa, no se escriben pruebas y no se ejecuta `BloqueoSinProgresoTests`. Esa clase y su evidencia roja permanecen en WIP be865c1, pendientes de recuperación y revisión por el desarrollador: no se atribuyen al árbol actual. No se cambian estados ni se hace commit.
