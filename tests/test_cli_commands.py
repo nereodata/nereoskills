@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 from adevv.cli import main_cli
 from adevv.store import set_config
+from tests import aislamiento_telegram
 
 
 def _pid_is_alive(pid: int) -> bool:

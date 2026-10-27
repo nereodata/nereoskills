@@ -14,6 +14,7 @@ from adevv.migrate import (
     ejecutar_migrar,
     formatear_diagnostico,
 )
+from tests import aislamiento_telegram
 
 
 class TestMigrate(unittest.TestCase):

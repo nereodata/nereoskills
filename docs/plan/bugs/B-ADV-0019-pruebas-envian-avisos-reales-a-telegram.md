@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Reporte del usuario (2026-10-27): siguen llegando mensajes «[tmp…]» al bot de Afinn mientras el bucle trabaja en v1.0"
 created_at: 2026-10-27
@@ -30,3 +30,13 @@ updated_at: 2026-10-27
 
 ## 🔓 Alcance (decisión humana, 2026-10-27)
 El usuario lo ha pedido expresamente. Se puede tocar cualquier ruta necesaria (`tests/`, `skills/*/test_*.py`, `skills/orquestar/`).
+
+## 🧭 Triaje
+- **A Definición**: [SKIP] sin requisito nuevo; el comportamiento esperado está en la descripción.
+- **B Diseño**: [SKIP] un módulo de soporte de pruebas importado por cada suite.
+- **C1 Pruebas**: [EXEC] `tests/test_aislamiento_telegram.py` y regresión en `test_bucle_promotes_difficulty_on_sin_progreso_and_retries` (token en el entorno, `urlopen` simulado sin llamadas).
+- **C2 Corrección**: [EXEC] `tests/aislamiento_telegram.py` (quita `TELEGRAM_*` y bloquea `api.telegram.org` con `BaseException`), importado en todas las suites; la prueba del bucle simula `enviar`.
+- **D QA**: [EXEC] Hades `/review-code` sobre el delta.
+- **E Documentación**: [SKIP] solo pruebas.
+- **F Cierre**: [EXEC].
+- **Verificación al cierre**: `python -m unittest discover -s tests` más los módulos de `skills/orquestar` y `skills/telegram_gateway`, con y sin `TELEGRAM_*` en el entorno: el cambio toca el arranque de todas las suites.

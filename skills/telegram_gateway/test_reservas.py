@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 SPEC = importlib.util.spec_from_file_location('gateway_reservas', Path(__file__).with_name('gateway.py'))
 gateway = importlib.util.module_from_spec(SPEC)

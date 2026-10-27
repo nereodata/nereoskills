@@ -14,6 +14,7 @@ from adevv.release_tools import (
     publicar_version,
     validar_publicacion,
 )
+from tests import aislamiento_telegram
 
 
 class TestInstallAndRelease(unittest.TestCase):

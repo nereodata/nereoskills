@@ -10,6 +10,7 @@ from urllib.error import HTTPError
 from urllib.parse import parse_qs
 
 from adevv import yaml_lite
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -933,6 +934,9 @@ class DificultadTests(unittest.TestCase):
         with (patch.object(motor, 'config', return_value=cfg),
               patch.object(motor, 'ejecutar', side_effect=fake_ejecutar),
               patch.object(motor, 'git', return_value=''),
+              patch.object(motor, 'enviar', return_value=True) as enviar,
+              patch.dict('os.environ', {'TELEGRAM_BOT_TOKEN': 'token-de-prueba', 'TELEGRAM_ALLOWED_USER_IDS': '1'}),
+              patch('urllib.request.urlopen') as urlopen,
               patch.object(motor, 'firma', side_effect=[1, 1, 1, 2, 2]),
               patch.object(motor, 'estado', side_effect=[
                   ('PASO', 'task-dev', 'T1', 'release/v0.1'),
@@ -944,6 +948,8 @@ class DificultadTests(unittest.TestCase):
             self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'media')
             self.assertEqual(llamadas[0], 'model-sencillo')
             self.assertEqual(llamadas[1], 'model-medio')
+            enviar.assert_called()
+            urlopen.assert_not_called()
 
 
 class ReservaCuotaTests(unittest.TestCase):

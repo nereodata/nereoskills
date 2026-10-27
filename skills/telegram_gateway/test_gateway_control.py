@@ -8,6 +8,7 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('gateway_control', Path(__file__).with_name('gateway.py'))

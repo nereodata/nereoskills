@@ -11,6 +11,7 @@ import os
 import re
 import unittest
 from pathlib import Path
+from tests import aislamiento_telegram
 
 
 class TestInstructionsCleanliness(unittest.TestCase):

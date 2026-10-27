@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from adevv.processes import _clasificar_linea_comandos
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('gateway_fondo', Path(__file__).with_name('gateway.py'))

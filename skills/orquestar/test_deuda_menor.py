@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from skills.orquestar import metricas, orquestar
 from skills.telegram_gateway import gateway
+from tests import aislamiento_telegram
 
 
 class DeudaMenorTests(unittest.TestCase):

@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location(

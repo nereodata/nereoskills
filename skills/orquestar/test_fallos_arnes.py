@@ -6,6 +6,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
+from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('motor_fallos', Path(__file__).with_name('orquestar.py'))

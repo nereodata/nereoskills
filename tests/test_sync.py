@@ -31,6 +31,7 @@ from adevv.sync import (
     sincronizar_destinos,
     EstadoDestino,
 )
+from tests import aislamiento_telegram
 
 
 class TestStore(unittest.TestCase):

@@ -34,6 +34,7 @@ from adevv.updater import (
     materializar_version_local,
     limpiar_versiones_antiguas,
 )
+from tests import aislamiento_telegram
 
 
 class TestUpdaterUnit(unittest.TestCase):

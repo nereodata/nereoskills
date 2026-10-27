@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from skills.orquestar import orquestar
+from tests import aislamiento_telegram
 
 
 class TestFirmaTelegram(unittest.TestCase):

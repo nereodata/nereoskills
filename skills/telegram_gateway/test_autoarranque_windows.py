@@ -10,6 +10,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
+if '--lanzador' not in sys.argv:
+    from tests import aislamiento_telegram
 
 
 SPEC = importlib.util.spec_from_file_location('gateway_auto', Path(__file__).with_name('gateway.py'))
