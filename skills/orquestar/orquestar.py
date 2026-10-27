@@ -997,6 +997,47 @@ def lista_reservas(cfg_rol):
     return resultado
 
 
+PASOS_ANALISIS = frozenset(('especificar', 'revisar-tarea', 'revisar-version',
+                           'calcular-dependencias', 'work-plan', 'revisar-deuda', 'aplicar-producto'))
+
+
+def cadena_analisis(root, paso, dificultad='media'):
+    """Perfiles de recuperación finitos y efectivos, sin expandir reservas de niveles."""
+    dificultad = dificultad or 'media'
+    rol, inicial = rol_de(root, paso, dificultad=dificultad)
+    cfg = config(root)
+    dev = cfg.get('artemisa') or cfg.get('development', {})
+    base = dev if rol == 'artemisa' else cfg.get('atenea') or dev
+    candidatos = [inicial]
+    nivel = siguiente_dificultad(dificultad)
+    while nivel:
+        if nivel in (base.get('dificultad') or {}):
+            candidatos.append(ajustes(base, paso, dificultad=nivel))
+        nivel = siguiente_dificultad(nivel)
+    esc = inicial.get('escalada') or {}
+    if esc:
+        candidatos.append({**inicial, **{k: v for k, v in esc.items() if k != 'rechazos'}})
+    candidatos.extend(lista_reservas(inicial))
+    resultado, vistos = [], set()
+    for candidato in candidatos:
+        identidad = (candidato.get('harness') or 'claude',
+                     candidato.get('model') or 'predeterminado', candidato.get('effort') or None)
+        if identidad not in vistos:
+            vistos.add(identidad)
+            resultado.append(candidato)
+    return resultado
+
+
+def diagnostico_analisis(recuperacion, limite):
+    """Identifica el par agotado y los perfiles probados con sus intentos."""
+    perfiles = ' → '.join(
+        f'{c.get("harness") or "claude"}/{c.get("model") or "predeterminado"}/'
+        f'{c.get("effort") or "predeterminado"} ({limite} intentos)'
+        for c in recuperacion['perfiles'])
+    return (f'"{recuperacion["paso"]}" {recuperacion["arg"] or "(sin argumento)"} '
+            f'sin progreso tras agotar perfiles: {perfiles}.')
+
+
 def configuraciones_con_cuota(root, configuraciones):
     """Omite agotamientos vigentes con reservas, conservando la última si todos agotaron."""
     if len(configuraciones) < 2:
@@ -1725,15 +1766,16 @@ def verificar(root, cmd):
     return codigo
 
 
-def bloquear_sin_progreso(root, iid, intentos, salida):
-    """Bloquea para el humano una tarea que no avanza en dificil y deja el motivo en la tarea y en la revisión de versión."""
+def bloquear_sin_progreso(root, iid, intentos, salida, contexto=''):
+    """Bloquea para el humano y persiste el motivo en tarea y revisión de versión."""
     fichero = fichero_de(root, iid)
     version = vkey(frontmatter(fichero).get('version'))
     dificultad = dificultad_de(root, iid)
     hoy = datetime.now().strftime('%Y-%m-%d')
     cola = (salida or '(el arnés no produjo salida)')[-2000:]
     detalle = '\n'.join('    ' + linea for linea in cola.splitlines())
-    motivo = (f'- {iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}; fecha: {ahora()}\n'
+    motivo = ((f'- {contexto}\n' if contexto else '')
+              + f'- {iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}; fecha: {ahora()}\n'
               f'- Cola de la última salida:\n\n{detalle}\n')
     cabecera, cuerpo = re.split(r'\n---[ \t]*(?:\n|$)', fichero.read_text(encoding='utf-8'), maxsplit=1)
     for clave, valor in {'status': 'blocked', 'pendiente_de': 'humano', 'updated_at': hoy}.items():
@@ -1754,7 +1796,8 @@ def bloquear_sin_progreso(root, iid, intentos, salida):
     subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True, check=True)
     subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): bloquear tarea sin progreso', '--', *rutas],
                    cwd=root, capture_output=True, check=True)
-    avisar(root, 'respuesta', f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; '
+    avisar(root, 'respuesta', (f'{contexto}\n' if contexto else '')
+           + f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; '
                               f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
 
 
@@ -2324,12 +2367,15 @@ def bucle(a, root):
     recarga = getattr(a, 'recarga', None) or {}
     sin_progreso = recarga.get('sin_progreso', 0)
     esperado = recarga.get('esperado', 0)
+    recuperaciones_analisis = {(r['paso'], r['arg']): r
+                              for r in recarga.get('recuperaciones_analisis', [])}
     for n in range(recarga.get('n', 1), a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
             return 2
         if not a.estado and recargar_version(__file__, root, PID,
-                                             {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado}, 'orquestar'):
+                                             {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado,
+                                              'recuperaciones_analisis': list(recuperaciones_analisis.values())}, 'orquestar'):
             return 0
         if not a.estado:
             for iid, titulo in ingerir(root):
@@ -2371,10 +2417,21 @@ def bucle(a, root):
                     dif = nueva_dif
         antes = firma(root, a.docs)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif)
-        cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
+        escalado = False
+        if paso not in PASOS_ANALISIS:
+            cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
         if escalado:
             print(f'[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; '
                   f'escalo a {cfg_rol.get("model") or cfg_rol.get("harness")}', flush=True)
+        clave_analisis = (paso, arg or '')
+        recuperacion = None
+        if paso in PASOS_ANALISIS:
+            if clave_analisis not in recuperaciones_analisis:
+                recuperaciones_analisis[clave_analisis] = {
+                    'paso': paso, 'arg': arg or '', 'indice': 0, 'intentos': 0,
+                    'perfiles': cadena_analisis(root, paso, dif)}
+            recuperacion = recuperaciones_analisis[clave_analisis]
+            cfg_rol = recuperacion['perfiles'][recuperacion['indice']]
         prompt = construir_prompt_paso(root, paso, arg)
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or ''}
         env.pop('ORQUESTAR_ESCALADA', None)
@@ -2402,7 +2459,9 @@ def bucle(a, root):
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
             arnes_paso = a.cmd or arnes(a, cfg_actual)
             if idx_cfg == 0:
-                sesion_paso = buscar_sesion_paso(root, paso, arg, arnes_paso)
+                nueva_sesion = (recuperacion and recuperacion['indice'] > 0
+                                and not recuperacion.get('perfil_iniciado', False))
+                sesion_paso = None if nueva_sesion else buscar_sesion_paso(root, paso, arg, arnes_paso)
             elif arnes_paso == arnes_anterior:
                 sesion_paso = sesion_anterior
             else:
@@ -2415,6 +2474,8 @@ def bucle(a, root):
                 f_met = root / METRICAS
                 n_met = len(f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
                 try:
+                    if recuperacion is not None:
+                        recuperacion['perfil_iniciado'] = True
                     if sesion_paso:
                         resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
                     else:
@@ -2539,6 +2600,7 @@ def bucle(a, root):
             print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
             sin_progreso = 0
             esperado = 0
+            recuperaciones_analisis.pop(clave_analisis, None)
             continue
         if cuota is not None and esperado + cuota <= a.espera_max * 3600:
             esperado += cuota
@@ -2556,6 +2618,7 @@ def bucle(a, root):
             if firma(root, a.docs) != antes and not git('status', '--porcelain'):
                 print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
                 sin_progreso = 0
+                recuperaciones_analisis.pop(clave_analisis, None)
                 continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
@@ -2565,6 +2628,24 @@ def bucle(a, root):
         esperado = 0
 
         if firma(root, a.docs) == antes:
+            if recuperacion is not None:
+                recuperacion['intentos'] += 1
+                print(f'[orquestar] {paso} {arg or ""}: sin progreso '
+                      f'({recuperacion["intentos"]}/{a.reintentos})', flush=True)
+                if recuperacion['intentos'] >= a.reintentos:
+                    if recuperacion['indice'] + 1 < len(recuperacion['perfiles']):
+                        recuperacion['indice'] += 1
+                        recuperacion['intentos'] = 0
+                        recuperacion['perfil_iniciado'] = False
+                    else:
+                        diagnostico = diagnostico_analisis(recuperacion, a.reintentos)
+                        if paso in ('especificar', 'revisar-tarea') and arg:
+                            print(f'[orquestar] {diagnostico}', flush=True)
+                            bloquear_sin_progreso(root, arg, a.reintentos, salida, contexto=diagnostico)
+                            recuperaciones_analisis.pop(clave_analisis, None)
+                        else:
+                            return parar(root, 'error', diagnostico)
+                continue
             sin_progreso += 1
             print(f'[orquestar] sin progreso ({sin_progreso}/{a.reintentos})')
             if sin_progreso >= a.reintentos:
@@ -2581,6 +2662,7 @@ def bucle(a, root):
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')
         else:
             sin_progreso = 0
+            recuperaciones_analisis.pop(clave_analisis, None)
     return parar(root, 'error', f'alcanzado --max-pasos={a.max_pasos}.')
 
 

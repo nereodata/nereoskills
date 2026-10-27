@@ -27,7 +27,7 @@ flowchart LR
 
 ## 1. Bucle general (`orquestar.py`)
 
-Cada caja es una ejecución del arnés con contexto limpio. Paradas en cualquier punto: paso de planificación o de versión sin progreso tras 2 intentos (un `task-dev`/`bug-fix` sin progreso se bloquea para el humano y el bucle sigue), suite en rojo al terminar la versión (`--test`), fallo persistente de todos los perfiles del arnés tras sus reintentos, `--parar` y `--max-pasos`. Las tareas con alguna `depende_de` sin completar quedan en espera, calculada por el script. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
+Cada caja es una ejecución del arnés. Los análisis sin progreso prueban niveles superiores, escalada y reservas con `--reintentos` intentos por perfil (2 por defecto), independientemente por paso y argumento. Al agotarlos, `especificar` y `revisar-tarea` bloquean solo el ID y continúan con las independientes; los análisis globales paran con diagnóstico de perfiles e intentos. Un `task-dev`/`bug-fix` sin progreso conserva su promoción y bloqueo local. Los pasos restantes paran tras agotar `--reintentos`. También se para por suite roja que agota su recuperación de cierre, fallo persistente de todos los perfiles del arnés, `--parar` o `--max-pasos`. Las tareas con alguna `depende_de` sin completar esperan. La recarga conserva perfiles y contadores parciales de análisis. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
 
 ```mermaid
 flowchart TD

@@ -183,3 +183,11 @@ El triaje conserva una base Git estable. Las skills task-dev y bug-fix aplican e
 
 
 Los pasos del bucle recuperan errores de red o autenticación mediante `adevv orquestar --reintentos-arnes 3`: reintentos por perfil y después reservas, con diagnóstico si se agotan. Consulta las esperas y la parada cooperativa en [Orquestación](docs/orquestacion.md).
+
+
+Los pasos de análisis recuperan la falta de progreso por `(paso, argumento)`:
+prueban niveles superiores, escalada y reservas con el límite `--reintentos` por
+perfil. La recarga conserva sus intentos. Si se agotan, `especificar` y
+`revisar-tarea` bloquean solo la tarea y permiten continuar las independientes;
+los análisis globales paran indicando los perfiles probados. Véase
+[recuperación de análisis](skills/orquestar/SKILL.md#recuperación-de-análisis-sin-progreso).

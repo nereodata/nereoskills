@@ -13,6 +13,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0013** — Recuperación por perfil de los análisis sin progreso, aislamiento por paso y argumento, continuidad local y conservación de intentos en recarga.
+
 - **B-ADV-0012** — Bloqueo local de tareas sin progreso tras agotar promociones, con diagnóstico persistido, aviso y continuidad de tareas independientes.
 - **B-ADV-0009** — Instalación inmediata con bucles en marcha, conservación de versiones existentes y copias globales diferidas hasta que terminen los bucles, también con `--forzar`. La versión nueva se adopta mediante la recarga cooperativa existente.
 - **B-ADV-0011** — Reintentos acotados por perfil ante fallos del arnés en pasos, reservas y diagnóstico final con cola de salida, conservando cuota y progreso commiteado.

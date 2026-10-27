@@ -58,7 +58,11 @@ class RecargaTests(unittest.TestCase):
     def test_transfiere_argumentos_raiz_estado_y_pid(self):
         (self.root / motor.PID).write_text(str(os.getpid()))
         hijo = Mock(pid=9876)
-        estado = {'n': 3, 'sin_progreso': 1, 'esperado': 90}
+        estado = {'n': 3, 'sin_progreso': 1, 'esperado': 90, 'recuperaciones_analisis': [
+            {'paso': 'especificar', 'arg': 'T-DEM-0001', 'indice': 1, 'intentos': 1,
+             'perfiles': [{'harness': 'codex', 'model': 'base'}, {'harness': 'codex', 'model': 'superior'}]},
+            {'paso': 'especificar', 'arg': 'T-DEM-0002', 'indice': 0, 'intentos': 1,
+             'perfiles': [{'harness': 'codex', 'model': 'base'}]}]}
         with patch.object(motor, '__file__', str(self.actual)), patch.object(motor.sys, 'argv', ['viejo', '--max-pasos', '8']), patch.object(motor.subprocess, 'Popen', return_value=hijo) as lanzar, patch('builtins.print') as imprimir:
             self.assertTrue(motor.recargar_version(self.actual, self.root, motor.PID, estado, 'orquestar'))
         imprimir.assert_called_once_with('[orquestar] recargado a versión 0.6.0', flush=True)
@@ -80,7 +84,7 @@ class RecargaTests(unittest.TestCase):
 
     def test_bucle_transfiere_antes_de_calcular_paso(self):
         a = argparse.Namespace(estado=False, idea=None, docs='docs', max_pasos=8,
-                               recarga={'n': 3, 'sin_progreso': 1, 'esperado': 90})
+                               recarga={'n': 3, 'sin_progreso': 1, 'esperado': 90, 'recuperaciones_analisis': []})
         with patch.object(motor, 'iniciar_gateway'), patch.object(motor, 'suite', return_value=None), patch.object(motor, 'recargar_version', return_value=True, create=True) as recarga, patch.object(motor, 'estado') as estado:
             self.assertEqual(motor.bucle(a, self.root), 0)
         estado.assert_not_called()

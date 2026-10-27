@@ -535,7 +535,7 @@ class EscaladaTests(unittest.TestCase):
             self.hades('RECHAZADO')
         args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None, estado=False, max_pasos=1,
                                         reintentos=2, espera_max=0, cmd=None)
-        with (patch.object(motor, 'estado', return_value=('PASO', 'revisar-tarea', 'T-ADV-0001', '')),
+        with (patch.object(motor, 'estado', return_value=('PASO', 'task-dev', 'T-ADV-0001', '')),
               patch.object(motor, 'ejecutar', return_value=(0, {}, '')) as ejecutar,
               patch.object(motor, 'firma', side_effect=['a', 'b']), patch.object(motor, 'git', return_value=''),
               patch.object(motor, 'ingerir', return_value=[]), patch.object(motor, 'avisar'),
@@ -1571,3 +1571,215 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         self.assertTrue(estado[1].startswith(motor.FIN_VERSION[0]))
         self.assertIn(iid, estado[1])
         self.assertEqual(self.git('status', '--porcelain'), '')
+
+
+class RecuperacionAnalisisTests(unittest.TestCase):
+    """Recorre el bucle con perfiles ficticios y resultados observables, sin proveedores."""
+
+    setUp = BloqueoSinProgresoTests.setUp
+    git = BloqueoSinProgresoTests.git
+    pasos = ('especificar', 'revisar-tarea', 'revisar-version', 'calcular-dependencias',
+             'work-plan', 'revisar-deuda', 'aplicar-producto')
+    perfiles = [('codex', 'base-demo', 'medium'), ('codex', 'superior-demo', 'high'),
+                ('claude', 'escalado-demo', 'high'), ('agy', 'reserva-demo', 'medium')]
+
+    def preparar(self):
+        """Declara el contrato común en la configuración real de ambos roles."""
+        cfg = {'harness': 'codex', 'model': 'base-demo', 'effort': 'medium',
+               'dificultad': {'media': {'model': 'base-demo'},
+                              'dificil': {'model': 'superior-demo', 'effort': 'high'}},
+               'escalada': {'harness': 'claude', 'model': 'escalado-demo', 'effort': 'high'},
+               'reserva': [{'model': 'superior-demo', 'effort': 'high'},
+                           {'harness': 'agy', 'model': 'reserva-demo'}]}
+        (self.root / motor.CONFIG).write_text(json.dumps({'atenea': cfg, 'artemisa': cfg}), encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'perfiles ficticios')
+        return cfg
+
+    def argumentos(self, recarga=None):
+        return motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=None,
+            estado=False, max_pasos=80, reintentos=2, espera_max=0, cmd=None, recarga=recarga)
+
+    def simular(self, pares, avanzar=None, recarga=None, capturar=None, continuar=False):
+        """Intercala pares sin modificar artificialmente la firma por cambiar de selector."""
+        iterador = iter(pares)
+        llamadas = []
+        progreso = [0]
+        siguiente = [False]
+        def seleccionar(*args):
+            if continuar and progreso[0] and not siguiente[0]:
+                siguiente[0] = True
+                return ('PASO', 'start-version', 'v0.2', None)
+            return next(iterador, ('FIN', 'fin simulado'))
+        def ejecutar(a, root, prompt, **kw):
+            cfg = kw['rol']
+            perfil = tuple(cfg.get(k) for k in ('harness', 'model', 'effort'))
+            par = (kw['env']['ORQUESTAR_PASO'], kw['env']['ORQUESTAR_ID'])
+            llamadas.append((par, perfil, kw.get('sesion'), kw['env'].get('ORQUESTAR_ESCALADA')))
+            if avanzar and avanzar(len(llamadas), par, perfil):
+                progreso[0] += 1
+            return 0, {'sesion': 'sesion-anterior'}, ''
+        def transferir(*args):
+            if capturar is not None:
+                capturar.append(json.loads(json.dumps(args[3])))
+            return False
+        with (patch.object(motor, 'estado', side_effect=seleccionar),
+              patch.object(motor, 'firma', side_effect=lambda *a: progreso[0]),
+              patch.object(motor, 'ejecutar', side_effect=ejecutar),
+              patch.object(motor, 'construir_prompt_paso', return_value='prompt'),
+              patch.object(motor, 'buscar_sesion_paso', return_value='sesion-anterior'),
+              patch.object(motor, 'recargar_version', side_effect=transferir),
+              patch.object(motor, 'avisar'), patch('builtins.print')):
+            resultado = motor.bucle(self.argumentos(recarga), self.root)
+        return resultado, llamadas
+
+    def test_exito_en_escalada_y_reserva_para_los_siete_pasos(self):
+        self.preparar()
+        for paso in self.pasos:
+            for ganador in (2, 3):
+                with self.subTest(paso=paso, ganador=ganador):
+                    par = (paso, 'T-DEM-0001' if paso in self.pasos[:2] else
+                           None if paso in ('work-plan', 'calcular-dependencias') else 'v0.1')
+                    contador = 2 * ganador + 1
+                    resultado, llamadas = self.simular(
+                        [('PASO', *par, None)] * (contador + 1),
+                        avanzar=lambda n, par, perfil: n == contador, continuar=True)
+                    self.assertEqual(resultado, 0)
+                    self.assertEqual([c[1] for c in llamadas],
+                                     [p for p in self.perfiles[:ganador] for _ in range(2)] + [self.perfiles[ganador], self.perfiles[0], self.perfiles[0]])
+                    for i in range(2, contador, 2):
+                        self.assertIsNone(llamadas[i][2], 'cambiar de perfil exige sesión nueva')
+                    self.assertEqual(llamadas[contador][0], ('start-version', 'v0.2'))
+                    self.assertEqual(llamadas[contador + 1][0], (par[0], par[1] or ''))
+
+    def test_agotamiento_global_diagnostica_sin_escribir_backlog(self):
+        self.preparar()
+        for paso in self.pasos[2:]:
+            with self.subTest(paso=paso):
+                antes = motor.fichero_de(self.root, 'T-DEM-0001').read_bytes()
+                with patch.object(motor, 'parar', return_value=2) as parar:
+                    argumento = None if paso in ('work-plan', 'calcular-dependencias') else 'v0.1'
+                    resultado, llamadas = self.simular([('PASO', paso, argumento, None)] * 9)
+                self.assertEqual(resultado, 2)
+                self.assertEqual([c[1] for c in llamadas], [p for p in self.perfiles for _ in range(2)])
+                diagnostico = parar.call_args.args[2]
+                for fragmento in (paso, argumento or '(sin argumento)', '2 intentos', *('/'.join(p) for p in self.perfiles)):
+                    self.assertIn(fragmento, diagnostico)
+                self.comprobar_diagnostico(diagnostico)
+                self.assertEqual(motor.fichero_de(self.root, 'T-DEM-0001').read_bytes(), antes)
+                self.assertEqual(self.git('status', '--porcelain'), '')
+
+    def test_rechazos_previos_no_adelantan_escalada_ni_sustituyen_reservas(self):
+        """La recuperación de análisis conserva el orden aunque Hades haya rechazado el ID."""
+        cfg = self.preparar()
+        cfg['escalada']['reserva'] = [{'model': 'reserva-exclusiva-escalada'}]
+        (self.root / motor.CONFIG).write_text(json.dumps({'artemisa': cfg}), encoding='utf-8')
+        with patch.object(motor, 'rechazos', return_value=2):
+            resultado, llamadas = self.simular(
+                [('PASO', 'revisar-tarea', 'T-DEM-0001', None)] * 7,
+                avanzar=lambda n, par, perfil: n == 7)
+        self.assertEqual(resultado, 0)
+        self.assertEqual([c[1] for c in llamadas],
+                         [p for p in self.perfiles[:3] for _ in range(2)] + [self.perfiles[3]])
+        self.assertTrue(all(c[3] is None for c in llamadas))
+
+    def test_intercalado_y_progreso_reinician_solo_el_par_correcto(self):
+        self.preparar()
+        for otro in [('especificar', 'T-DEM-0002'), ('revisar-tarea', 'T-DEM-0001')]:
+            with self.subTest(otro=otro):
+                uno = ('especificar', 'T-DEM-0001')
+                secuencia = [uno, uno, uno, otro, uno, uno, otro]
+                _, llamadas = self.simular([('PASO', *par, None) for par in secuencia])
+                self.assertEqual([c[1] for c in llamadas],
+                    [self.perfiles[i] for i in (0, 0, 1, 0, 1, 2, 0)])
+                secuencia = [uno, uno, uno, otro, otro, otro, uno, uno, uno, uno, otro]
+                _, llamadas = self.simular([('PASO', *par, None) for par in secuencia],
+                                          avanzar=lambda n, par, perfil: n == 7)
+                self.assertEqual([c[1] for c in llamadas],
+                    [self.perfiles[i] for i in (0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1)])
+
+    def test_recarga_conserva_dos_pares_y_contadores_parciales(self):
+        self.preparar()
+        uno, otro = ('especificar', 'T-DEM-0001'), ('especificar', 'T-DEM-0002')
+        estados = []
+        self.simular([('PASO', *par, None) for par in [uno, uno, uno, otro]], capturar=estados)
+        transferencia = estados[-1]
+        transferencia['n'] = 1
+        _, llamadas = self.simular([('PASO', *par, None) for par in [uno, uno, otro, otro]], recarga=transferencia)
+        self.assertEqual([c[1] for c in llamadas], [self.perfiles[i] for i in (1, 2, 0, 1)])
+
+    def test_perfiles_heredan_sobreescrituras_y_no_expanden_reservas(self):
+        cfg = self.preparar()
+        cfg['pasos'] = {'work-plan': {'effort': 'low'}}
+        cfg['dificultad']['dificil']['reserva'] = [{'model': 'no-expandir-nivel'}]
+        cfg['escalada']['reserva'] = [{'model': 'no-expandir-escalada'}]
+        (self.root / motor.CONFIG).write_text(json.dumps({'atenea': cfg}), encoding='utf-8')
+        cadena = motor.cadena_analisis(self.root, 'work-plan', 'media')
+        self.assertEqual([tuple(c.get(k) for k in ('harness', 'model', 'effort')) for c in cadena],
+            [('codex', 'base-demo', 'low'), ('codex', 'superior-demo', 'low'),
+             ('claude', 'escalado-demo', 'high'), ('codex', 'superior-demo', 'high'),
+             ('agy', 'reserva-demo', 'low')])
+        for cfg_sin_niveles in ({'harness': 'codex', 'model': 'solo'},
+                               {'harness': 'codex', 'model': 'solo', 'reserva': [{'model': 'reserva'}]}):
+            (self.root / motor.CONFIG).write_text(json.dumps({'atenea': cfg_sin_niveles}), encoding='utf-8')
+            cadena = motor.cadena_analisis(self.root, 'work-plan', 'media')
+            self.assertEqual([c['model'] for c in cadena],
+                             ['solo', 'reserva'] if 'reserva' in cfg_sin_niveles else ['solo'])
+
+    def test_agotamiento_local_bloquea_y_continua_independiente(self):
+        self.preparar()
+        for paso in self.pasos[:2]:
+            with self.subTest(paso=paso):
+                atascada = motor.fichero_de(self.root, 'T-DEM-0001')
+                estado = 'blocked\npendiente_de: especificador' if paso == 'especificar' else 'completed'
+                atascada.write_text('---\nid: T-DEM-0001\nstatus: ' + estado + '\ndificultad: media\n'
+                                    'version: v0.1.0\ndepende_de: []\n---\nTrabajo previo.\n', encoding='utf-8')
+                (self.root / 'docs/review/code_reviews/T-DEM-0001-code-review.md').unlink(missing_ok=True)
+                for iid, dep in [('T-DEM-0002', '[]'), ('T-DEM-0003', '[T-DEM-0001]')]:
+                    (self.root / f'backlog/tasks/{iid}.md').write_text(
+                        f'---\nid: {iid}\nstatus: planned\nversion: v0.1.0\ndepende_de: {dep}\n---\n', encoding='utf-8')
+                revision = self.root / 'docs/review/versions/v0.1-revision.md'
+                revision.parent.mkdir(parents=True, exist_ok=True)
+                revision.write_text('Contenido previo.\n', encoding='utf-8')
+                (revision.parent / 'v0.1-arquitectura.md').write_text('APROBADO', encoding='utf-8')
+                self.git('add', '.')
+                self.git('commit', '-qm', 'caso local')
+                llamadas = []
+                def ejecutar(a, root, prompt, **kw):
+                    iid = kw['env']['ORQUESTAR_ID']
+                    llamadas.append((iid, tuple(kw['rol'].get(k) for k in ('harness', 'model', 'effort'))))
+                    if iid != 'T-DEM-0001':
+                        self.assertEqual(iid, 'T-DEM-0002')
+                        f = motor.fichero_de(root, iid)
+                        f.write_text(f.read_text(encoding='utf-8').replace('status: planned', 'status: completed'), encoding='utf-8')
+                        (root / f'docs/review/code_reviews/{iid}-code-review.md').write_text('APROBADO', encoding='utf-8')
+                        self.git('add', '.')
+                        self.git('commit', '-qm', 'completar independiente')
+                    return 0, {}, 'cola local'
+                with (patch.object(motor, 'ejecutar', side_effect=ejecutar),
+                      patch.object(motor, 'construir_prompt_paso', return_value='prompt'),
+                      patch.object(motor, 'comprobar_promocion', return_value=(False, '')),
+                      patch.object(motor, 'avisar') as avisar, patch('builtins.print') as imprimir):
+                    self.assertEqual(motor.bucle(self.argumentos(), self.root), 2)
+                self.assertEqual(llamadas, [('T-DEM-0001', p) for p in self.perfiles for _ in range(2)] +
+                                 [('T-DEM-0002', self.perfiles[0])])
+                fm = motor.frontmatter(atascada)
+                self.assertEqual((fm['status'], fm['pendiente_de'], fm['dificultad']), ('blocked', 'humano', 'media'))
+                self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0002'))['status'], 'completed')
+                self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0003'))['status'], 'planned')
+                for texto in (atascada.read_text(encoding='utf-8'), revision.read_text(encoding='utf-8'),
+                              '\n'.join(str(c) for c in avisar.call_args_list),
+                              '\n'.join(str(c) for c in imprimir.call_args_list)):
+                    for dato in (paso, 'T-DEM-0001', '2 intentos', *('/'.join(p) for p in self.perfiles)):
+                        self.assertIn(dato, texto)
+                    self.comprobar_diagnostico(texto)
+                self.assertIn('Trabajo previo.', atascada.read_text(encoding='utf-8'))
+                self.assertIn('Contenido previo.', revision.read_text(encoding='utf-8'))
+                self.assertEqual(self.git('status', '--porcelain'), '')
+
+    def comprobar_diagnostico(self, texto):
+        """Cada perfil se informa en orden y asociado a su propio conteo."""
+        posiciones = [texto.index('/'.join(p)) for p in self.perfiles]
+        self.assertEqual(posiciones, sorted(posiciones))
+        for inicio, fin in zip(posiciones, posiciones[1:] + [len(texto)]):
+            self.assertIn('2 intentos', texto[inicio:fin])

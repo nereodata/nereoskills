@@ -108,7 +108,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 
 Si la suite completa falla al cerrar una versión (`--test`), el bucle registra un bug `planned` en esa release con el comando y la última salida, lo commitea y continúa por `bug-fix` y Hades. Para una misma versión y comando reutiliza el ID aunque cambien los errores. Cada recaída tras un arreglo `completed` cuenta como intento fallido: tres recaídas en un nivel promocionan mediante el mecanismo existente; tras tres en `dificil`, bloquea el bug para el humano y para avisando en consola y Telegram con ID y última salida. El fallo inicial no consume intento. Los bloqueos y cancelaciones conservan el control habitual y no se reabren automáticamente.
 
-El bucle también para si un paso no avanza tras 2 intentos o al llegar a `--max-pasos`. Excepción: un `task-dev` o `bug-fix` que no avanza tras agotar la subida de dificultad no para el bucle; la tarea pasa a `blocked` con `pendiente_de: humano`, el motivo (intentos, dificultad y la cola de la última salida) queda en la tarea y en `vX.Y-revision.md`, se avisa por Telegram (`respuesta`) y el bucle sigue con las tareas independientes. Las que dependen de ella quedan en espera. El bug de cierre de suite mantiene su regla propia.
+El bucle para al llegar a `--max-pasos`. Los siete pasos de análisis descritos en «Recuperación de análisis sin progreso» agotan primero su cadena, con `--reintentos` intentos por perfil (2 por defecto): `especificar` y `revisar-tarea` bloquean solo su ID y continúan; los otros cinco paran con diagnóstico. Los demás pasos sin recuperación específica paran tras `--reintentos` intentos sin progreso. Un `task-dev` o `bug-fix` que no avanza tras agotar la subida de dificultad bloquea la tarea con `pendiente_de: humano`, persiste el motivo en tarea y revisión, avisa y sigue con las independientes; sus dependientes esperan. El bug de cierre de suite mantiene su regla propia.
 
 **Sin cuota** (Claude, Codex u otro arnés): si un paso o subagente falla y su salida indica límite de uso, el bucle conmuta inmediatamente a la siguiente `reserva` configurada (iniciando sesión nueva si cambia de arnés) y registra cada intento en métricas. Si se agotan el principal y todas las reservas, el bucle no para: espera hasta la hora de recuperación más temprana entre las cuotas reportadas (o 30 min si no la da), reintenta el mismo paso y sigue; `--estado` muestra «esperando cuota hasta…». Para si la espera seguida supera `--espera-max` horas (12 por defecto; 0 = no esperar) o si le piden `--parar`. Los fallos ajenos a cuota de los pasos siguen la recuperación de arnés descrita abajo; los roles conservan su tratamiento previo.
 
@@ -201,3 +201,30 @@ Formato de cada entrada (una por tarea o bug, la añade `/task-dev` o `/bug-fix`
 `adevv orquestar --reintentos-arnes 3` permite tres reintentos adicionales por perfil ante errores ajenos a cuota, con esperas de 60, 300 y 900 segundos. Para límites mayores se repite la espera de 900 segundos. El límite debe ser entero no negativo; cero pasa a la reserva sin esperar. Al agotarlo se prueba la siguiente reserva en orden y con sesión nueva. No consume pasos ni intentos por falta de progreso. Las esperas respetan `--parar`.
 
 Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se agotan todos los perfiles; consola y aviso incluyen los últimos 2000 caracteres de la salida del último arnés ejecutado. Un paso completado y commiteado no se repite por un retorno erróneo. La cuota mantiene su circuito, incluida su recuperación si otra reserva falla por red. Esta recuperación corresponde a pasos del bucle; no cambia el tratamiento de errores operacionales de los roles ni de la conversación del gateway.
+
+
+## Recuperación de análisis sin progreso
+
+Para `especificar`, `revisar-tarea`, `revisar-version`, `calcular-dependencias`,
+`work-plan`, `revisar-deuda` y `aplicar-producto`, una ejecución correcta del arnés
+sin cambio en la firma de progreso consume un intento del perfil actual. Cada par
+`(paso, argumento)` mantiene una cadena independiente: perfil inicial efectivo →
+niveles superiores configurados (sencilla/media/dificil) → escalada del rol →
+reservas del inicial en su orden. Se resuelven herencia y ajustes del paso antes
+de deduplicar por `(harness, model, effort)`. Las reservas de niveles y escalada
+no expanden esta cadena por falta de progreso. Sin niveles ni escalada se recorren
+el inicial y sus reservas; sin alternativas basta agotar el inicial.
+
+Cada perfil dispone de `--reintentos` ejecuciones consecutivas sin progreso.
+Cambiar de perfil inicia sesión nueva y contador cero. El primer progreso termina
+la cadena y reinicia solo ese par si reaparece. Intercalar otros pares conserva
+su perfil e intentos pendientes; la recarga cooperativa los transfiere, incluidos
+contadores parciales. No se persisten entre arranques manuales ni se reescribe la
+dificultad de tareas: los pasos globales usan media por defecto.
+
+Agotados los perfiles, `especificar` y `revisar-tarea` bloquean solo su ID con
+`pendiente_de: humano`, registran paso, argumento, perfiles e intentos en tarea y
+revisión de versión, y avisan por consola y Telegram. El bucle continúa con las
+independientes; las dependientes esperan. Los otros cinco pasos paran con el mismo
+diagnóstico sin cambiar estados del backlog. La cuota, los fallos operacionales,
+la firma de progreso y la recuperación de `task-dev`/`bug-fix` conservan sus reglas.

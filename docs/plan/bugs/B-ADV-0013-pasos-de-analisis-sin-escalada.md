@@ -5,7 +5,7 @@ type: bug
 weight: 25
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Revisión humana de los puntos de parada de orquestar.py (2026-10-27): para sin necesitar al humano"
 created_at: 2026-10-27
@@ -64,3 +64,28 @@ Agotada la cadena, solo `especificar` y `revisar-tarea` bloquean el ID: `status:
 - **DEC-ESP-13-03:** cada par conserva su perfil pendiente e intentos aunque se intercale otro par sin que el primero avance. Un progreso real de un par borra solo su recuperación, de modo que si vuelve a necesitar el mismo paso arranca del inicial con todos sus intentos. Se descarta un contador global y reiniciar solo por cambiar de par, porque mezclan o pierden agotamientos.
 - **DEC-ESP-13-04:** la recarga cooperativa conserva la recuperación de todos los pares, incluido el contador parcial del perfil activo; se descarta reiniciar en base o conceder intentos adicionales. No se exige persistencia entre paradas manuales independientes.
 - **DEC-ESP-13-05:** fixtures de selección de pasos y arneses simulados permiten intercalar pares sin progreso artificial ni efectos externos. Se descarta ejecutar agentes reales o reutilizar como verde el rojo de WIP. H-01 se resuelve con secuencias y éxito en reserva; H-02 con aislamiento, reinicio y recarga; H-03 con esquemas locales, independiente elegible y límite explícito.
+
+## Triaje de desarrollo (Artemisa)
+- A [EXEC]: consumir especificación aprobada; sin cambios de contrato ni nueva revisión spec.
+- B [EXEC]: diseño por par en docs/design/B-ADV-0013-design.md.
+- C1 [EXEC]: pruebas de éxito, agotamiento, aislamiento, progreso y recarga.
+- C2 [EXEC]: motor de recuperación de análisis.
+- D [EXEC]: Hades sobre todo el delta.
+- E [EXEC]: skill orquestar, README y changelog existente.
+- F [EXEC]: cierre y commit.
+- Verificación: los dos comandos unittest del triaje aprobado y `git diff --check`, todos con `--verificar`; sin herramientas de lint/tipado configuradas ni dependencias nuevas.
+
+## Resolución
+
+Cadena de análisis independiente por paso y argumento, con niveles superiores,
+escalada y reservas originales deduplicadas. Conserva perfiles e intentos en
+recarga; el progreso reinicia solo su par. El agotamiento local bloquea el ID y
+continúa con independientes; el global informa de los perfiles probados y para.
+Los rechazos previos de Hades no alteran esta cadena; desarrollo conserva su
+escalada propia. Se sincroniza el contrato operativo y se conserva UTF-8.
+
+Verificación con `adevv orquestar --verificar`: 80 pruebas de
+`test_orquestar.py`, 11 de `test_recarga.py` y `git diff --check` en verde.
+Hades: especificación aprobada; pruebas y código aprobados con 9/10, sin
+hallazgos pendientes. C-01, C-02 y C-03 resueltos. Validación de versión en
+`docs/review/versions/v1.0-revision.md`. No se ejecuta la suite completa.
