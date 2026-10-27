@@ -4,7 +4,7 @@ title: "intento entablar una conversación con un bot desde telegram y la respue
 type: bug
 weight: 100
 version: ""
-status: backlog
+status: cancelled
 created_at: 2026-10-27
 updated_at: 2026-10-27
 ---
@@ -19,3 +19,6 @@ intento entablar una conversación con un bot desde telegram y la respuesta es q
 
 ## 📋 Evidencias
 - Registrado desde Telegram (usuario 7495519376), 2026-10-27.
+
+## ❌ Cancelado (decisión humana, 2026-10-27)
+Duplicado de T-ADV-0026 (reservas en la conversación de Telegram), ya completada en v1.0. El fallo venía de que agy/gemini-4-argon agotó su cuota y el gateway 0.6.1 no tenía reservas; desde v1.0 la conversación conmuta a la reserva.
