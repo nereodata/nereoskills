@@ -3,6 +3,7 @@ import csv
 import json
 import re
 from collections import defaultdict
+from pathlib import Path
 
 
 CAMPOS = ('id version tipo dificultad tiempo_estimado_min tiempo_real_min modelos_dev '
@@ -24,13 +25,43 @@ DEFECTO = (2.5, .25, 10)
 
 def version(valor):
     """Normaliza versiones numéricas al bloque mayor.menor usado por vkey."""
+    clave = clave_version_numerica(valor)
+    return f'v{clave[0]}.{clave[1]}' if clave else ''
+
+
+def clave_version_numerica(valor):
+    """Devuelve la clave mayor/menor de una versión completa, o None si no es válida."""
     m = re.fullmatch(r'v?(\d+)\.(\d+)(?:\.\d+)?', str(valor or '').strip())
-    return f'v{int(m[1])}.{int(m[2])}' if m else ''
+    return (int(m[1]), int(m[2])) if m else None
 
 
 def clave_version(valor):
     """Orden numérico compatible con vkey; sin-version queda al principio."""
-    return tuple(map(int, valor[1:].split('.'))) if valor != 'sin-version' else (-1, -1)
+    return clave_version_numerica(valor) if valor != 'sin-version' else (-1, -1)
+
+
+def leer_registros(root, tolerar_ultima=False):
+    """Lee el JSONL común y permite tolerar escrituras incompletas del bucle."""
+    ruta = Path(root) / 'orquestar_metricas.jsonl'
+    if not ruta.exists():
+        return []
+    filas = []
+    with ruta.open(encoding='utf-8') as entrada:
+        for numero, linea in enumerate(entrada, 1):
+            if not linea.strip():
+                continue
+            try:
+                fila = json.loads(linea)
+            except json.JSONDecodeError as error:
+                if tolerar_ultima:
+                    continue
+                raise ValueError(f'{ruta.name}: JSON inválido en línea {numero}') from error
+            if not isinstance(fila, dict):
+                if tolerar_ultima:
+                    continue
+                raise ValueError(f'{ruta.name}: se esperaba un objeto en línea {numero}')
+            filas.append(fila)
+    return filas
 
 
 def seleccionar(filtro, disponibles):
@@ -171,21 +202,7 @@ def escribir_tabla(filas, out):
 
 def consultar(root, items, filtro):
     """Lee y agrega el JSONL sin modificar el estado ni producir salida parcial."""
-    registros = []
-    ruta = root / 'orquestar_metricas.jsonl'
-    if ruta.exists():
-        with ruta.open(encoding='utf-8') as entrada:
-            for numero, linea in enumerate(entrada, 1):
-                if not linea.strip():
-                    continue
-                try:
-                    registro = json.loads(linea)
-                except json.JSONDecodeError as error:
-                    raise ValueError(f'{ruta.name}: JSON inválido en línea {numero}') from error
-                if not isinstance(registro, dict):
-                    raise ValueError(f'{ruta.name}: se esperaba un objeto en línea {numero}')
-                registros.append(registro)
-    return agregar(registros, items, filtro)
+    return agregar(leer_registros(root, tolerar_ultima=False), items, filtro)
 
 
 def mostrar(root, items, filtro, csv_destino, out):

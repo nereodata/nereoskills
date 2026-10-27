@@ -29,7 +29,7 @@ class TestFirmaTelegram(unittest.TestCase):
             script = d / 'skills' / 'orquestar' / 'orquestar.py'
             script.parent.mkdir(parents=True, exist_ok=True)
             script.touch()
-            (d / 'pyproject.toml').write_text('version = "0.8.0"\n', encoding='utf-8')
+            (d / 'pyproject.toml').write_text('[project]\nversion = "0.8.0"\n', encoding='utf-8')
 
             mock_adevv = types.ModuleType('adevv')
             mock_adevv.__version__ = '0.7.0'
@@ -45,7 +45,7 @@ class TestFirmaTelegram(unittest.TestCase):
             script = d / 'skills' / 'orquestar' / 'orquestar.py'
             script.parent.mkdir(parents=True, exist_ok=True)
             script.touch()
-            (d / 'pyproject.toml').write_text('version = "0.8.0"\n', encoding='utf-8')
+            (d / 'pyproject.toml').write_text('[project]\nversion = "0.8.0"\n', encoding='utf-8')
 
             with patch.dict('sys.modules', {'adevv': None}):
                 ver = orquestar.version_adevv(script)
@@ -60,7 +60,7 @@ class TestFirmaTelegram(unittest.TestCase):
 
             with patch.dict('sys.modules', {'adevv': None}):
                 ver = orquestar.version_adevv(script)
-                self.assertEqual(ver, '0.5.0')
+                self.assertEqual(ver, 'desconocida')
 
     def test_firmar_formato_basico(self):
         """Añade la firma estándar con em-dash y versión al pie de un mensaje."""

@@ -7,6 +7,7 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import ctypes
 import hashlib
 import importlib.util
 import json
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -65,20 +67,75 @@ PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
 
+try:
+    from . import metricas
+except ImportError:
+    try:
+        import metricas
+    except ImportError:
+        _metricas_spec = importlib.util.spec_from_file_location('adevv_metricas', Path(__file__).with_name('metricas.py'))
+        metricas = importlib.util.module_from_spec(_metricas_spec)
+        _metricas_spec.loader.exec_module(metricas)
+vkey = metricas.clave_version_numerica
+
+
+def directorio_version_almacen(script=None):
+    """Resuelve una única vez el almacén y directorio versionado de un motor."""
+    try:
+        p = Path(script or __file__).resolve()
+        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
+        versions = home / 'versions'
+        rel = p.relative_to(versions)
+        version_dir = versions / rel.parts[0]
+        version = version_dir.name
+        if not re.fullmatch(r'v?\d+(\.\d+)*', version):
+            return None
+        return home, version_dir, version.lstrip('v')
+    except (OSError, ValueError, IndexError, RuntimeError):
+        return None
+
+
+def version_de_manifiestos(script):
+    """Obtiene la versión del proyecto desde pyproject.toml o task_config.yaml."""
+    try:
+        padres = Path(script).resolve().parents
+    except (OSError, ValueError, RuntimeError):
+        return None
+    for padre in padres:
+        manifiesto = padre / 'pyproject.toml'
+        if manifiesto.is_file():
+            try:
+                datos = tomllib.loads(manifiesto.read_text(encoding='utf-8'))
+                version = datos.get('project', {}).get('version')
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            if isinstance(version, str) and version.strip():
+                return version.strip().lstrip('v')
+    for padre in padres:
+        manifiesto = padre / 'task_config.yaml'
+        if not manifiesto.is_file() or not yaml:
+            continue
+        try:
+            if hasattr(yaml, 'safe_load'):
+                datos = yaml.safe_load(manifiesto.read_text(encoding='utf-8')) or {}
+            elif hasattr(yaml, 'load_yaml'):
+                datos = yaml.load_yaml(manifiesto)
+            else:
+                continue
+            version = (datos.get('project') or {}).get('version') if isinstance(datos, dict) else None
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if isinstance(version, str) and version.strip():
+            return version.strip().lstrip('v')
+    return None
+
 
 def version_adevv(script=None):
     """Devuelve la versión de Adevv del proceso en ejecución (deducida del almacén o metadatos)."""
     try:
-        p = Path(script or __file__).resolve()
-        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
-        if len(p.parents) >= 3 and p.parents[2].parent == home / 'versions':
-            v = p.parents[2].name
-            if re.fullmatch(r'v?\d+(\.\d+)*', v):
-                return v.lstrip('v')
-        if p.is_relative_to(home / 'versions'):
-            rel = p.relative_to(home / 'versions')
-            if rel.parts and re.fullmatch(r'v?\d+(\.\d+)*', rel.parts[0]):
-                return rel.parts[0].lstrip('v')
+        version_dir = directorio_version_almacen(script)
+        if version_dir:
+            return version_dir[2]
     except (OSError, ValueError, RuntimeError):
         pass
     try:
@@ -89,15 +146,12 @@ def version_adevv(script=None):
     except Exception:
         pass
     try:
-        for padre in Path(script or __file__).resolve().parents:
-            pyproj = padre / 'pyproject.toml'
-            if pyproj.is_file():
-                m = re.search(r"version\s*=\s*['\"]([^'\"]+)['\"]", pyproj.read_text(encoding='utf-8'))
-                if m:
-                    return m.group(1).strip().lstrip('v')
+        version = version_de_manifiestos(script or __file__)
+        if version:
+            return version
     except Exception:
         pass
-    return '0.5.0'
+    return 'desconocida'
 
 
 def tiene_firma(texto):
@@ -126,11 +180,11 @@ def firmar(texto, extra=None, script=None):
 def version_activa_distinta(script):
     """Devuelve el homólogo activo solo para motores del almacén versionado."""
     try:
-        script = Path(script).resolve()
-        home = Path(os.environ.get('ADEVV_HOME') or Path.home() / '.adevv').resolve()
-        version_dir = script.parents[2]
-        if version_dir.parent != home / 'versions':
+        ubicacion = directorio_version_almacen(script)
+        if ubicacion is None:
             return None
+        home, version_dir, _ = ubicacion
+        script = Path(script).resolve()
         datos = json.loads((home / 'active.json').read_text(encoding='utf-8'))
         version = datos.get('version') if isinstance(datos, dict) else None
         if not isinstance(version, str) or not re.fullmatch(r'\d+\.\d+\.\d+', version):
@@ -154,7 +208,7 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
     temporal = pid.with_suffix('.recarga.tmp')
     hijo = None
     try:
-        if pid.read_text(encoding='utf-8').strip() != str(os.getpid()):
+        if not es_propietario_pid(root, pid_file):
             return False
         datos = {'root': str(root), 'script': str(destino), 'estado': estado_recarga}
         env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos)}
@@ -185,7 +239,7 @@ def recibir_recarga(root, pid_file, script):
     if datos['root'] != str(root.resolve()) or datos['script'] != str(Path(script).resolve()):
         raise ValueError('Transferencia de recarga destinada a otro proceso')
     for _ in range(100):
-        if (root / pid_file).read_text(encoding='utf-8').strip() == str(os.getpid()):
+        if es_propietario_pid(root, pid_file):
             return datos['estado']
         time.sleep(0.05)
     raise RuntimeError('No se publicó el PID de la recarga')
@@ -204,6 +258,48 @@ def get_active_version_dir():
     except Exception:
         pass
     return Path(__file__).resolve().parents[2]
+
+
+def _proceso_vivo(pid):
+    """Comprueba si existe un proceso, incluyendo procesos ajenos sin permiso de consulta."""
+    if os.name == 'nt':
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
+        kernel.OpenProcess.restype = ctypes.c_void_p
+        kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5
+        try:
+            codigo = ctypes.c_ulong()
+            return not kernel.GetExitCodeProcess(handle, ctypes.byref(codigo)) or codigo.value == 259
+        finally:
+            kernel.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def pid_vivo(root, pid_file=PID):
+    """Devuelve el PID registrado si sigue vivo; ignora marcas inválidas o muertas."""
+    try:
+        pid = int((Path(root) / pid_file).read_text(encoding='utf-8').strip())
+        return pid if pid > 0 and _proceso_vivo(pid) else None
+    except (OSError, ValueError, OverflowError):
+        return None
+
+
+def es_propietario_pid(root, pid_file=PID):
+    """Indica si el archivo de PID pertenece al proceso actual."""
+    try:
+        return (Path(root) / pid_file).read_text(encoding='utf-8').strip() == str(os.getpid())
+    except (OSError, ValueError):
+        return False
 
 
 def es_repositorio_fuente_adevv(root):
@@ -742,11 +838,6 @@ def ingerir(root):
 def deuda(items):
     """Deuda registrada: bugs pendientes sin versión, fuera del bucle hasta que se incluyan."""
     return [i for i in items if i['paso'] == 'bug-fix' and i['status'] not in FUERA and not vkey(i['version'])]
-
-
-def vkey(v):
-    m = re.match(r'v?(\d+)\.(\d+)', v or '')
-    return (int(m[1]), int(m[2])) if m else None
 
 
 def primera_linea(path):
@@ -1762,17 +1853,7 @@ def registrar(root, fila):
 
 def leer_metricas(root):
     """Lee registros completos; tolera una última línea aún en escritura."""
-    ruta = root / METRICAS
-    filas = []
-    if ruta.exists():
-        for linea in ruta.read_text(encoding='utf-8').splitlines():
-            try:
-                fila = json.loads(linea)
-            except ValueError:
-                continue
-            if isinstance(fila, dict):
-                filas.append(fila)
-    return filas
+    return metricas.leer_registros(root, tolerar_ultima=True)
 
 
 def fecha_estado(valor):
@@ -1946,46 +2027,11 @@ def informe_agentes(root, docs='docs/requirements'):
     return '\n'.join(lineas)
 
 
-def detalle_estado(root, e):
-    """Presentación común de agentes efectivos y evidencia reciente de uso/cuota."""
-    instante = fecha_estado(ahora())
-    lineas, perfiles = [], []
-    if e[0] == 'PASO':
-        paso, iid = e[1:3]
-        dificultad = dificultad_de(root, iid) if iid else None
-        rol, cfg = rol_de(root, paso, dificultad=dificultad)
-        cfg, escalado = escalada(root, rol, cfg, iid)
-        hades = ajustes(config(root).get('hades', {}), paso, dificultad=dificultad)
-        lineas.append(f'Agentes para {paso} {iid or ""} (dificultad: {dificultad or "no aplica"}):')
-        for nombre, perfil in ((rol, cfg), ('hades', hades)):
-            reservas = lista_reservas(perfil)
-            perfiles.extend([perfil] + reservas)
-            lineas.append(f'{nombre}: {perfil_estado(perfil)}'
-                          + (' [escalada]' if nombre == rol and escalado else '')
-                          + ('; reservas: ' + ', '.join(perfil_estado(r) for r in reservas) if reservas else ''))
-    uso, cuotas = consumo_cuotas(root, instante)
-    for perfil in perfiles:
-        uso.setdefault((perfil.get('harness') or 'claude', perfil.get('model') or 'predeterminado'), 0)
-    espera = root / ESPERA
-    hasta = fecha_estado(espera.read_text(encoding='utf-8').strip()) if espera.exists() else None
-    if hasta and hasta > instante:
-        minutos = int((hasta - instante).total_seconds() + 59) // 60
-        lineas.append(f'Espera global: hasta {hasta:%Y-%m-%d %H:%M %z} ({minutos} min restantes)')
-    if not uso:
-        lineas.append('Sin uso registrado en las últimas 5 h')
-    for clave, tokens in sorted(uso.items()):
-        hasta = cuotas.get(clave)
-        cuota = (f'agotado hasta {hasta:%Y-%m-%d %H:%M %z} '
-                 f'({int((hasta - instante).total_seconds() + 59) // 60} min restantes)' if hasta else
-                 'sin agotamiento registrado')
-        lineas.append(f'{clave[0]}/{clave[1]}: {tokens} tokens (5 h); {cuota}')
-    return lineas
-
-
 def resumen(root):
     """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
-    if (root / PID).exists():
-        print(f'[orquestar] en marcha (pid {(root / PID).read_text().strip()}); salida en {LOG}')
+    vivo = pid_vivo(root)
+    if vivo:
+        print(f'[orquestar] en marcha (pid {vivo}); salida en {LOG}')
     else:
         print('[orquestar] no hay ningún bucle en marcha')
     if not (root / METRICAS).exists():
@@ -2017,7 +2063,7 @@ def parte(root, docs='docs/requirements'):
     if hasta and hasta > fecha_estado(ahora()):
         marcha = f'esperando cuota hasta {hasta:%H:%M}'
     else:
-        marcha = 'en marcha' if (root / PID).exists() else 'parado'
+        marcha = 'en marcha' if pid_vivo(root) else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
     items = backlog(root)
@@ -2069,9 +2115,11 @@ def iniciar_gateway(root, informar=True):
 
 def en_fondo(root, argumentos=None):
     """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
-    if (root / PID).exists():
-        sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). '
+    vivo = pid_vivo(root)
+    if vivo:
+        sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). '
                  f'Si no es así, borra {PID}.')
+    (root / PID).unlink(missing_ok=True)
     excluir(root)
     iniciar_gateway(root, informar=False)
     args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != '--fondo']
@@ -2187,7 +2235,10 @@ def main():
         print('[orquestar] aviso enviado' if ok else '[orquestar] el aviso no se pudo enviar')
         return 0 if ok else 1
     if a.parar:
-        if not (root / PID).exists():
+        vivo = pid_vivo(root)
+        if not vivo:
+            (root / PID).unlink(missing_ok=True)
+            (root / PARADA).unlink(missing_ok=True)
             print('[orquestar] no hay ningún bucle en marcha')
             return 0
         excluir(root)
@@ -2203,15 +2254,16 @@ def main():
         resumen(root)
     elif a.recarga is not None:
         pass
-    elif (root / PID).exists():
-        sys.exit(f'Ya hay un bucle en marcha (pid {(root / PID).read_text().strip()}). Si no es así, borra {PID}.')
+    elif (vivo := pid_vivo(root)):
+        sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.')
     else:
+        (root / PID).unlink(missing_ok=True)
         excluir(root)
         (root / PID).write_text(str(os.getpid()), encoding='utf-8')
     try:
         return bucle(a, root)
     finally:
-        if not a.estado and (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
+        if not a.estado and es_propietario_pid(root):
             for f in (PID, PARADA, ESPERA):
                 (root / f).unlink(missing_ok=True)
 

@@ -13,7 +13,7 @@ SPEC.loader.exec_module(motor)
 
 
 class EstadoAgentesTests(unittest.TestCase):
-    """Compatibilidad del detalle histórico, con reloj fijo y sin red."""
+    """Contrato del informe de agentes, con reloj fijo y sin red."""
 
     def setUp(self):
         self.enterContext(patch.object(motor, 'iniciar_gateway'))
@@ -38,8 +38,7 @@ class EstadoAgentesTests(unittest.TestCase):
               patch.object(motor, 'dificultad_de', return_value='dificil'),
               patch.object(motor, 'backlog', return_value=[]),
               patch.object(motor, 'ahora', return_value='2026-10-23T12:00:00+00:00')):
-            detalle = '\n'.join(motor.detalle_estado(self.root, motor.estado(self.root, 'docs/requirements')))
-            return (detalle,)
+            return (motor.informe_agentes(self.root, 'docs/requirements'),)
 
     def metrics(self, rows):
         (self.root / motor.METRICAS).write_text('\n'.join(json.dumps(r) for r in rows), encoding='utf-8')
@@ -51,8 +50,9 @@ class EstadoAgentesTests(unittest.TestCase):
                              'claude/review-backup (high)'):
                 self.assertIn(expected, output)
         for output in self.outputs(step='work-plan'):
-            self.assertIn('atenea: agy/planner', output)
-            self.assertNotIn('artemisa:', output)
+            informe_paso = output.split('Agentes para')[-1]
+            self.assertIn('atenea: agy/planner', informe_paso)
+            self.assertNotIn('artemisa:', informe_paso)
 
     def test_escalated_agent(self):
         self.metrics([{'tipo': 'agente', 'rol': 'hades', 'id': 'T-ADV-0014',
@@ -63,6 +63,8 @@ class EstadoAgentesTests(unittest.TestCase):
             self.assertIn('codex/backup (high)', output)
 
     def test_window_and_quota_before_reserve_without_double_reasoning(self):
+        self.cfg['artemisa']['model'] = 'm1'
+        (self.root / motor.CONFIG).write_text(json.dumps(self.cfg), encoding='utf-8')
         self.metrics([
             {'fecha': '2026-10-23T07:00:00+00:00', 'arnes': 'codex',
              'modelos': {'m1': {'entrada': 100, 'cache_leida': 20, 'salida': 30, 'razonamiento': 10}}},
@@ -73,34 +75,40 @@ class EstadoAgentesTests(unittest.TestCase):
             {'fecha': '2026-10-23T13:50:00+02:00', 'arnes': 'codex',
              'modelo_cuota': 'm1', 'cuota_espera_s': 1800}])
         for output in self.outputs():
-            self.assertIn('codex/m1: 150 tokens (5 h)', output)
+            self.assertIn('codex/m1: 100.0% consumido (agotado hasta', output)
             self.assertIn('agotado hasta', output)
             self.assertIn(datetime.fromisoformat('2026-10-23T12:20:00+00:00').astimezone().strftime('%H:%M'), output)
             self.assertIn('20 min', output)
-            self.assertIn('codex/hard: 0 tokens (5 h)', output)
-            self.assertIn('sin agotamiento registrado', output)
+            self.assertIn('codex/hard: 0.0% consumido (0 / 10000000 tokens en 5 h)', output)
+            self.assertIn('codex/hard: 0.0% consumido', output)
 
     def test_expired_quota_and_global_wait(self):
+        self.cfg['artemisa']['model'] = 'm1'
+        (self.root / motor.CONFIG).write_text(json.dumps(self.cfg), encoding='utf-8')
         self.metrics([{'fecha': '2026-10-23T11:00:00+00:00', 'arnes': 'codex',
                        'modelos': {'m1': {}}, 'sin_cuota': True, 'espera_s': 60}])
         (self.root / motor.ESPERA).write_text('2026-10-23T12:15:00+00:00', encoding='utf-8')
         for output in self.outputs():
             self.assertIn('Espera global:', output)
             self.assertIn('15 min', output)
-            self.assertNotIn('codex/m1: 0 tokens (5 h); agotado', output)
+            cuota = next(line for line in output.splitlines() if line.startswith('codex/m1:'))
+            self.assertIn('codex/m1: 0.0% consumido (0 / 10000000 tokens en 5 h)', cuota)
+            self.assertNotIn('agotado', cuota)
 
     def test_no_step_or_metrics(self):
         for output in self.outputs(kind='FIN'):
-            self.assertNotIn('artemisa:', output)
-            self.assertIn('Sin uso registrado en las últimas 5 h', output)
+            self.assertNotIn('Agentes para', output)
+            self.assertIn('codex/base: 0.0% consumido', output)
 
     def test_read_only_and_legacy_quota(self):
+        self.cfg['hades'] = {'harness': 'claude', 'model': 'old'}
+        (self.root / motor.CONFIG).write_text(json.dumps(self.cfg), encoding='utf-8')
         self.metrics([{'fecha': '2026-10-23T11:50:00+00:00', 'arnes': 'claude',
                        'modelos': {'old': {'cache_escrita': 4}},
                        'sin_cuota': True, 'espera_s': 1800}])
         before = {p.name: p.read_bytes() for p in self.root.iterdir()}
         for output in self.outputs():
-            self.assertIn('claude/old: 4 tokens (5 h); agotado hasta', output)
+            self.assertIn('claude/old: 100.0% consumido (agotado hasta', output)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.root.iterdir()})
 
     def test_agent_records_each_quota_even_without_reported_usage(self):

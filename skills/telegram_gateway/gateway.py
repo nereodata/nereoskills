@@ -32,10 +32,7 @@ _spec = importlib.util.spec_from_file_location(
 motor = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(motor)
 
-_spec_metricas = importlib.util.spec_from_file_location(
-    'metricas_gateway', Path(__file__).resolve().parents[1] / 'orquestar' / 'metricas.py')
-metricas = importlib.util.module_from_spec(_spec_metricas)
-_spec_metricas.loader.exec_module(metricas)
+metricas = motor.metricas
 firmar = motor.firmar
 
 ALTAS = {'/tarea': 'tarea', '/task': 'tarea', '/bug': 'bug'}
@@ -344,34 +341,9 @@ def actualizaciones(token, desde=None, espera=25):
         return []
 
 
-def pid_vivo(root):
-    """Devuelve el PID registrado si sigue vivo; ignora marcas inválidas o muertas."""
-    try:
-        pid = int((root / PID).read_text(encoding='utf-8').strip())
-        if pid <= 0:
-            return None
-        if os.name == 'nt':
-            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-            kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-            kernel.OpenProcess.restype = ctypes.c_void_p
-            kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-            handle = kernel.OpenProcess(0x1000, False, pid)
-            if not handle:
-                return pid if ctypes.get_last_error() == 5 else None
-            try:
-                codigo = ctypes.c_ulong()
-                if not kernel.GetExitCodeProcess(handle, ctypes.byref(codigo)):
-                    return pid
-                return pid if codigo.value == 259 else None
-            finally:
-                kernel.CloseHandle(handle)
-        os.kill(pid, 0)
-        return pid
-    except PermissionError:
-        return pid
-    except (OSError, ValueError, OverflowError):
-        return None
+def pid_vivo(root, pid_file=PID):
+    """Consulta la comprobación común de vida para el PID del gateway."""
+    return motor.pid_vivo(root, pid_file)
 
 
 def reservar(root):
@@ -390,12 +362,9 @@ def reservar(root):
     (root / PARADA).unlink(missing_ok=True)
 
 
-def es_propietario_pid(root):
-    """Comprueba si el proceso actual conserva la propiedad del PID."""
-    try:
-        return (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid())
-    except (FileNotFoundError, OSError, ValueError):
-        return False
+def es_propietario_pid(root, pid_file=PID):
+    """Consulta la comprobación común de propiedad del PID del gateway."""
+    return motor.es_propietario_pid(root, pid_file)
 
 
 def limpiar(root):
@@ -575,7 +544,7 @@ def main():
     recarga = motor.recibir_recarga(root, PID, __file__)
     if recarga is None and a.gestionado:
         for _ in range(100):
-            if (root / PID).exists() and (root / PID).read_text(encoding='utf-8').strip() == str(os.getpid()):
+            if motor.es_propietario_pid(root, PID):
                 break
             time.sleep(0.05)
         else:
