@@ -1,73 +1,67 @@
-# Revisión de especificación — B-ADV-0009
+﻿# Revisión de especificación — B-ADV-0009
 
-**Veredicto: APROBADO.** H1, H2 y H3 quedan resueltos. Media: **9/10**. Sin hallazgos críticos ni altos pendientes.
+**Veredicto: APROBADO. Media: 9/10.** Sin hallazgos pendientes.
 
-## Alcance y evidencia
+## Alcance y método
 
-Reevaluación en modo orquestado, con Hades y `/review-spec` de la instalación 0.6.1, ignorando el modelo del frontmatter. Se revisa exclusivamente el delta respecto a `HEAD` de:
+Revisión de cero, en modo orquestado, aplicando Hades y `/review-spec` de `C:/Users/Iván Moreno/.adevv/versions/0.6.1/` e ignorando el modelo del frontmatter. Fecha: 2026-10-27.
 
-- `docs/requirements/requirements.md`.
-- `docs/requirements/funcionalidades/F-01_instalacion_y_sincronizacion.md`.
-- `docs/requirements/funcionalidades/F-03_actualizacion_automatica.md`.
+Objeto revisado: la especificación autorizada en HEAD `61d13d192f490368c9faac1d939f41202d523a38`, incorporada mediante `95b3d0b` (`docs(plan): especificar B-ADV-0009 y desbloquear desarrollo`). Se cotejó el delta de ese commit con su padre y se leyó el contrato resultante, limitado al triaje de definición del bug:
+
+- `docs/requirements/requirements.md`: CE-3 y contratos relacionados de R2 y §4.
+- `docs/requirements/funcionalidades/F-01_instalacion_y_sincronizacion.md`: instalación y protección de copias globales, especialmente RF-F01-11.
+- `docs/requirements/funcionalidades/F-03_actualizacion_automatica.md`: instalación con procesos vivos, consumo de aplazamientos heredados, avisos y vuelta atrás.
 - `tests/features/actualizacion_automatica.feature`.
 - `tests/features/instalacion_y_sincronizacion.feature`.
 
-Contexto: alcance y triaje de B-ADV-0009 y reporte anterior obtenido de `cd22e3f:docs/review/spec_reviews/B-ADV-0009-spec-review.md` en `wip/B-ADV-0009`. Los escenarios anteriores se usan como contexto, sin reabrir comportamientos ajenos al delta. La decisión humana autoriza sustituir los contratos de aplazamiento y sus escenarios; prevalece sobre la prohibición genérica de alterar escenarios existentes. DEC-P13 se toma exclusivamente como decisión normativa de separar instalación y copias globales, sin evaluar diseño.
+Se leyeron el alcance y triaje del bug y el informe existente para identificar H1–H3; su aprobación previa no se toma como prueba del veredicto actual. Los cinco artefactos revisados coinciden con HEAD. La sustitución de los escenarios de aplazamiento está expresamente autorizada por el apartado «Alcance (decisión humana)» del bug. Los escenarios ajenos al delta solo se usan como contexto de contratos que deben conservarse.
 
-Se reutiliza la verificación documental `adevv orquestar --verificar "git diff --check"`, registrada en `orquestar_evidencias.jsonl:418`: árbol `dcd26b25b3eee65ce14dbbba39ca8dbd7d253f57`, fecha `2026-10-27T06:01:09`, código 0. No se repite. Esta evidencia corresponde al delta recibido antes de añadir este informe; no acredita ejecución funcional ni verifica el informe nuevo. La evidencia roja del WIP no se atribuye a este árbol.
-
-No se ha leído implementación, pruebas unitarias ni diseño; no se han ejecutado pruebas de desarrollo ni suite completa. El cotejo textual de Gherkin forma parte de la lectura documental.
+No se ha consultado implementación, diseño ni tests unitarios. No se han ejecutado pruebas ni suite completa. La comprobación es documental; no certifica funcionamiento. La evidencia histórica de `git diff --check` del informe anterior no se atribuye al árbol actual ni a este informe nuevo. No se considera necesario ejecutar una verificación adicional para resolver el juicio semántico de esta revisión.
 
 ## Comprobaciones obligatorias
 
-| Criterio | Resultado | Motivo |
+| Criterio | Resultado | Evidencia y valoración |
 | --- | --- | --- |
-| No regresión | ✅ | Las modificaciones de los escenarios de aplazamiento, gateway y vuelta atrás están autorizadas por el bug. No se eliminan escenarios ajenos a ese cambio. |
-| Coherencia | ✅ | CE-3, R2, tabla de resultados, RF-F01-11 y RF-F03-06/11 separan instalación versionada de copias globales. La recarga se exige a motores desde v0.5.0; los anteriores requieren reinicio manual. RF-F03-07 remite a F-01, cuya guarda condiciona la sincronización. |
-| Trazabilidad | ✅ | Se conservan las etiquetas CA-F03-01/03/04/05/13 revisadas en el informe anterior y su correspondencia con los criterios funcionales modificados por autorización del bug. No se crean etiquetas CA inexistentes. Las adiciones trazan RF-F03-06, RF-F03-08 y RF-F01-11, respectivamente: consumo heredado, conservación de versiones en uso y protección de copias globales. |
-| Delta real | ✅ | Cambia la instalación con bucles, sin duplicar la resincronización anterior: el esquema nuevo añade las órdenes explícitas y `--forzar`; los escenarios añadidos observan el consumo heredado sin consulta y la reutilización sin sobrescritura. |
+| No regresión | ✅ | El delta sustituye los contratos de aplazamiento y ajusta los avisos y precondiciones de recarga dentro del alcance autorizado. Conserva los escenarios de errores, credenciales, desactivación, versiones inexistentes y órdenes dentro del paso. No elimina escenarios ajenos al bug. |
+| Coherencia | ✅ | CE-3, R2, RF-F03-06/11 y RF-F01-11 permiten instalar con bucles y reservan el aplazamiento para archivos y registros globales. La fila 7 es transversal y permite llegar a APLICADA/FALLIDA. RF-F03-07 remite a F-01 para la sincronización, por lo que se aplica su guarda. La recarga se distingue del reinicio manual anterior a v0.5.0. |
+| Trazabilidad | ✅ | Las CA modificadas CA-F03-01/03/04/05/13 existen en F-03 y corresponden a los contratos que el bug autoriza cambiar. Las adiciones trazan directamente RF-F03-06, RF-F03-08 y RF-F01-11; no inventan CA del bug. CA-F01-10/11 conservan la resincronización posterior y la protección con bucles vivos. |
+| Delta real | ✅ | Se especifica instalar sin esperar al fin de los bucles, consumir aplazamientos heredados, reutilizar una versión en uso sin sobrescribirla y proteger las copias incluso con órdenes explícitas y `--forzar`. El esquema nuevo de F-01 añade esas variantes al caso previo de consulta de versión. |
 
 ## Puntuaciones
 
 | Dimensión | Nota | Motivo |
 | --- | --- | --- |
-| Claridad | 9/10 | Se distingue instalación, recarga cooperativa y copia global; la precedencia excluye expresamente la fila transversal como resultado terminal. |
-| Completitud | 9/10 | Incluye actualización automática y manual, rollback compatible, motores antiguos, gateway, recuperación heredada, conservación de versiones y sincronización posterior. La tabla conserva SIN_RED y FALLIDA también con bucles. |
-| Testeabilidad | 9/10 | Versiones concretas, puntero activo, archivos y registros intactos y límites de recarga observables. El origen controlado estabiliza las tres variantes de sincronización. |
-| Estructura | 9/10 | Los escenarios permanecen en los archivos de sus funcionalidades y las variantes de órdenes comparten un esquema. |
+| Claridad | 9/10 | Distingue versión activa, motor en ejecución y destinos globales; expresa cuándo cambia cada uno y qué aviso corresponde. |
+| Completitud | 9/10 | Cubre actualización automática y manual con bucles, gateway, motor antiguo, rollback compatible, aplazamiento heredado y sincronización tras terminar el último bucle. Conserva las salidas normativas de fallo y falta de red. |
+| Testeabilidad | 9/10 | Usa versiones concretas, puntero activo, conservación de archivos y registros y límites observables entre pasos/polling. El origen controlado del esquema evita una versión final dependiente de publicaciones externas. |
+| Estructura | 9/10 | Los escenarios permanecen en los archivos de sus funcionalidades; las variantes de órdenes que protegen copias comparten un esquema. |
 
-**Media: 9/10**, superior a 8; todas las obligatorias se cumplen.
+**Media: (9 + 9 + 9 + 9) / 4 = 9/10**, superior a 8; sin hallazgos críticos ni altos.
 
-## Reevaluación de hallazgos anteriores y enrutado
+## Reevaluación y enrutado de hallazgos anteriores
 
-| Hallazgo | Gravedad anterior | Estado | Para | Destino |
+| Hallazgo | Gravedad anterior | Estado actual | Para | Destino |
 | --- | --- | --- | --- | --- |
-| H1 — Capacidad de recarga incompatible con versiones de partida | 🔴 CRÍTICO | **Resuelto** | `especificador` | `resolver` — corrección satisfecha, sin acción pendiente |
-| H2 — Condiciones y avisos incoherentes en la tabla normativa | 🔴 CRÍTICO | **Resuelto** | `especificador` | `resolver` — corrección satisfecha, sin acción pendiente |
-| H3 — Versión final del esquema dependiente del origen | 🟡 MEDIA | **Resuelto** | `especificador` | `resolver` — corrección satisfecha, sin acción pendiente |
+| H1 — Recarga exigida a versiones sin esa capacidad | 🔴 CRÍTICO | Resuelto | `especificador` | `resolver`: corrección satisfecha, sin acción pendiente |
+| H2 — Tabla normativa y avisos incompatibles con instalar con bucles | 🔴 CRÍTICO | Resuelto | `especificador` | `resolver`: corrección satisfecha, sin acción pendiente |
+| H3 — Versión final del esquema dependiente del origen | 🟡 MEDIA | Resuelto | `especificador` | `resolver`: corrección satisfecha, sin acción pendiente |
 
 ### H1 — Resuelto
 
-En `tests/features/actualizacion_automatica.feature:38` el bucle parte de 0.5.0 y adopta 0.6.1; en `:57` el gateway también parte explícitamente de 0.5.0 y adopta 0.6.1 entre vueltas de polling, preservando la respuesta en curso. El rollback de `:117` parte de un bucle 0.6.1 y vuelve a 0.5.0: tanto origen como destino soportan la recarga. El caso antiguo de `:48` fija un motor anterior a v0.5.0 y pide reinicio manual, conservando sus archivos. Las copias de estos escenarios en F-03 reflejan las mismas precondiciones y resultados.
-
-El escenario añadido «Volver a una versión que sigue en uso» usa 0.1.0, pero solo exige conmutar el puntero sin sobrescribir su carpeta: no exige recarga cooperativa a ese motor antiguo y no reproduce H1.
+CA-F03-03 y CA-F03-05 parten de motores 0.5.0 y adoptan 0.6.1; CA-F03-13 vuelve de 0.6.1 a 0.5.0. Esas precondiciones son compatibles con la recarga desde v0.5.0 y preservan el paso o respuesta en curso. CA-F03-04 distingue explícitamente el motor antiguo y exige aviso de reinicio manual, sin modificar sus archivos. Las copias Gherkin de F-03 mantienen esas expectativas. El escenario de reutilización de 0.1.0 solo exige conmutar el puntero y no sobrescribir su carpeta; no exige recarga a ese motor antiguo.
 
 ### H2 — Resuelto
 
-`requirements.md:100` establece que la fila 7 es transversal y no detiene la evaluación hacia 8/9. En `:110` solo aplaza la copia global; APLICADA y FALLIDA (`:111` y `:112`) admiten expresamente instalación con o sin bucles. Se conserva la precedencia de SIN_RED y el tratamiento de errores, plazo y discrepancia de versión.
+La precedencia de §4 declara que la fila 7 no es un resultado terminal. Las filas 8/9 admiten instalación con o sin bucles y mantienen las salidas APLICADA/FALLIDA; SIN_RED conserva su tratamiento propio. El texto de consumo heredado exige intentar instalar sin volver a consultar la lista y borra el aplazamiento tras APLICADA/FALLIDA o instalar otra versión, sin producir nuevos aplazamientos de instalación.
 
-El aviso de APLICADA distingue copias globales pendientes de sesiones que pueden usar copias ya sincronizadas, y recarga desde v0.5.0 de reinicio manual de motores anteriores, identificando los procesos afectados. El consumo heredado de `:114` intenta instalar aunque haya bucles, no vuelve a consultar la lista y borra el estado en APLICADA/FALLIDA; SIN_RED sigue siendo un resultado independiente. F-03 E8/E10 y el caso del gateway antiguo E11 están alineados con esta tabla.
+El aviso de APLICADA sustituye la petición de reiniciar sesiones por la indicación de copias pendientes cuando hay bucles. Distingue recarga cooperativa y reinicio manual y pide identificar los procesos. E8/E10, E11 y los escenarios modificados no contradicen esas reglas. La protección de archivos y registros globales se conserva también en `instalar --forzar`; la instalación y el cambio de puntero pueden completarse sin esa copia.
 
 ### H3 — Resuelto
 
-`tests/features/instalacion_y_sincronizacion.feature:119` fija un origen controlado accesible cuya última versión publicada es 0.2.0. La precondición se aplica a `instalar`, `instalar --forzar` y `actualizar`, y se mantiene en la segunda orden del escenario. Ninguna variante puede actualizar a una publicada superior a la esperada. Se observan archivos y registros en 0.1.0 mientras existe el bucle y la sincronización con 0.2.0 tras terminar el último.
+El esquema «Ninguna copia global pisa un paso vivo» fija un origen controlado accesible cuya última publicada es 0.2.0. Sus tres órdenes (`instalar`, `instalar --forzar`, `actualizar`) deben mantener archivos y registros en 0.1.0 mientras existe un bucle. Tras terminar el último, `--version` debe sincronizar con 0.2.0. Las dos fases tienen un resultado verificable sin depender de nuevas publicaciones del origen real.
 
-## Coherencia de las copias Gherkin
+## Hallazgos nuevos y salida orquestada
 
-El bloque Gherkin de F-03, desde CA-F03-01 hasta CA-F03-16, coincide con sus escenarios en `tests/features/actualizacion_automatica.feature`, salvo la sangría. Esto incluye versiones de partida y destino, avisos, ejemplos de la ventana y rollback corregidos.
+Ninguno. No hay hallazgos para `desarrollador`, `especificador` o `humano`, ni deuda que registrar o descartar. La especificación del alcance revisado queda aprobada; las fases posteriores deberán acreditar su cumplimiento mediante sus propias revisiones y verificaciones.
 
-Los dos escenarios añadidos de recuperación heredada y reutilización de una versión figuran solo en el `.feature`; desarrollan RF-F03-06 y RF-F03-08 sin contradecir el bloque documental. La diferencia de cobertura entre copias no introduce expectativas incompatibles ni deja sin definir esos contratos.
-
-## Hallazgos nuevos
-
-Ninguno. No quedan correcciones pendientes ni recursos externos que solicitar. La aprobación se limita a la especificación del delta; no acredita implementación ni pruebas funcionales. Solo se añade este informe, sin modificar estados, requisitos, escenarios ni crear commit.
+Esta actuación solo sustituye el informe. No modifica requisitos, escenarios ni estados, y no crea commit. Se conserva el cambio previo del árbol que sitúa el bug en `in_progress`.

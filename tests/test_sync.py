@@ -6,6 +6,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from adevv.store import (
@@ -94,6 +95,13 @@ class TestSyncEngine(unittest.TestCase):
     """Verifica los casos de aceptación y reglas de sincronización en los arneses."""
 
     def setUp(self):
+        entorno = patch.dict(os.environ)
+        entorno.start()
+        self.addCleanup(entorno.stop)
+        os.environ.pop("ORQUESTAR_PASO", None)
+        detector = patch("adevv.processes.hay_bucles_en_marcha", return_value=[])
+        self.bucles = detector.start()
+        self.addCleanup(detector.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
 
@@ -151,6 +159,46 @@ class TestSyncEngine(unittest.TestCase):
             "Usa la herramienta view_file en `../skills/orquestar/SKILL.md`.\n",
             encoding="utf-8",
         )
+
+    def test_bucle_impide_escrituras_borrados_y_registro_incluso_forzando(self):
+        """RF-F01-11: la guarda protege todos los archivos y registros compartidos."""
+        self.claude_home.mkdir(parents=True)
+        sincronizar_destinos(origen_dir=self.version_dir, version="0.1.0")
+        destino = self.claude_home / "skills/commit/SKILL.md"
+        registro = get_sync_registry("claude")
+        anterior = destino.read_bytes()
+        archivo_cambiado = self.claude_home / "skills/orquestar/SKILL.md"
+        contenido_anterior = archivo_cambiado.read_bytes()
+        (self.version_dir / "skills/commit/SKILL.md").unlink()
+        (self.version_dir / "skills/orquestar/SKILL.md").write_text("nuevo", encoding="utf-8")
+        self.bucles.return_value = [{"tipo": "bucle", "pid": 456, "cwd": "otro"}]
+        for forzar in (False, True):
+            with self.subTest(forzar=forzar):
+                resultado = sincronizar_destinos(origen_dir=self.version_dir, version="0.2.0", forzar=forzar)["claude"]
+                self.assertEqual(resultado["estado"], EstadoDestino.DESFASADO)
+                self.assertEqual((resultado["escritos"], resultado["borrados"]), (0, 0))
+                self.assertIn("bucles", resultado["detalle"])
+                self.assertEqual(destino.read_bytes(), anterior)
+                self.assertEqual(archivo_cambiado.read_bytes(), contenido_anterior)
+                self.assertEqual(get_sync_registry("claude"), registro)
+        self.bucles.return_value = []
+        sincronizar_destinos(origen_dir=self.version_dir, version="0.2.0")
+        self.assertFalse(destino.exists())
+        self.assertEqual(archivo_cambiado.read_text(encoding="utf-8"), "nuevo")
+        self.assertEqual(get_sync_registry("claude")["version"], "0.2.0")
+
+    def test_paso_ancestro_no_detectado_tampoco_permite_copiar(self):
+        """La variable del paso protege al bucle excluido por la enumeración."""
+        self.claude_home.mkdir(parents=True)
+        sincronizar_destinos(origen_dir=self.version_dir, version="0.1.0")
+        destino = self.claude_home / "skills/commit/SKILL.md"
+        anterior = destino.read_bytes()
+        registro = get_sync_registry("claude")
+        (self.version_dir / "skills/commit/SKILL.md").write_text("nuevo", encoding="utf-8")
+        with patch.dict(os.environ, {"ORQUESTAR_PASO": "bug-fix"}):
+            sincronizar_destinos(origen_dir=self.version_dir, version="0.2.0", forzar=True)
+        self.assertEqual(destino.read_bytes(), anterior)
+        self.assertEqual(get_sync_registry("claude"), registro)
 
     def tearDown(self):
         os.environ.pop("ADEVV_HOME", None)

@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-from adevv import __version__
+from adevv import __version__, processes
 from adevv._build import is_symlink_or_junction
 from adevv.store import (
     get_active_info,
@@ -369,6 +369,11 @@ def obtener_estado_destino(destino_key: str, version_activa: str) -> Dict[str, A
     }
 
 
+def sincronizacion_bloqueada() -> bool:
+    """Protege copias globales también si el bucle ancestro no se enumera."""
+    return bool(os.environ.get("ORQUESTAR_PASO") or processes.hay_bucles_en_marcha())
+
+
 def sincronizar_destinos(
     origen_dir: Optional[Path] = None,
     version: Optional[str] = None,
@@ -383,6 +388,7 @@ def sincronizar_destinos(
         version = act.get("version", __version__) if act else __version__
 
     resultados: Dict[str, Any] = {}
+    bloqueada = sincronizacion_bloqueada()
 
     for destino_key in DESTINOS.keys():
         plan = planificar_sincronizacion(destino_key, origen_dir, version, forzar=forzar)
@@ -398,6 +404,20 @@ def sincronizar_destinos(
                 "borrados": 0,
                 "conflictos": [],
                 "rutas_ignoradas": [],
+            }
+            continue
+
+        if bloqueada:
+            sin_cambios = plan.get("sin_cambios", False)
+            resultados[destino_key] = {
+                "estado": estado if sin_cambios else EstadoDestino.DESFASADO,
+                "nombre": plan["nombre"],
+                "detalle": None if sin_cambios else "copias pendientes mientras haya bucles o pasos en marcha",
+                "sin_cambios": sin_cambios,
+                "escritos": 0,
+                "borrados": 0,
+                "conflictos": plan.get("conflictos", []),
+                "rutas_ignoradas": plan.get("rutas_ignoradas", []),
             }
             continue
 

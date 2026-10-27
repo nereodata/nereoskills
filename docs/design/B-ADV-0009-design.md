@@ -1,0 +1,20 @@
+# Diseño B-ADV-0009
+
+Se aplica DEC-P13 del plan de plataforma: separar la instalación inmutable de la copia global y conservar la recarga existente. El estado heredado `aplazada` mantiene su ruta de descarga y errores pero deja de esperar procesos. La instalación nunca borra un destino de versión ya existente: valida su versión y lo reutiliza, o falla sin tocarlo.
+
+## Cambios y mapa de impacto
+- `updater.evaluar_comprobacion_actualizacion`: CLI automática, instalar y actualizar sin argumento quieren instalar con bucles; se eliminan las dos salidas APLAZADA. `evaluar_tabla` conserva ese resultado solo como señal interna para consumir estado heredado (no resultado público de nueva comprobación).
+- `updater.instalar_version_publicada`: CLI dirigida y evaluador quieren conmutar inmediatamente, conservar versiones existentes y omitir el sincronizador entrante antiguo si hay bucles. Si no hay bucles se mantiene el mapa del sincronizador entrante.
+- `sync.sincronizar_destinos`: llamantes en updater (incluida carga dinámica), CLI instalar y resincronización automática; todos deben aplazar las escrituras globales con bucles, también --forzar, devolviendo DESFASADO con causa y contadores cero sin alterar registros. La guarda vive en sync; updater usa esa implementación cuando no es seguro ejecutar un sincronizador antiguo.
+- `cli.comando_actualizar`: desaparece el rechazo con bucles; el aviso explica recarga y copias pendientes también al volver atrás.
+- La guarda común de copias considera también `ORQUESTAR_PASO`: la enumeración de procesos excluye ancestros y puede ocultar el bucle que ejecuta la orden. El sincronizador entrante solo se carga cuando esa guarda permite copiar. La limpieza de versiones se omite con pasos/bucles para proteger también motores ancestros que la enumeración no devuelve.
+- `cli.comando_instalar` deja de rematerializar una versión existente por `--forzar`; esa opción solo fuerza las copias permitidas por la guarda. `updater.materializar_version_local` reutiliza una carpeta existente válida y nunca la reemplaza. Es el mismo contrato inmutable que `instalar_version_publicada`; el único llamante de materializar es `comando_instalar`.
+- La reutilización local conserva el efecto de activar `active.json` antes de retornar, también si falta el puntero. Así la limpieza posterior de `comando_instalar` reconoce la versión activa y no borra la carpeta recuperada.
+- Los avisos nuevos de recarga y copias se envían a stderr (RF-F03-13). Los resultados ordinarios de la orden dirigida, como desactivación de auto_update, conservan su canal previo. No cambia la firma de funciones existentes ni el esquema persistido.
+- `skills/orquestar/orquestar.py` y gateway no cambian: `version_activa_distinta` y `recargar_version` ya transfieren entre pasos, con PID/estado y parada prioritaria. `prompt_paso` y `prompt_agente` construyen mandatos con rutas absolutas al almacén activo; no dependen de las copias globales.
+- Cambian los tests E8/E10, CA-F03-03/04/13 y `test_adevv_actualizar_cli_comandos`, que fijaban el contrato expresamente sustituido. E9/E11/E12 conservan recuperación heredada y errores de red. CA-F01-10/11 siguen válidos y se amplía instalar/--forzar. Se añade integración instalación real → active.json → recarga, versión anterior y destinos intactos, y reutilización de versión existente.
+- Contradicciones autorizadas: requirements.md CE-3/R2/§4 y F-03 RF-F03-06/11 y escenarios, F-01 RF-F01-11; se actualizan en este delta. DEC-P13 matiza la sincronización inmediata descrita en plataforma §2.
+- Sin cambios de unidades, reloj ni ventanas temporales; las fechas heredadas mantienen el contrato. Camino frecuente: se verifica número de consulta/instalación en mocks y reuso de la ventana de 24h; no hay polling ni nuevas dependencias.
+
+## Verificación
+Alcance y comandos en el triaje. Mocks de bucles y origen git local, hogares temporales; sin red ni procesos reales del usuario. Se reutilizan los tests de recarga y del gateway, incluida transferencia real de proceso y prioridad de parada.

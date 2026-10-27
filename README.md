@@ -22,6 +22,10 @@ Al ejecutar `adevv instalar`:
 2. Sincroniza las skills, agentes y workflows en las carpetas globales confirmadas de cada arnés detectado (`~/.claude`, `~/.codex`, `~/.gemini/config`).
 3. Registra huellas SHA-256 de los archivos instalados para proteger tus archivos ajenos o editados a mano.
 
+Las actualizaciones, también `adevv actualizar X.Y.Z`, se instalan aunque haya bucles en marcha. Cada versión ocupa su propia carpeta y las versiones existentes se conservan sin sobrescribir. Los motores desde v0.5 toman la versión activa al terminar su paso actual; el gateway la toma entre vueltas de polling. Los motores anteriores requieren reinicio manual, según el aviso de actualización.
+
+Las copias globales de skills y agentes esperan mientras haya bucles, incluso con `adevv instalar --forzar`. La primera orden fuera de pasos y sin bucles reintenta la sincronización. Esta espera no impide instalar ni recargar los motores; reinicia las sesiones abiertas de los arneses cuando las copias estén sincronizadas.
+
 Para comprobar el estado y las versiones sincronizadas en cualquier momento:
 ```bash
 adevv --version

@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Hotfix v0.6.1 (B-ADV-0008): publicada la 0.6.1, no se instaló porque había bucles en marcha, y el bucle de Adevv siguió con la nota de alcance vieja de la 0.6.0"
 created_at: 2026-10-27
@@ -61,3 +61,10 @@ El usuario ha pedido expresamente este cambio de comportamiento. Modificar los r
 - Verificación al cierre: `python -m unittest discover -s tests -p test_updater.py`, `python -m unittest discover -s tests -p test_sync.py`, `python -m unittest discover -s tests -p test_cli_commands.py`, `python -m unittest discover -s tests -p test_install_and_release.py`, `python -m unittest discover -s skills/orquestar -p test_recarga.py`, `python -m unittest discover -s skills/telegram_gateway -p test_recarga_gateway.py`; ejercitan instalación, sincronización y transferencia cooperativa sin ejecutar el resto de la suite. Estático: `git diff --check` y compilación de los módulos modificados; sin linter/tipado configurados ni cambios de dependencias.
 - DEC-B09: se conserva `aplazada` solo como entrada heredada que se consume sin esperar bucles; no se producen nuevos aplazamientos de instalación. Las copias globales esperan a la primera orden sin bucles. Los mandatos del motor usan rutas absolutas al almacén activo; ninguna carpeta instalada se sobrescribe.
 - Autorización: el apartado «Alcance (decisión humana)» permite sustituir los contratos anteriores y sus escenarios contradictorios; no se requiere nueva consulta.
+
+## Resolución del desarrollo · 2026-10-27
+
+- Instalación automática y dirigida con bucles; consumo inmediato de aplazamientos heredados. Se activan versiones nuevas o existentes sin sobrescribir carpetas y sin reimplementar la recarga.
+- Copias y registros globales protegidos por una guarda común, también con `--forzar` y `ORQUESTAR_PASO`. Limpieza diferida mientras haya bucles/pasos; recuperación local sin puntero restaura `active.json` antes de limpiar.
+- Hades: especificación, pruebas y código APROBADOS 9/10, sin hallazgos ni deuda pendientes. Diseño, reportes y validación funcional enlazados en `docs/review/versions/v1.0-revision.md`.
+- Verificación del triaje: 82 pruebas OK (31 updater, 15 sync, 10 CLI, 8 instalación, 11 recarga, 7 gateway), mediante `adevv orquestar --verificar`; evidencia renovada reutilizada por Hades. Compilación, `git diff --check` y escaneo de secretos verdes. Sin cambios de dependencias ni suite completa.

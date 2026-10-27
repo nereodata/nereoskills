@@ -26,7 +26,7 @@ from adevv.store import (
     set_config,
     set_update_state,
 )
-from adevv.sync import EstadoDestino, sincronizar_destinos
+from adevv.sync import EstadoDestino, sincronizacion_bloqueada, sincronizar_destinos
 
 
 def hay_bucles_en_marcha() -> List[Dict[str, Any]]:
@@ -159,6 +159,8 @@ def consultar_versiones_publicadas(origin_url: Optional[str] = None, timeout: in
 
 def limpiar_versiones_antiguas() -> None:
     """Limpia versiones antiguas en versions/ que no sean la activa ni estén en uso por procesos."""
+    if sincronizacion_bloqueada():
+        return
     versions_dir = get_adevv_home() / "versions"
     if not versions_dir.exists() or not versions_dir.is_dir():
         return
@@ -237,6 +239,17 @@ def materializar_version_local(version: str) -> Path:
     versions_parent.mkdir(parents=True, exist_ok=True)
     target_dir = versions_parent / version
 
+    if target_dir.exists():
+        if _read_package_version_from_dir(target_dir) != version:
+            raise ValueError(f"la versión instalada no es {version}")
+        set_active_info({
+            "version": version,
+            "id": version,
+            "origen": "publicada",
+            "commit": "",
+        })
+        return target_dir
+
     source_dir = Path(__file__).resolve().parents[1]
     staging_dir = versions_parent / f".staging-local-{version}-{os.getpid()}"
     if staging_dir.exists():
@@ -255,12 +268,7 @@ def materializar_version_local(version: str) -> Path:
 
         filtrar_por_lista_blanca(staging_dir)
 
-        if target_dir.exists():
-            shutil.rmtree(target_dir, ignore_errors=True)
-        try:
-            os.replace(str(staging_dir), str(target_dir))
-        except OSError:
-            shutil.move(str(staging_dir), str(target_dir))
+        os.rename(str(staging_dir), str(target_dir))
 
         set_active_info({
             "version": version,
@@ -284,12 +292,16 @@ def instalar_version_publicada(
     adevv_home = get_adevv_home()
     versions_parent = adevv_home / "versions"
     versions_parent.mkdir(parents=True, exist_ok=True)
+    target_dir = versions_parent / target_version
+    if target_dir.exists():
+        if _read_package_version_from_dir(target_dir) != target_version:
+            return False, f"la versión instalada no es {target_version}", []
+        return _activar_version_publicada(target_dir, target_version, commit_hash)
+
     staging_dir = versions_parent / f".staging-{target_version}-{os.getpid()}"
     if staging_dir.exists():
         shutil.rmtree(staging_dir, ignore_errors=True)
     staging_dir.mkdir(parents=True, exist_ok=True)
-
-    target_dir = versions_parent / target_version
 
     remote = origin_url or os.environ.get("ADEVV_ORIGIN_URL") or "https://github.com/nereodata/nereoskills.git"
     tag_name = f"v{target_version}"
@@ -360,12 +372,19 @@ def instalar_version_publicada(
 
     filtrar_por_lista_blanca(staging_dir)
 
-    if target_dir.exists():
-        shutil.rmtree(target_dir, ignore_errors=True)
     try:
-        os.replace(str(staging_dir), str(target_dir))
-    except OSError:
-        shutil.move(str(staging_dir), str(target_dir))
+        os.rename(str(staging_dir), str(target_dir))
+    except OSError as exc:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        return False, f"no se pudo guardar la versión {target_version}: {exc}", []
+
+    return _activar_version_publicada(target_dir, target_version, commit_hash)
+
+
+def _activar_version_publicada(
+    target_dir: Path, target_version: str, commit_hash: Optional[str],
+) -> Tuple[bool, str, List[str]]:
+    """Conmuta el puntero y sincroniza solo si las copias globales son seguras."""
 
     set_active_info({
         "version": target_version,
@@ -375,7 +394,7 @@ def instalar_version_publicada(
     })
 
     sync_module_path = target_dir / "adevv" / "sync.py"
-    if sync_module_path.exists():
+    if sync_module_path.exists() and not sincronizacion_bloqueada():
         try:
             spec = importlib.util.spec_from_file_location("adevv_incoming_sync", str(sync_module_path))
             if spec and spec.loader:
@@ -396,6 +415,28 @@ def instalar_version_publicada(
 
     limpiar_versiones_antiguas()
     return True, "OK", desfasados
+
+
+def mensaje_actualizacion(version_anterior: str, version_nueva: str, desfasados: List[str]) -> str:
+    """Describe instalación, copias pendientes y adopción cooperativa o manual."""
+    msg = f"Adevv actualizado de {version_anterior} a {version_nueva}."
+    if desfasados:
+        msg += " Reinicia las sesiones abiertas de los arneses cuando sus copias estén sincronizadas."
+    else:
+        msg += " Reinicia las sesiones abiertas de los arneses para usar las skills nuevas."
+    bucles = hay_bucles_en_marcha()
+    gateways = [p for p in detectar_procesos_adevv() if p.get("tipo") == "gateway"]
+    if bucles:
+        lista = ", ".join(formatear_proceso_ui(p) for p in bucles)
+        msg += f" Los bucles desde v0.5 tomarán la versión al terminar su paso actual: {lista}."
+    if gateways:
+        lista = ", ".join(formatear_proceso_ui(p) for p in gateways)
+        msg += f" Los gateways desde v0.5 tomarán la versión entre vueltas de polling: {lista}."
+    if bucles or gateways:
+        msg += " Los motores anteriores a v0.5 requieren reinicio manual."
+    if desfasados:
+        msg += f" Arneses sin sincronizar: {', '.join(desfasados)}."
+    return msg
 
 
 def evaluar_tabla(
@@ -498,51 +539,36 @@ def evaluar_comprobacion_actualizacion(
             return decision["resultado"], decision["mensaje"], decision["target_version"]
 
         target_version = decision["target_version"]
-        bucles = hay_bucles_en_marcha()
-        if bucles:
-            lista_bucles = ", ".join(formatear_proceso_ui(b) for b in bucles)
-            msg = None
-            if _horas_transcurridas(state.get("last_notice_aplazada_at"), ahora_dt) >= 24.0:
-                msg = f"Adevv {target_version} disponible; se aplicará cuando no haya bucles en marcha: {lista_bucles}."
-                state["last_notice_aplazada_at"] = ahora_dt.isoformat()
+        ok, causa, desfasados = instalar_version_publicada(target_version=target_version, origin_url=origin_url)
+        if not ok:
+            causa_l = causa.lower()
+            es_error_red = "red" in causa_l or "conexión" in causa_l or "could not read" in causa_l
+            if es_error_red:
+                state["last_sin_red_at"] = ahora_dt.isoformat()
+                state["last_sin_red_cause"] = causa
                 set_update_state(state)
-            return ResultadoActualizacion.APLAZADA, msg, target_version
-        else:
-            ok, causa, desfasados = instalar_version_publicada(target_version=target_version, origin_url=origin_url)
-            if not ok:
-                causa_l = causa.lower()
-                es_error_red = "red" in causa_l or "conexión" in causa_l or "could not read" in causa_l
-                if es_error_red:
-                    state["last_sin_red_at"] = ahora_dt.isoformat()
-                    state["last_sin_red_cause"] = causa
-                    set_update_state(state)
-                    msg = f"No se pudo consultar {origin_url or 'el origen'}: {causa}. Sigues con la {version_actual}." if (forzada or es_instalar) else None
-                    return ResultadoActualizacion.SIN_RED, msg, target_version
-                else:
-                    state.pop("aplazada", None)
-                    state["last_checked_at"] = ahora_dt.isoformat()
-                    state["last_checked_status"] = ResultadoActualizacion.FALLIDA
-                    state["fallida"] = target_version
-                    state["fallida_causa"] = causa
-                    state["last_failed_at"] = ahora_dt.isoformat()
-                    set_update_state(state)
-                    msg = f"No se pudo actualizar a {target_version}: {causa}. Sigues con la {version_actual}. Reintenta con `adevv actualizar`."
-                    return ResultadoActualizacion.FALLIDA, msg, target_version
+                msg = f"No se pudo consultar {origin_url or 'el origen'}: {causa}. Sigues con la {version_actual}." if (forzada or es_instalar) else None
+                return ResultadoActualizacion.SIN_RED, msg, target_version
             else:
                 state.pop("aplazada", None)
-                state.pop("fallida", None)
                 state["last_checked_at"] = ahora_dt.isoformat()
-                state["last_checked_status"] = ResultadoActualizacion.APLICADA
-                state["last_applied_at"] = ahora_dt.isoformat()
-                state["last_applied_version"] = target_version
+                state["last_checked_status"] = ResultadoActualizacion.FALLIDA
+                state["fallida"] = target_version
+                state["fallida_causa"] = causa
+                state["last_failed_at"] = ahora_dt.isoformat()
                 set_update_state(state)
-                msg = f"Adevv actualizado de {version_actual} a {target_version}. Reinicia las sesiones abiertas de los arneses para usar las skills nuevas."
-                for gw in detectar_procesos_adevv():
-                    if gw.get("tipo") == "gateway":
-                        msg += f" Reinicia el gateway en {gw.get('cwd', 'su carpeta')}."
-                if desfasados:
-                    msg += f" Arneses sin sincronizar: {', '.join(desfasados)}."
-                return ResultadoActualizacion.APLICADA, msg, target_version
+                msg = f"No se pudo actualizar a {target_version}: {causa}. Sigues con la {version_actual}. Reintenta con `adevv actualizar`."
+                return ResultadoActualizacion.FALLIDA, msg, target_version
+        else:
+            state.pop("aplazada", None)
+            state.pop("fallida", None)
+            state["last_checked_at"] = ahora_dt.isoformat()
+            state["last_checked_status"] = ResultadoActualizacion.APLICADA
+            state["last_applied_at"] = ahora_dt.isoformat()
+            state["last_applied_version"] = target_version
+            set_update_state(state)
+            msg = mensaje_actualizacion(version_actual, target_version, desfasados)
+            return ResultadoActualizacion.APLICADA, msg, target_version
 
     versiones, mapa_commits, err = consultar_versiones_publicadas(origin_url=origin_url)
     if err:
@@ -580,18 +606,6 @@ def evaluar_comprobacion_actualizacion(
 
     nueva_version = candidatas[-1]
     commit_hash = mapa_commits.get(nueva_version)
-    bucles = hay_bucles_en_marcha()
-
-    if bucles:
-        state["aplazada"] = nueva_version
-        state["last_checked_at"] = ahora_dt.isoformat()
-        state["last_checked_status"] = ResultadoActualizacion.APLAZADA
-        state["last_notice_aplazada_at"] = ahora_dt.isoformat()
-        set_update_state(state)
-        lista_bucles = ", ".join(formatear_proceso_ui(b) for b in bucles)
-        msg = f"Adevv {nueva_version} disponible; se aplicará cuando no haya bucles en marcha: {lista_bucles}."
-        return ResultadoActualizacion.APLAZADA, msg, nueva_version
-
     ok, causa, desfasados = instalar_version_publicada(
         target_version=nueva_version,
         commit_hash=commit_hash,
@@ -625,10 +639,5 @@ def evaluar_comprobacion_actualizacion(
     state["last_applied_version"] = nueva_version
     set_update_state(state)
 
-    msg = f"Adevv actualizado de {version_actual} a {nueva_version}. Reinicia las sesiones abiertas de los arneses para usar las skills nuevas."
-    for gw in detectar_procesos_adevv():
-        if gw.get("tipo") == "gateway":
-            msg += f" Reinicia el gateway en {gw.get('cwd', 'su carpeta')}."
-    if desfasados:
-        msg += f" Arneses sin sincronizar: {', '.join(desfasados)}."
+    msg = mensaje_actualizacion(version_actual, nueva_version, desfasados)
     return ResultadoActualizacion.APLICADA, msg, nueva_version

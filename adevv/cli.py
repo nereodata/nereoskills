@@ -45,7 +45,7 @@ def comando_actualizar(target_version: Optional[str], out: TextIO, err: TextIO) 
         res, msg, ver = updater.evaluar_comprobacion_actualizacion(forzada=True)
         if res == updater.ResultadoActualizacion.APLICADA:
             if msg:
-                print(msg, file=out)
+                print(msg, file=err)
             return 0
         elif res == updater.ResultadoActualizacion.AL_DIA:
             if msg:
@@ -79,12 +79,6 @@ def comando_actualizar(target_version: Optional[str], out: TextIO, err: TextIO) 
         print(f"Adevv {target_version} ya está instalado.", file=out)
         return 0
 
-    bucles = processes.hay_bucles_en_marcha()
-    if bucles:
-        lista_bucles = ", ".join(processes.formatear_proceso_ui(b) for b in bucles)
-        print(f"No se puede instalar {target_version} con bucles en marcha: {lista_bucles}.", file=err)
-        return 1
-
     commit_hash = mapa_commits.get(target_version)
     state = get_update_state()
     state.pop("aplazada", None)
@@ -94,6 +88,7 @@ def comando_actualizar(target_version: Optional[str], out: TextIO, err: TextIO) 
         print(f"No se pudo instalar {target_version}: {causa}.", file=err)
         return 1
 
+    print(updater.mensaje_actualizacion(version_actual, target_version, desfasados), file=err)
     mayor_publicada = versiones[-1]
     if updater._version_es_mayor(mayor_publicada, target_version):
         cfg = get_config()
@@ -186,7 +181,7 @@ def comando_instalar(forzar: bool, out: TextIO, err: TextIO) -> int:
     origen = act.get("origen", "publicada") if act else "publicada"
     versions_dir = get_adevv_home() / "versions" / version
 
-    if origen != "desarrollo" and (not act or not versions_dir.exists() or (forzar and not act.get("commit"))):
+    if origen != "desarrollo" and (not act or not versions_dir.exists()):
         version = __version__
         updater.materializar_version_local(version)
         updater.limpiar_versiones_antiguas()
@@ -205,6 +200,8 @@ def comando_instalar(forzar: bool, out: TextIO, err: TextIO) -> int:
             print(f"{nombre}: {detalle or 'no detectado'}", file=out)
         elif estado == EstadoDestino.DESACTIVADO:
             print(f"{nombre}: desactivado", file=out)
+        elif estado == EstadoDestino.DESFASADO:
+            print(f"{nombre}: {detalle or 'sin sincronizar'}", file=out)
         elif sin_cambios:
             print(f"{nombre}: sin cambios", file=out)
         elif estado == EstadoDestino.INCOMPLETO:
