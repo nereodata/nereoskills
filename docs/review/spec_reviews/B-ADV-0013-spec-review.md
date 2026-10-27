@@ -1,67 +1,69 @@
-# Revisión de especificación — B-ADV-0013
+﻿# Revisión de especificación — B-ADV-0013
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO**
 
-Fecha: 2026-10-27. Revisor: Hades. Modo orquestado.
+Fecha: 2026-10-27. Revisor: Hades. Modo orquestado. **Media: 9/10. Sin hallazgos pendientes.**
 
 ## Alcance
 
-Solo los tres escenarios nuevos `@B-ADV-0013` de `tests/features/uso_sin_rutas.feature` y el contrato/triaje de `docs/plan/bugs/B-ADV-0013-pasos-de-analisis-sin-escalada.md`. Se aplican Hades y `/review-spec` de la instalación 0.6.1, ignorando el modelo del frontmatter. Los escenarios anteriores solo se contrastan con el diff para comprobar su conservación. El cambio de regla de parada está expresamente autorizado y no constituye un hallazgo.
+Reevaluación del delta sin commit respecto a HEAD `811cca063fc8808d685b776ce9a97fa5acdb38ea`: nuevos escenarios `@B-ADV-0013` de `tests/features/uso_sin_rutas.feature` y contrato, configuración común, DEC y triaje de `docs/plan/bugs/B-ADV-0013-pasos-de-analisis-sin-escalada.md`. Contraste con H-01/H-02/H-03 del informe anterior.
+
+Se aplican Hades y `/review-spec` de la instalación 0.6.1, ignorando el modelo del frontmatter. Los escenarios previos de release solo se contrastan con el diff para comprobar su conservación. El cambio del contrato de parada está expresamente autorizado en el bug. No se revisan diseño, implementación ni tests ejecutables; no se recupera la rama WIP.
 
 ## Comprobaciones obligatorias
 
 | Comprobación | Resultado | Motivo |
 | --- | --- | --- |
-| No regresión | ✅ | El diff añade tres escenarios y no altera los existentes. |
-| Coherencia | ✅ | La escalada, el bloqueo local y la parada global concuerdan con el contrato autorizado. Las omisiones de cobertura se detallan abajo. |
-| Trazabilidad | ✅ | Los tres escenarios remiten a `@B-ADV-0013` y a comportamientos del bug. No incorporan etiquetas `@CA-*`. |
-| Delta real | ✅ | Extienden la recuperación a pasos de análisis y distinguen su alcance local o global, sin duplicar los escenarios de desarrollo existentes. |
+| No regresión | ✅ | El delta del `.feature` es aditivo y conserva intactos los escenarios anteriores. |
+| Coherencia | ✅ | Los resultados concuerdan con el contrato autorizado y DEC-ESP-13-01 a DEC-ESP-13-05: cadena finita por par, bloqueo local con continuidad y parada global tras agotamiento. Se conserva el aislamiento declarado de B-ADV-0012. |
+| Trazabilidad | ✅ | Los escenarios llevan `@B-ADV-0013` y verifican comportamientos del bug y sus decisiones explícitas. No se incorporan etiquetas `@CA-*`. |
+| Delta real | ✅ | Se especifica la recuperación de los siete pasos de análisis, sus desenlaces y el ciclo de vida de sus recuperaciones. Éxito, agotamiento e intercalado discriminan comportamientos distintos. |
 
 ## Puntuaciones
 
 | Criterio | Nota | Motivo |
 | --- | --- | --- |
-| Claridad | 8/10 | Se distinguen los desenlaces, pero faltan perfiles concretos y configuración explícita en los casos de agotamiento. |
-| Completitud | 6/10 | Faltan garantías de orden, recuperación mediante reservas y ciclo de vida de la cadena por paso/argumento. |
-| Testeabilidad | 7/10 | Los estados finales son observables; la ejecución efectiva de la cadena queda mayoritariamente en el antecedente del agotamiento. |
-| Estructura | 9/10 | Amplía el archivo funcional existente. |
+| Claridad | 9/10 | La configuración común fija perfiles efectivos, duplicado, límite y condiciones del arnés; los esquemas identifican cada paso y argumento. |
+| Completitud | 9/10 | Cubre éxito por escalada y reserva, agotamiento de los siete pasos, continuidad local, aislamiento por paso y argumento, reinicio por progreso y recarga con contadores parciales. El contrato delimita alternativas ausentes y excluye fallos operacionales y cuota. |
+| Testeabilidad | 9/10 | Secuencias exactas, intentos, sesiones, estados, diagnósticos y siguientes ejecuciones distinguen omisiones, repeticiones, bloqueos prematuros y pérdida de recuperación mediante arneses simulados. |
+| Estructura | 9/10 | Amplía el archivo de la funcionalidad existente; los esquemas agrupan variaciones y remiten a una configuración común explícita en el bug. |
 
-**Media: 7,5/10.** Dos hallazgos de severidad alta impiden aprobar.
+**Media: 9/10 (> 8). Sin hallazgos críticos ni altos.**
 
-## Hallazgos
+## Reevaluación de hallazgos anteriores
 
-### H-01 — 🟠 ALTA — La cadena de recuperación no queda exigida como resultado observable
+### H-01 — ALTA — Resuelto
 
-**Para:** especificador. **Destino:** resolver.
+**Para:** especificador. **Destino:** resolver. **Estado vigente:** resuelto; sin acción pendiente.
 
-**Evidencia:** el primer escenario solo exige pasar de base a escalada. Los otros dos sitúan el agotamiento de niveles superiores, escalada y reservas en el `Cuando`; no exigen observar su ejecución en el orden contractual. «Sin duplicarlos» tampoco define perfiles efectivos repetidos con los que comprobar la deduplicación.
+La configuración distingue cuatro perfiles efectivos y declara una reserva idéntica al nivel superior. Los resultados de éxito y agotamiento exigen el orden inicial → nivel superior → escalada → reserva restante, con dos ejecuciones sin progreso por perfil y sin repetir la reserva duplicada. Cada cambio de perfil exige una sesión nueva.
 
-**Impacto:** una recuperación que omita niveles o reservas, los pruebe en otro orden o repita el mismo perfil efectivo puede satisfacer los desenlaces descritos. La ruta de éxito con una reserva tampoco queda especificada, aunque forma parte del comportamiento esperado del bug.
+El esquema de recuperación incluye éxito en `claude/escalado-demo/high` y en `agy/reserva-demo/medium`: los perfiles anteriores consumen sus dos intentos, el exitoso ejecuta una vez y no se prueban los posteriores. Se exige continuar sin bloqueo ni parada por falta de progreso. Quedan observables el orden, la deduplicación, los intentos y el éxito por reserva que faltaban en la revisión anterior.
 
-**Corrección requerida:** concretar una configuración con perfiles distinguibles, un duplicado efectivo y el límite de reintentos; exigir como resultado la secuencia de ejecuciones e intentos, en orden niveles superiores → escalada → reservas y sin repetir perfiles efectivos. Incluir un caso en que una reserva permita completar el paso y continuar sin bloqueo ni parada. Puede hacerse con un esquema compacto, sin imponer detalles internos de implementación.
+### H-02 — ALTA — Resuelto
 
-### H-02 — 🟠 ALTA — Falta cobertura del aislamiento y del ciclo de vida de la recuperación
+**Para:** especificador. **Destino:** resolver. **Estado vigente:** resuelto; sin acción pendiente.
 
-**Para:** especificador. **Destino:** resolver.
+El esquema de intercalado distingue dos argumentos de `especificar` y dos pasos para el mismo argumento. El otro par empieza en base mientras el primero conserva su segundo intento superior; al volver al otro par se conserva también su contador parcial. Un contador o perfil compartido no satisface esas secuencias.
 
-**Evidencia:** «Decisiones sin preguntar» exige que la cadena pertenezca al par paso/argumento, se reinicie al avanzar y se conserve en la recarga cooperativa. Ninguno de los tres escenarios describe esos cambios de contexto ni sus efectos.
+El escenario de progreso exige que solo el par que avanza recupere sus dos intentos iniciales y después pase al superior, mientras el segundo par conserva el superior pendiente. El escenario de recarga exige que dos pares mantengan tanto su perfil como sus intentos parciales: segundo intento superior para uno y segundo intento base para el otro, con sus transiciones posteriores. Reiniciar al intercalar, reiniciar ambos al avanzar o conceder intentos por recarga incumple resultados explícitos.
 
-**Impacto:** los escenarios aceptarían que una tarea heredase perfiles agotados de otra, que una recarga perdiese la recuperación pendiente o que el progreso dejase agotamientos antiguos activos. Esto puede causar bloqueos prematuros o reintentos reiterados y frustrar la continuidad autónoma que persigue el bug.
+### H-03 — MEDIA — Resuelto
 
-**Corrección requerida:** añadir ejemplos con dos argumentos del mismo paso y con pasos distintos, progreso y recarga cooperativa. Expresar mediante las siguientes ejecuciones observables que cada par conserva su recuperación independiente, que avanzar reinicia la cadena correspondiente y que recargar mantiene el punto pendiente sin volver al perfil base agotado.
+**Para:** especificador. **Destino:** resolver. **Estado vigente:** resuelto; sin acción pendiente.
 
-### H-03 — 🟡 MEDIA — Los casos de agotamiento no fijan suficientemente su contexto
+El agotamiento local parametriza `especificar` y `revisar-tarea`, declara una tarea independiente `planned` elegible y otra dependiente. Exige bloquear solo el ID agotado, completar la independiente y no ejecutar ni modificar la dependiente antes de informar del bloqueo de versión.
 
-**Para:** especificador. **Destino:** resolver.
+Todos los casos fijan la configuración común con `--reintentos=2`. El agotamiento global parametriza los otros cinco pasos con sus argumentos, exige la cadena completa y un diagnóstico con perfiles e intentos, sin cambios de estado de tareas. El local exige esos mismos datos en tarea, revisión de versión y avisos de consola y Telegram simulado. Desaparecen la alternativa ambigua entre pasos y el límite implícito.
 
-**Evidencia:** el segundo escenario usa «especificar o revisar-tarea», no declara una tarea independiente en los antecedentes y fija dos intentos sin indicar la configuración. El tercero tampoco declara el límite. El contrato establece que cada perfil dispone de `--reintentos` intentos.
+## Hallazgos nuevos y pendientes
 
-**Impacto:** queda abierta la selección del paso que se verifica y la procedencia del límite, y la continuidad se afirma sobre una tarea cuya elegibilidad no se establece.
-
-**Corrección requerida:** parametrizar `especificar` y `revisar-tarea`, declarar la tarea independiente elegible y fijar `--reintentos=2` en los ejemplos de agotamiento. Identificar los perfiles esperados en el diagnóstico con los mismos valores usados en la configuración.
+Ninguno. H-01, H-02 y H-03 quedan resueltos en esta revisión documental. No se proponen derivaciones ni cambios de estados del backlog.
 
 ## Evidencia y límites
 
-Revisión por lectura del contrato, del triaje y de los escenarios, con contraste del diff respecto a HEAD. El triaje prevé verificación del bucle simulado y de sus contratos colindantes; no se solicita ampliar a la suite completa. No se revisan código, diseño ni pruebas de implementación, ni se ejecutan pruebas. Los hallazgos requieren cambios de especificación, no concluyen defectos en una implementación.
+Revisión por lectura del delta respecto a HEAD, del contrato y del reporte anterior. Se reutiliza la verificación documental verde indicada para este árbol: `adevv orquestar --verificar "git diff --check"`, registrada en `orquestar_evidencias.jsonl` el 2026-10-27 a las 09:16:25, código 0, árbol `20627fb10835bb39170ddc0653bd3534e87c3225`. Esta evidencia cubre el chequeo documental previo al informe; el juicio sobre el comportamiento especificado procede de la lectura.
 
-Solo se escribe este informe en el árbol de trabajo. No se modifica la instalación ni se crean commits.
+El triaje separa esta fase documental del desarrollo posterior y reserva para este último las verificaciones del bucle simulado y de recarga. No hay delta de capas ejecutables que requiera esas pruebas en este paso. No se reutiliza el rojo de WIP como evidencia del árbol actual ni se ejecutan suite completa, pruebas funcionales o proveedores reales. Los perfiles son ficticios y los arneses y Telegram están simulados.
+
+La aprobación corresponde exclusivamente a la especificación; no certifica una implementación. Solo se escribe este informe en el árbol de trabajo, sin modificar estados, la copia instalada ni crear commits.
