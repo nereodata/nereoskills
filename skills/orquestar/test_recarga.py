@@ -92,6 +92,7 @@ class RecargaTests(unittest.TestCase):
         with patch.object(motor.subprocess, 'Popen', side_effect=OSError('fallo')):
             self.assertFalse(motor.recargar_version(self.actual, self.root, motor.PID, {}, 'orquestar'))
         self.assertEqual((self.root / motor.PID).read_text(), str(os.getpid()))
+        self.assertNotIn('recargado a versión', (self.root / motor.LOG).read_text(encoding='utf-8'))
 
     def test_bucle_transfiere_antes_de_calcular_paso(self):
         a = argparse.Namespace(estado=False, idea=None, docs='docs', max_pasos=8,
@@ -117,6 +118,7 @@ class RecargaTests(unittest.TestCase):
         hijo.terminate.assert_called_once()
         hijo.wait.assert_called_once()
         self.assertEqual(pid.read_text(), str(os.getpid()))
+        self.assertNotIn('recargado a versión', (self.root / motor.LOG).read_text(encoding='utf-8'))
 
     def test_main_antiguo_no_borra_marcas_del_sucesor(self):
         pid = self.root / motor.PID
@@ -152,10 +154,18 @@ class RecargaTests(unittest.TestCase):
                                'assert motor.recargar_version(__file__, root, motor.PID, {"n": 4}, "orquestar")\n'
                                'try:\n    hijos[0].wait(timeout=10)\nfinally:\n    if hijos[0].poll() is None:\n        hijos[0].kill()\n        hijos[0].wait()\n', encoding='utf-8')
         self.nuevo.write_text(carga + 'estado = motor.recibir_recarga(root, motor.PID, __file__)\n'
+                              'print("salida áéñ", flush=True)\n'
+                              'print("error áéñ", file=sys.stderr, flush=True)\n'
                               '(root / "resultado.json").write_text(json.dumps({"estado": estado, "pid": os.getpid(), "args": sys.argv[1:]}))\n', encoding='utf-8')
+        (self.root / motor.LOG).write_text('anterior\n', encoding='utf-8')
         resultado = subprocess.run([motor.sys.executable, str(self.actual), '--docs', 'carpeta con espacios'], cwd=self.root, capture_output=True, timeout=15)
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
         datos = json.loads((self.root / 'resultado.json').read_text())
         self.assertEqual(datos['estado'], {'n': 4})
         self.assertEqual(datos['args'], ['--docs', 'carpeta con espacios'])
         self.assertEqual((self.root / motor.PID).read_text(), str(datos['pid']))
+        registro = (self.root / motor.LOG).read_text(encoding='utf-8')
+        self.assertTrue(registro.startswith('anterior\n'))
+        self.assertIn('salida áéñ', registro)
+        self.assertIn('error áéñ', registro)
+        self.assertEqual(registro.count('[orquestar] recargado a versión 0.6.0'), 1)

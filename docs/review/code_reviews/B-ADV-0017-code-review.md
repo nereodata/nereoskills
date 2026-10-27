@@ -1,48 +1,46 @@
-**Veredicto:** RECHAZADO
+**Veredicto:** APROBADO
 
-Segunda revisi?n de B-ADV-0017 mediante `/review-code`, como Hades, el 2026-10-27. Se revisa la correcci?n del hallazgo anterior y el delta sin commitear de `recargar_version()`, el mensaje de error del gateway y sus pruebas asociadas. No se modifica c?digo de producci?n ni pruebas.
+Tercera revisión de B-ADV-0017 mediante `/review-code`, como Hades, el 2026-10-27. Alcance: delta completo desde `92fb785~1` hasta el árbol de trabajo (incluidos cambios sin commitear) en `skills/orquestar/orquestar.py` (`recargar_version`), `skills/orquestar/test_recarga.py` y `skills/telegram_gateway/*`. No se modifica código de producción ni pruebas.
 
-## Evidencia y an?lisis est?tico
+## Análisis estático
 
-- ?rbol revisado antes de actualizar este informe: `d2acfff53f0ac461855f867cac58c133405a06cf`. Huella calculada sin escrituras en `.git`, mediante hashes de archivos y ?rboles en memoria.
-- La ?ltima evidencia registrada para los mismos tests corresponde exactamente a este ?rbol: `2026-10-27T10:19:21`, c?digo **1**. Comando: `python -m unittest skills.orquestar.test_recarga skills.telegram_gateway.test_firma_gateway skills.telegram_gateway.test_recarga_gateway tests.test_telegram_gateway tests.test_updater`.
-- La evidencia verde de `2026-10-27T10:16:10` pertenece al ?rbol anterior `1a2e2d86fa2b2a3b3348688b4048e2fe99a00fbb`; no acredita esta correcci?n. No se han relanzado las pruebas.
-- Comprobaci?n adicional con `ast.parse`, sin ejecutar los m?dulos ni generar archivos: **fallan los tres archivos corregidos**, con cadenas sin cerrar (v?ase H2). `git diff --check`: correcto.
-- El mecanismo `--verificar` no puede ejecutarse desde este motor por el error de sintaxis; adem?s, el c?lculo habitual de su huella requiere escribir objetos en `.git`, operaci?n prohibida en este entorno. Se consulta la evidencia existente y se confirma su correspondencia con el ?rbol mediante el c?lculo independiente indicado.
-- Sin cambios de dependencias; auditor?a de dependencias N/A. Sin lint ni tipado configurados en los manifiestos consultados. No se observan secretos nuevos en el delta.
+- Árbol revisado: `57429a7f8d`. Evidencia en verde registrada para ese árbol con `adevv orquestar --verificar "python -m unittest skills.orquestar.test_recarga skills.telegram_gateway.test_firma_gateway skills.telegram_gateway.test_recarga_gateway tests.test_telegram_gateway tests.test_updater"`, más `compileall` de los módulos del delta y `git diff --check`, todo en limpio. No se ha relanzado nada.
+- Sin lint ni tipado configurados; sin cambios de dependencias (auditoría N/A); no aparecen secretos en el delta.
 
 ## Puntuaciones
 
-| Criterio | Puntuaci?n |
+| Criterio | Puntuación |
 |---|---:|
-| Correcci?n | 1 |
+| Corrección | 9 |
 | Seguridad | 9 |
-| Conformidad | 6 |
-| Calidad | 5 |
-| Eficiencia | 9 |
-| Documentaci?n | 9 |
-| **Media** | **6,50** |
+| Conformidad | 9 |
+| Calidad | 9 |
+| Eficiencia | 10 |
+| Documentación | 9 |
+| **Media** | **9,17** |
 
-## Reevaluaci?n del hallazgo anterior
+## Cumplimiento del comportamiento esperado
 
-### H1 ? ?? ALTA ? Persiste: se anuncia ?xito antes de completar la transferencia
+1. **Log del sucesor**: el sucesor se lanza con `stdout` apuntando a `root/telegram.log` (gateway) o a `root/orquestar.log` (bucle), con `stderr=STDOUT`, `stdin=DEVNULL`, el archivo abierto en modo `'a'` con UTF-8 y `PYTHONIOENCODING=utf-8`. Son las mismas rutas que usan los lanzamientos iniciales (`gateway.py:384`, `orquestar.py:2325`). ✅
+2. **Línea de recarga**: se escribe `[<etiqueta>] recargado a versión <v>` en ese mismo log. ✅
+3. **Sin argumentos repetidos**: para el gateway se eliminan todas las apariciones de `--root X` y `--root=X` antes de añadir una sola, así que se limpian también las líneas de órdenes ya contaminadas. El bucle no recibe `--root`. ✅
+4. **Motivo breve al usuario**: `TipoExcepción: mensaje`, sin saltos de línea y limitado a 120 caracteres. Si el motivo rompe el Markdown, `enviar` reintenta en texto plano, así que el mensaje se entrega igual. ✅
+5. **Pruebas**: la transferencia real comprueba que stdout y stderr del sucesor llegan en UTF-8 y en modo añadir, y que la confirmación aparece una sola vez. Hay pruebas de `--root` único, de `--root`/`--root=` históricos y de que no hay confirmación cuando fallan el lanzamiento o la publicación del PID. ✅
 
-- **para:** desarrollador
-- **Ubicaci?n:** `skills/orquestar/orquestar.py:229`, escritura de la confirmaci?n antes de `Popen`, `temporal.write_text` y `os.replace`.
-- **Estado:** la escritura directa en el archivo atiende la p?rdida de la salida del padre, pero no satisface toda la correcci?n solicitada: registrar una transferencia exitosa sin anunciar ?xito cuando falla la publicaci?n del PID.
-- **Caso e impacto:** incluso tras arreglar la sintaxis de H2, si `Popen` lanza `OSError`, el log ya contiene ?recargado a versi?n ?? aunque no se haya creado el sucesor. Si falla la publicaci?n del PID, se termina al hijo y se conserva el proceso anterior, pero la confirmaci?n de ?xito tambi?n permanece. El registro puede atribuir al proceso una versi?n que no est? ejecutando.
-- **Correcci?n requerida:** escribir la confirmaci?n despu?s de publicar correctamente el PID, o hacer que el sucesor la escriba al aceptar la transferencia. Mantener la escritura expl?cita en el log y evitar duplicarla con un `print` hacia el mismo archivo.
-- **Validaci?n pendiente:** comprobar que una transferencia exitosa registra la versi?n en el archivo y que los fallos de lanzamiento o publicaci?n del PID no dejan una confirmaci?n de ?xito. Las pruebas actuales de conservaci?n del PID no comprueban esa condici?n del log.
+## Reevaluación de hallazgos anteriores
+
+### H1 · 🟠 ALTA · Resuelto
+La confirmación (`orquestar.py:234`) se escribe después de `os.replace(temporal, pid)` y ya no se imprime antes de `Popen`. Si `Popen` falla o falla la publicación del PID, el log no recibe la confirmación, y `test_fallo_lanzamiento_conserva_pid` y la prueba de fallo de publicación lo comprueban. La salida queda solo en el archivo (`print` eliminado), sin duplicados.
+
+### H2 · 🔴 CRÍTICO · Resuelto
+Las tres cadenas usan ahora la secuencia `\n` en una sola línea. `compileall` y la suite del triaje están en verde sobre el árbol revisado.
 
 ## Hallazgos nuevos
 
-### H2 ? ?? CR?TICO ? Cadenas sin cerrar impiden cargar el motor y dos m?dulos de pruebas
+### N1 · 🟡 MEDIA · Fallo al escribir la confirmación tras publicar el PID — `resolver`
+- **Ubicación**: `skills/orquestar/orquestar.py:234-235`.
+- **Caso**: `log.write`/`log.flush` siguen dentro del `try` que captura `OSError`. Si fallan (disco lleno, por ejemplo) después de `os.replace`, se termina al hijo, pero el archivo PID ya contiene su PID y el proceso anterior sigue vivo sin ser propietario. Es improbable porque el archivo ya está abierto para añadir.
+- **Corrección**: tratar la escritura de la confirmación como algo que no puede fallar, aislándola en su propio `try`/`except OSError: pass` o sacándola del bloque que deshace la transferencia, para que una vez publicado el PID no se deshaga.
 
-- **para:** desarrollador
-- **Ubicaci?n:** `skills/orquestar/orquestar.py:230`, `skills/orquestar/test_recarga.py:69` y `skills/telegram_gateway/test_recarga_gateway.py:81`.
-- **Hecho:** la cadena de `log.write` y las dos cadenas esperadas en las aserciones contienen un salto de l?nea f?sico antes de la comilla de cierre, aunque usan comillas simples. No son literales v?lidos de Python.
-- **Evidencia:** `ast.parse` devuelve `unterminated f-string literal` en producci?n y `unterminated string literal` en ambos m?dulos de pruebas. La evidencia de tests del ?rbol actual tiene c?digo 1.
-- **Impacto:** el motor no puede importarse ni ejecutarse; tambi?n queda impedida la carga del gateway que importa ese motor y de las pruebas afectadas. La correcci?n no es operativa.
-- **Correcci?n requerida:** representar el salto de l?nea con la secuencia literal `\n` dentro de las tres cadenas, conserv?ndolas en una sola l?nea de c?digo. Registrar despu?s una verificaci?n verde del ?rbol corregido con el comando de pruebas indicado.
-
-No se detectan hallazgos nuevos en la normalizaci?n de `--root`, la redirecci?n del sucesor o el mensaje breve de error del gateway respecto a la ronda anterior.
+### N2 · 🔵 BAJA · Detalle de la excepción visible en el chat — `descartar`
+El motivo puede incluir rutas locales u otros datos internos de la excepción. Solo lo reciben usuarios autorizados y está acotado a 120 caracteres, así que el riesgo es hipotético.

@@ -211,7 +211,7 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
         if not es_propietario_pid(root, pid_file):
             return False
         datos = {'root': str(root), 'script': str(destino), 'estado': estado_recarga}
-        env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos)}
+        env = {**os.environ, 'ADEVV_RECARGA': json.dumps(datos), 'PYTHONIOENCODING': 'utf-8'}
         argumentos = list(sys.argv[1:])
         if etiqueta == 'gateway':
             sin_root = []
@@ -229,10 +229,13 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
         with registro.open('a', encoding='utf-8') as log:
             hijo = subprocess.Popen([sys.executable, '-u', str(destino), *argumentos], cwd=root, env=env,
                                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **opciones)
-        temporal.write_text(str(hijo.pid), encoding='utf-8')
-        os.replace(temporal, pid)
-        with registro.open('a', encoding='utf-8') as log:
-            log.write(f'[{etiqueta}] recargado a versión {version}\n')
+            temporal.write_text(str(hijo.pid), encoding='utf-8')
+            os.replace(temporal, pid)
+            try:
+                log.write(f'[{etiqueta}] recargado a versión {version}\n')
+                log.flush()
+            except OSError:
+                pass
     except OSError as error:
         if hijo is not None:
             hijo.terminate()
