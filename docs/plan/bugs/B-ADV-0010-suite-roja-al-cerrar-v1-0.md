@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: sencilla
 version: "v1.0.0"
-status: planned
+status: completed
 depende_de: []
 origen: "Cierre de v1.0 (2026-10-27 01:08): el bucle paró con «la versión no tiene más tareas elegibles pero la suite falla (python -m unittest discover -s tests)», 163 pruebas, 2 fallos"
 created_at: 2026-10-27
@@ -44,3 +44,10 @@ AssertionError: 'bucle en marcha' not found in '*tmp…* · bucle parado\n*Fase:
 
 ## ✅ Criterio de cierre
 La suite completa (`python -m unittest discover -s tests`) pasa en verde, con y sin las variables `TELEGRAM_*` en el entorno.
+
+## Resolución
+
+- `skills/telegram_gateway/features/telegram_gateway.feature`: las ocho filas de T-ADV-0030 usan `adevv telegram --gestionado`, sin rutas de script ni `python *.py`.
+- `tests/test_telegram_gateway.py`: los escenarios de bandeja y `/status` simulan el helper compartido `motor.pid_vivo()` como vivo y escriben el PID actual, sin depender de que el PID 1 exista en el sistema operativo.
+- Hades: revisión de pruebas APROBADA (9/10), sin hallazgos; revisión de código APROBADA (9/10), sin hallazgos. Reportes: `docs/review/test_reviews/B-ADV-0010-test-review.md` y `docs/review/code_reviews/B-ADV-0010-code-review.md`.
+- Verificación del triaje: `adevv orquestar --verificar "python -m unittest tests.test_instructions_cleanliness tests.test_telegram_gateway"`: 25 pruebas OK. La reproducción previa dio los dos fallos descritos. `adevv orquestar --verificar "git diff --check"`: OK. Suite completa no ejecutada; corresponde al bucle al cerrar v1.0.

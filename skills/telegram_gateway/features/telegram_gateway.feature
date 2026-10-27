@@ -169,9 +169,9 @@ Característica: Continuidad de la conversación de Telegram con reservas
       | adevv telegram --fondo | AUSENTE | AUSENTE |
       | adevv telegram --fondo | AUSENTE | 111 |
       | adevv telegram --fondo | VACIO | 111 |
-      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | AUSENTE |
-      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | 111 |
-      | python skills/telegram_gateway/gateway.py --gestionado | VACIO | 111 |
+      | adevv telegram --gestionado | AUSENTE | AUSENTE |
+      | adevv telegram --gestionado | AUSENTE | 111 |
+      | adevv telegram --gestionado | VACIO | 111 |
 
   @T-ADV-0030 @CA-M-3 @CA-M-4
   Esquema del escenario: Permitir cada entrada de escucha con token local y destinatario efectivo
@@ -190,9 +190,9 @@ Característica: Continuidad de la conversación de Telegram con reservas
       | adevv telegram --fondo | 111 | AUSENTE | AUSENTE | 111 |
       | adevv telegram --fondo | 111 | token-entorno-ficticio | 222 | 111 |
       | adevv telegram --fondo | AUSENTE | token-entorno-ficticio | 222 | 222 |
-      | python skills/telegram_gateway/gateway.py --gestionado | 111 | AUSENTE | AUSENTE | 111 |
-      | python skills/telegram_gateway/gateway.py --gestionado | 111 | token-entorno-ficticio | 222 | 111 |
-      | python skills/telegram_gateway/gateway.py --gestionado | AUSENTE | token-entorno-ficticio | 222 | 222 |
+      | adevv telegram --gestionado | 111 | AUSENTE | AUSENTE | 111 |
+      | adevv telegram --gestionado | 111 | token-entorno-ficticio | 222 | 111 |
+      | adevv telegram --gestionado | AUSENTE | token-entorno-ficticio | 222 | 222 |
 
   @T-ADV-0030 @CA-M-1 @CA-M-3 @CA-M-4
   Esquema del escenario: No avisar ni escuchar con credenciales incompletas
@@ -209,8 +209,8 @@ Característica: Continuidad de la conversación de Telegram con reservas
       | adevv telegram | token-local-ficticio | AUSENTE |
       | adevv telegram --fondo | VACIO | 111 |
       | adevv telegram --fondo | token-local-ficticio | AUSENTE |
-      | python skills/telegram_gateway/gateway.py --gestionado | VACIO | 111 |
-      | python skills/telegram_gateway/gateway.py --gestionado | token-local-ficticio | AUSENTE |
+      | adevv telegram --gestionado | VACIO | 111 |
+      | adevv telegram --gestionado | token-local-ficticio | AUSENTE |
 
   @T-ADV-0024 @CA-M-1 @CA-M-2 @CA-M-3
   Escenario: Registrar una única entrada de Inicio por proyecto con la orden pública
