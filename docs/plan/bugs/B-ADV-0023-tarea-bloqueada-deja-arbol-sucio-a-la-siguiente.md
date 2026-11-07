@@ -5,10 +5,10 @@ type: bug
 weight: 1500
 dificultad: media
 version: "v1.1.0"
-status: planned
+status: completed
 origen: "B-ADV-0012/B-ADV-0013 × B-ADV-0015; revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), H-02 🟡"
 created_at: 2026-10-27
-updated_at: 2026-11-02
+updated_at: 2026-11-07
 ---
 
 # B-ADV-0023: Una tarea bloqueada deja sus cambios sin commitear a la siguiente tarea de la misma rama
@@ -27,3 +27,24 @@ updated_at: 2026-11-02
 
 ## 📋 Evidencias
 - `docs/review/versions/v1.0-arquitectura.md`, hallazgo H-02.
+
+## Triaje
+- base_calidad: db73e8ed8abeb7beab1db80de30822284b6f3732
+- A Definición: [SKIP] Contrato existente de aislamiento y resolución de árbol sucio; no cambia requisitos.
+- B Diseño: [SKIP] Reutilización local del mecanismo Clio/stash existente, sin decisión arquitectónica nueva.
+- C1 Pruebas: [EXEC] Regresión con Git real: tarea y bug dejan cambios, bloqueo y siguiente tarea en la misma rama; Clio, stash y fallo de limpieza.
+- C2 Corrección: [EXEC] Extraer resolución común y exigir árbol limpio tras todos los bloqueos locales antes de continuar.
+- D QA: [EXEC] Hades sobre el delta completo de B-ADV-0023.
+- E Documentación: [EXEC] Contrato de orquestación y changelog.
+- F Cierre: [EXEC] Revisión de versión, completed y commit.
+- Verificación al cierre: `python -m unittest tests.test_orquestar.BloqueoSinProgresoTests tests.test_orquestar.RecuperacionAnalisisTests skills.orquestar.test_cambio_rama_sucia skills.orquestar.test_perfil_fijado.BucleTests` cubre bloqueos, recuperación y mecanismo compartido; `git diff --check` y calidad del delta. No hay tipador, linter ni escáner de secretos configurados; inspección del delta sin credenciales ni cambios de dependencias.
+
+- Ampliación de verificación: BucleTests de perfil fijado porque dos puntos de bloqueo estricto también deben respetar el resultado de limpieza.
+- Rojo confirmado: el test falla en la entrada de la independiente con `?? resto.txt`; evidencia conservada en `orquestar_evidencias.jsonl`.
+
+## Resolución
+- Mecanismo Clio/stash extraído a `resolver_arbol_sucio`; se aplica después de persistir cada bloqueo local y antes de cambiar de rama.
+- Los cuatro llamadores del bloqueo comprueban el resultado y paran si persisten cambios, conservándolos para recuperación.
+- Regresión con Git real, tarea y bug, transición media/difícil, stash de fichero nuevo, edición de revisión preservada y siguiente tarea limpia en la misma rama.
+- Hades: pruebas APROBADO (9/10), código APROBADO (9.8/10). Único hallazgo cosmético bajo con destino descartar; sin deuda nueva.
+- Verificación: 23 pruebas focalizadas en verde; diff sin errores; formato/lint omitidos por ausencia de herramientas, sin tipador configurado ni cambios de dependencias.

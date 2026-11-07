@@ -6,6 +6,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0023** — Tras un bloqueo local, Clio resuelve los cambios pendientes o se conservan en stash con aviso antes de seguir con otra tarea, también en la misma rama; si no queda limpio, el bucle para.
+
 - **B-ADV-0029** — Las reservas del bucle conservan su arnés al usar `--harness`; comandos, sesiones, cuotas y métricas usan el perfil efectivo, sin reutilizar la sesión de otro arnés.
 
 ## [1.0.0] - 2026-10-27

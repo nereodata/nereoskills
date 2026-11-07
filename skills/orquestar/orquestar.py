@@ -2106,11 +2106,11 @@ def parar(root, evento, texto):
     return 2
 
 
-def cambiar_de_rama(root, rama):
-    """Cambia a `rama` resolviendo sin persona los cambios pendientes: Clio los commitea o descarta; si quedan, `git stash`."""
+def resolver_arbol_sucio(root, contexto):
+    """Resuelve cambios con Clio o stash y confirma que el árbol queda limpio."""
     actual = git('branch', '--show-current')
     if git('status', '--porcelain'):
-        prompt = (f'El árbol de la rama {actual} tiene cambios sin commitear y el bucle debe cambiar a {rama}. '
+        prompt = (f'El árbol de la rama {actual} tiene cambios sin commitear y el bucle debe {contexto}. '
                   'Revisa `git status`: commitea (commit semántico) lo que pertenezca al trabajo hecho y '
                   'descarta solo los restos (temporales o ignorables). No cambies de rama ni toques nada más.')
         try:
@@ -2123,7 +2123,14 @@ def cambiar_de_rama(root, rama):
         if git('status', '--porcelain'):
             return False
         print(f'[orquestar] cambios guardados en el stash «{nombre}»', flush=True)
-        avisar(root, 'error', f'🗃 Cambios sin commitear de {actual} guardados en el stash «{nombre}»; sigo en {rama}.')
+        avisar(root, 'error', f'🗃 Cambios sin commitear de {actual} guardados en el stash «{nombre}»; el bucle debe {contexto}.')
+    return True
+
+
+def cambiar_de_rama(root, rama):
+    """Cambia de rama únicamente tras resolver los cambios pendientes."""
+    if not resolver_arbol_sucio(root, f'cambiar a {rama}'):
+        return False
     git('checkout', '-q', rama)
     return git('branch', '--show-current') == rama
 
@@ -2203,7 +2210,7 @@ def reescribir_frontmatter(texto, cambios):
 
 
 def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
-    """Bloquea para el humano y persiste el motivo en tarea y revisión de versión.
+    """Persiste el bloqueo para el humano y devuelve si el árbol queda limpio.
 
     `causa` sustituye la frase de los intentos sin progreso cuando el bloqueo es por otro motivo.
     """
@@ -2234,7 +2241,8 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
                    cwd=root, capture_output=True, check=True)
     avisar(root, 'respuesta', (f'{contexto}\n' if contexto else '')
            + (f'⏸ {causa}; ' if causa else f'⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; ')
-           + f'el bucle sigue con las demás.\nCola de la última salida:\n{cola}')
+           + f'\nCola de la última salida:\n{cola}')
+    return resolver_arbol_sucio(root, f'continuar tras el bloqueo de {iid}')
 
 
 def registrar_fallo_suite(root, version, cmd):
@@ -2862,9 +2870,10 @@ def bucle(a, root):
                 print(f'[orquestar] {arg}: {motivo} con el perfil fijado estricto; no cambio de modelo.', flush=True)
                 registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': arg, 'de': dif,
                                  'dificultad': dif, 'estricto': True})
-                bloquear_sin_progreso(root, arg, 0, '', causa=(
+                if not bloquear_sin_progreso(root, arg, 0, '', causa=(
                     f'{arg} bloqueada para el humano: {motivo} con el perfil fijado estricto, que impide '
-                    'subir de dificultad o escalar a otro modelo'))
+                    'subir de dificultad o escalar a otro modelo')):
+                    return parar(root, 'error', f'no puedo limpiar el árbol tras bloquear {arg}.')
                 continue
         if paso in ('task-dev', 'bug-fix') and arg and not estricto:
             debe, motivo = comprobar_promocion(root, arg)
@@ -3047,7 +3056,8 @@ def bucle(a, root):
             motivo = (f'perfil fijado estricto {clave_perfil(cfg_rol)}: el arnés '
                       f'"{cfg_rol.get("harness") or "claude"}" no está disponible y no se cambia de modelo')
             print(f'[orquestar] {arg}: {motivo}', flush=True)
-            bloquear_sin_progreso(root, arg, 0, '', causa=f'{arg} bloqueada para el humano: {motivo}')
+            if not bloquear_sin_progreso(root, arg, 0, '', causa=f'{arg} bloqueada para el humano: {motivo}'):
+                return parar(root, 'error', f'no puedo limpiar el árbol tras bloquear {arg}.')
             continue
         if not hubo_ejecucion:
             cuota, cfg_omitida = cuota_descartada(root, [cfg_rol] + reservas, configs_a_probar)
@@ -3142,7 +3152,8 @@ def bucle(a, root):
                         diagnostico = diagnostico_analisis(recuperacion, a.reintentos)
                         if paso in ('especificar', 'revisar-tarea') and arg:
                             print(f'[orquestar] {diagnostico}', flush=True)
-                            bloquear_sin_progreso(root, arg, a.reintentos, salida, contexto=diagnostico)
+                            if not bloquear_sin_progreso(root, arg, a.reintentos, salida, contexto=diagnostico):
+                                return parar(root, 'error', f'no puedo limpiar el árbol tras bloquear {arg}.')
                             recuperaciones_analisis.pop(clave_analisis, None)
                         else:
                             return parar(root, 'error', diagnostico)
@@ -3157,7 +3168,8 @@ def bucle(a, root):
                         if nueva_dif:
                             sin_progreso = 0
                             continue
-                    bloquear_sin_progreso(root, arg, sin_progreso, salida)
+                    if not bloquear_sin_progreso(root, arg, sin_progreso, salida):
+                        return parar(root, 'error', f'no puedo limpiar el árbol tras bloquear {arg}.')
                     sin_progreso = 0
                     continue
                 return parar(root, 'error', f'"{paso}" no avanza tras {a.reintentos} intentos.')

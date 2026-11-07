@@ -1543,6 +1543,37 @@ class BloqueoSinProgresoTests(unittest.TestCase):
                               capture_output=True, text=True).stdout.strip()
 
 
+    def test_bloqueo_resuelve_con_clio_o_informa_fallo(self):
+        """El bloqueo conserva metadatos y solo permite continuar con árbol limpio."""
+        for resuelve in (True, False):
+            with self.subTest(resuelve=resuelve):
+                resto = self.root / 'resto.txt'
+                contenido = f'pendiente-{resuelve}'
+                resto.write_text(contenido, encoding='utf-8')
+
+                def clio(root, rol, prompt):
+                    self.assertEqual(rol, 'clio')
+                    if resuelve:
+                        self.git('add', '.')
+                        self.git('commit', '-qm', 'preservar trabajo')
+
+                real_run = subprocess.run
+
+                def run(command, **kwargs):
+                    if command[:3] == ['git', 'stash', 'push']:
+                        return subprocess.CompletedProcess(command, 1)
+                    return real_run(command, **kwargs)
+
+                with (patch.object(motor, 'agente', side_effect=clio),
+                      patch.object(motor.subprocess, 'run', side_effect=run),
+                      patch.object(motor, 'avisar')):
+                    self.assertEqual(motor.bloquear_sin_progreso(
+                        self.root, 'T-DEM-0001', 2, 'rechazo'), resuelve)
+                self.assertEqual(motor.frontmatter(motor.fichero_de(
+                    self.root, 'T-DEM-0001'))['status'], 'blocked')
+                self.assertEqual(bool(self.git('status', '--porcelain')), not resuelve)
+                self.assertEqual(resto.read_text(encoding='utf-8'), contenido)
+
     def test_bloquea_solo_atascada_y_completa_independiente(self):
         """Ambos pasos aíslan el bloqueo; media promociona antes de bloquear."""
         for paso, nivel in [('task-dev', 'dificil'), ('bug-fix', 'dificil'), ('task-dev', 'media')]:
@@ -1575,6 +1606,9 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         cola = 'Z' * 1989 + 'FIN RECHAZO'
         def ejecutar(a, root, prompt, **kwargs):
             actual = kwargs['env']['ORQUESTAR_ID']
+            if actual == iid and not llamadas:
+                (root / 'resto.txt').write_text('trabajo interrumpido', encoding='utf-8')
+                revision.write_text(revision.read_text(encoding='utf-8') + 'Edición pendiente.\n', encoding='utf-8')
             llamadas.append((actual, motor.dificultad_de(root, actual)))
             if actual != iid:
                 self.assertEqual(actual, 'T-DEM-0002')
@@ -1588,6 +1622,7 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         with (patch.object(motor, 'ejecutar', side_effect=ejecutar),
               patch.object(motor, 'construir_prompt_paso', return_value='prompt'),
               patch.object(motor, 'comprobar_promocion', return_value=(False, '')),
+              patch.object(motor, 'agente', side_effect=SystemExit('sin arnés')),
               patch.object(motor, 'avisar') as aviso, patch('builtins.print')):
             self.assertEqual(motor.bucle(args, self.root), 2)
         fm = motor.frontmatter(atascada)
@@ -1605,8 +1640,11 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         self.assertIn('2 intentos', informe)
         self.assertIn('dificil', informe)
         self.assertTrue(any(iid in c.args[2] and cola in c.args[2] for c in aviso.call_args_list))
-        self.assertEqual(llamadas, [(iid, 'media')] * 2 + [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')]
-                         if nivel == 'media' else [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')])
+        self.assertEqual(llamadas, [(iid, 'media')] * 3 + [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')]
+                         if nivel == 'media' else [(iid, 'dificil')] * 3 + [('T-DEM-0002', 'media')])
+        self.assertFalse((self.root / 'resto.txt').exists())
+        self.assertIn('resto.txt', self.git('stash', 'show', '--include-untracked', '--name-only', 'stash@{0}'))
+        self.assertIn('Edición pendiente.', informe)
         self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0002'))['status'], 'completed')
         self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0003'))['status'], 'planned')
         estado = motor.estado(self.root, 'docs')
