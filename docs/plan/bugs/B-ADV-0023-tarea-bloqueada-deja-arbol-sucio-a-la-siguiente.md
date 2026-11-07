@@ -4,11 +4,11 @@ title: "Una tarea bloqueada deja sus cambios sin commitear a la siguiente tarea 
 type: bug
 weight: 1500
 dificultad: media
-version: ""
-status: backlog
+version: "v1.1.0"
+status: planned
 origen: "B-ADV-0012/B-ADV-0013 × B-ADV-0015; revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), H-02 🟡"
 created_at: 2026-10-27
-updated_at: 2026-10-27
+updated_at: 2026-11-02
 ---
 
 # B-ADV-0023: Una tarea bloqueada deja sus cambios sin commitear a la siguiente tarea de la misma rama

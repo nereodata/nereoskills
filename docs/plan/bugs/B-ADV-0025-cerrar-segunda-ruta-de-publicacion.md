@@ -4,11 +4,11 @@ title: "/cerrar publica la release por una segunda ruta con validaciones propias
 type: bug
 weight: 2000
 dificultad: media
-version: ""
-status: backlog
+version: "v1.1.0"
+status: planned
 origen: "T-ADV-0023; revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), H-08 🟡"
 created_at: 2026-10-27
-updated_at: 2026-10-27
+updated_at: 2026-11-02
 ---
 
 # B-ADV-0025: /cerrar publica la release por una segunda ruta con validaciones propias

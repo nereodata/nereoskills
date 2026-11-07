@@ -4,11 +4,11 @@ title: "El gateway trata las marcas de cuota sin hora como agotamiento de 30 min
 type: bug
 weight: 1500
 dificultad: media
-version: ""
-status: backlog
+version: "v1.1.0"
+status: planned
 origen: "T-ADV-0026 × B-ADV-0020; revisar-version v1.0 (docs/review/versions/v1.0-arquitectura.md), H-03 🟡"
 created_at: 2026-10-27
-updated_at: 2026-10-27
+updated_at: 2026-11-02
 ---
 
 # B-ADV-0024: El gateway trata las marcas de cuota sin hora como agotamiento de 30 min
