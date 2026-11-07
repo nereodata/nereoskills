@@ -2690,11 +2690,17 @@ def parte(root, docs='docs/requirements'):
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
     items = backlog(root)
-    abiertas = sorted({i['version'] for i in items if vkey(i['version']) and i['status'] not in CERRADO}, key=vkey)
-    for v in abiertas[:1]:
-        suyas = [i for i in items if i['version'] == v]
+    abiertas = sorted({vkey(i['version']) for i in items if vkey(i['version']) and i['status'] not in CERRADO})
+    for vk in abiertas[:1]:
+        suyas = [i for i in items if vkey(i['version']) == vk]
+        v = max((i['version'] for i in suyas if i.get('version')), key=len, default=f'v{vk[0]}.{vk[1]}')
+        tareas = [i for i in suyas if i['paso'] == 'task-dev']
+        bugs = [i for i in suyas if i['paso'] == 'bug-fix']
         cuenta = lambda *s: [i['id'] for i in suyas if i['status'] in s]
-        lineas.append(f'*{v}:* {len(cuenta("completed"))}/{len(suyas)} cerradas'
+        cuenta_t = lambda *s: [i['id'] for i in tareas if i['status'] in s]
+        cuenta_b = lambda *s: [i['id'] for i in bugs if i['status'] in s]
+        lineas.append(f'*{v}:* {len(cuenta_t("completed"))}/{len(tareas)} tareas cerradas, '
+                      f'{len(cuenta_b("completed"))}/{len(bugs)} bugs cerrados'
                       + (f' · en curso {", ".join(cuenta("in_progress"))}' if cuenta('in_progress') else '')
                       + (f' · bloqueadas {", ".join(cuenta("blocked"))}' if cuenta('blocked') else ''))
     sin_version = [i for i in items if not vkey(i['version']) and i['status'] not in FUERA]
