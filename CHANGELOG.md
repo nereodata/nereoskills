@@ -10,6 +10,10 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0028** — `/estado` en Telegram desglosa por separado tareas y bugs de la versión abierta, agrupando variantes numéricas por `vkey`.
+
+- **B-ADV-0024** — El gateway clasifica las marcas de cuota sin hora como supuestas de 300 s mediante `fallo_cuota`, permite su sondeo periódico con `configuraciones_con_cuota`, registra la recuperación tras éxito y avisa de falta de créditos una sola vez por episodio.
+
 - **B-ADV-0027** — `reintentos_acumulados` no promueve indebidamente en tareas multiturno con progreso o aprobación de Hades y respeta las bajadas manuales de dificultad en Markdown reseteando contadores.
 
 - **B-ADV-0026** — Preguntas humanas persistentes y accionables por Telegram, aislamiento del trabajo bloqueado y continuación de tareas independientes; respuestas incorporadas entre pasos y reanudación respetando parada manual.

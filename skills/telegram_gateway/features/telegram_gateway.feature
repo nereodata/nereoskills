@@ -150,6 +150,25 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Cuando la reanudación falla y el reintento sin sesión también falla sin cuota ni error de arranque
     Entonces se conserva el tratamiento de error ordinario sin invocar reservas
 
+  @B-ADV-0024
+  Escenario: Tratar cuotas sin hora como supuestas de 300 segundos y permitir sondeo periódico
+    Dado telegram con titular codex/m1 y reserva claude/m2
+    Y que todos los instantes del escenario están en UTC el 26 de octubre de 2026
+    Cuando a las 12:00:00 codex/m1 falla por cuota sin hora de reinicio
+    Entonces la métrica registra cuota_tipo supuesta, origen sin hora en la respuesta y cuota_espera_s de 300 segundos
+    Y claude/m2 responde como reserva a las 12:00:00
+    Cuando a las 12:04:59 se envía otro mensaje
+    Entonces no se sondea codex/m1 y responde claude/m2
+    Cuando a las 12:05:00 se envía otro mensaje y codex/m1 responde con éxito
+    Entonces se sondea e invoca primero codex/m1 y se registra la recuperación de cuota para codex/m1
+
+  @B-ADV-0024
+  Escenario: Notificar créditos en fallo de cuota una sola vez por episodio
+    Dado telegram con titular codex/m1 como único modelo y sin reservas
+    Cuando a las 12:00:00 codex/m1 falla por agotamiento de créditos
+    Entonces se emite un aviso de cuota informando de la falta de créditos en codex
+    Y una repetición del fallo dentro del mismo episodio no duplica el aviso
+
   @T-ADV-0030 @CA-M-3 @CA-M-4
   Esquema del escenario: Rechazar cada entrada de escucha con token ambiental antes de cualquier efecto
     Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos

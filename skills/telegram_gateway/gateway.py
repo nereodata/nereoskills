@@ -179,14 +179,19 @@ def invocar(root, prompt, cfg, sesion=None):
         raise ModeloIndisponible(f'fallo de arranque: {error}') from error
     fecha = motor.ahora()
     instante = motor.fecha_estado(fecha)
-    cuota = motor.espera_cuota(salida, ahora=instante.astimezone()) if codigo else None
+    modelo = cfg.get('model') or 'predeterminado'
+    cuota = motor.espera_cuota(salida) if codigo else None
     if cuota is not None:
+        datos = motor.fallo_cuota(root, harness, modelo, salida)
+        m.update(datos)
+        cuota = datos['cuota_espera_s']
         motor.registrar(root, {**m, 'tipo': 'gateway', 'fecha': fecha,
                                'arnes': harness, 'codigo': codigo,
-                               'modelo_cuota': cfg.get('model') or 'predeterminado',
-                               'cuota_espera_s': cuota})
+                               **datos})
         hasta = (instante + timedelta(seconds=cuota)).astimezone(timezone.utc)
         raise ModeloIndisponible(f'cuota hasta {hasta.isoformat()}')
+    if not codigo:
+        motor.recuperar_cuota(root, harness, modelo)
     sesion_id = m.get('sesion')
     if not sesion_id:
         for linea in reversed(salida.splitlines()):
@@ -210,15 +215,21 @@ def conversar(root, usuario, texto):
     cfg_tg = cfg_todo.get('telegram', {}) if isinstance(cfg_todo.get('telegram'), dict) else {}
     cfg = {**cfg_atenea, **cfg_tg}
     prompt = construir_prompt(root, texto)
-    cuotas = motor.consumo_cuotas(root, motor.fecha_estado(motor.ahora()))[1]
+    configs_originales = [cfg] + motor.lista_reservas(cfg)
+    configs_a_probar = motor.configuraciones_con_cuota(root, configs_originales)
+    instante = motor.fecha_estado(motor.ahora())
+    cuotas = motor.consumo_cuotas(root, instante)[1]
     motivos = []
-    for posicion, cfg_actual in enumerate([cfg] + motor.lista_reservas(cfg)):
+    for posicion, cfg_actual in enumerate(configs_originales):
         harness = cfg_actual.get('harness', 'claude')
         modelo = cfg_actual.get('model') or 'predeterminado'
         perfil = f'{harness}/{modelo}'
-        hasta = cuotas.get((harness, modelo))
-        if hasta:
-            motivos.append(f'{perfil}: cuota hasta {hasta.astimezone(timezone.utc).isoformat()}')
+        if cfg_actual not in configs_a_probar:
+            hasta = cuotas.get((harness, modelo))
+            if hasta:
+                motivos.append(f'{perfil}: cuota hasta {hasta.astimezone(timezone.utc).isoformat()}')
+            else:
+                motivos.append(f'{perfil}: cuota vigente')
             continue
         sesion = obtener_sesion(root, usuario, harness)
         try:

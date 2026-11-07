@@ -25,7 +25,7 @@ class ReservasTests(unittest.TestCase):
         self.enterContext(patch.object(motor, 'config', side_effect=lambda r: self.cfg))
         self.enterContext(patch.object(motor, 'ahora', return_value='2026-10-26T12:00:00+00:00'))
         self.enterContext(patch.object(motor, 'excluir'))
-        self.enterContext(patch.object(motor, 'avisar'))
+        self.aviso = self.enterContext(patch.object(motor, 'avisar'))
         self.enterContext(patch.object(motor, 'buscar_ejecutable', side_effect=lambda e: e))
         self.launch = self.enterContext(patch.object(motor, 'lanzar'))
         self.launch.return_value = (0, {'sesion': 'nueva'}, 'respuesta')
@@ -33,13 +33,14 @@ class ReservasTests(unittest.TestCase):
     def agotar(self, model='m1', harness='codex'):
         """Persiste un agotamiento vigente con el esquema del motor."""
         motor.registrar(self.root, {'tipo': 'gateway', 'fecha': motor.ahora(), 'arnes': harness,
-                                   'modelo_cuota': model, 'cuota_espera_s': 1800})
+                                   'modelo_cuota': model, 'cuota_espera_s': 1800,
+                                   'cuota_tipo': 'real', 'cuota_origen': 'hora en la respuesta'})
 
     def test_cuota_cruda_arranque_reserva_y_metricas(self):
         """La cuota en stderr no se pierde al extraer un result vacío."""
         gateway.guardar_sesion(self.root, '123', 'codex', 'anterior')
         self.launch.side_effect = [(1, {'modelos': {'m1': {'entrada': 10}}},
-                                    '{"result":""}\nusage limit reached'),
+                                    '{"result":""}\nusage limit reached resets in 1680s'),
                                    OSError('no arranca'), (0, {'sesion': 's3'}, 'respuesta')]
         texto = gateway.conversar(self.root, '123', 'hola')
         self.assertIn('claude/m3', texto)
@@ -174,3 +175,53 @@ class ReservasTests(unittest.TestCase):
         self.assertEqual([c.args[2] for c in self.launch.call_args_list], ['codex', 'codex'])
         self.assertIn('previa', self.launch.call_args_list[0].args[0])
         self.assertNotIn('previa', self.launch.call_args_list[1].args[0])
+
+    def test_cuota_sin_hora_clasificada_como_supuesta_sondeo_y_recuperacion(self):
+        """Una cuota sin hora se clasifica como supuesta de 300 s, se sondea al vencer y se recupera."""
+        self.cfg['atenea'] = {'harness': 'codex', 'model': 'm1',
+                              'reserva': {'harness': 'claude', 'model': 'm2'}}
+        self.launch.side_effect = [(1, {}, 'usage limit reached without timestamp'),
+                                   (0, {'sesion': 's-claude'}, 'respuesta claude')]
+        texto = gateway.conversar(self.root, '123', 'hola')
+        self.assertIn('claude/m2', texto)
+        self.assertIn('reserva', texto)
+
+        filas = motor.leer_metricas(self.root)
+        cuota = next(f for f in filas if f.get('modelo_cuota') == 'm1')
+        self.assertEqual(cuota.get('cuota_tipo'), 'supuesta')
+        self.assertEqual(cuota.get('cuota_origen'), 'sin hora en la respuesta')
+        self.assertEqual(cuota.get('cuota_espera_s'), 300)
+
+        self.launch.side_effect = [(0, {'sesion': 's-claude-2'}, 'respuesta claude 2')]
+        with patch.object(motor, 'ahora', return_value='2026-10-26T12:04:59+00:00'):
+            texto2 = gateway.conversar(self.root, '123', 'mensaje 2')
+        self.assertIn('claude/m2', texto2)
+        self.assertEqual(self.launch.call_args.args[2], 'claude')
+
+        self.launch.side_effect = [(0, {'sesion': 's-codex'}, 'respuesta codex')]
+        with patch.object(motor, 'ahora', return_value='2026-10-26T12:05:00+00:00'):
+            texto3 = gateway.conversar(self.root, '123', 'mensaje 3')
+        self.assertIn('codex/m1', texto3)
+        self.assertNotIn('reserva', texto3)
+        self.assertEqual(self.launch.call_args.args[2], 'codex')
+
+        filas_final = motor.leer_metricas(self.root)
+        self.assertTrue(any(f.get('tipo') == 'cuota_recuperada' and f.get('arnes') == 'codex' and f.get('modelo_cuota') == 'm1' for f in filas_final))
+
+    def test_creditos_aviso_unico_por_episodio_en_gateway(self):
+        """El fallo de créditos emite aviso específico de créditos una sola vez por episodio."""
+        self.cfg['atenea'].pop('reserva')
+        self.launch.side_effect = [(1, {}, 'your credit balance is too low to complete this request')]
+        with self.assertRaises(gateway.GatewayNoDisponible):
+            gateway.conversar(self.root, '123', 'hola')
+
+        self.aviso.assert_any_call(self.root, 'cuota', 'Sin créditos en codex: recarga y el bucle lo reintentará')
+        self.aviso.reset_mock()
+
+        # Al vencer el intervalo de 300 s, codex se vuelve a sondear y falla de nuevo por créditos
+        self.launch.side_effect = [(1, {}, 'your credit balance is too low')]
+        with patch.object(motor, 'ahora', return_value='2026-10-26T12:05:00+00:00'):
+            with self.assertRaises(gateway.GatewayNoDisponible):
+                gateway.conversar(self.root, '123', 'hola 2')
+        self.assertEqual(self.launch.call_count, 2)
+        self.assertFalse(any(len(c.args) > 1 and c.args[1] == 'cuota' for c in self.aviso.call_args_list))
