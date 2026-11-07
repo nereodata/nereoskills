@@ -496,10 +496,18 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False):
     if f_ev.exists():
         try:
             clave = arbol(root)
-            cmds = list(dict.fromkeys(
-                e['comando'] for l in f_ev.read_text(encoding='utf-8').splitlines() if l.strip()
-                for e in (json.loads(l),) if e.get('arbol') == clave and e.get('codigo') == 0
-            ))
+            estado_cmds = {}
+            orden_cmds = []
+            for l in f_ev.read_text(encoding='utf-8').splitlines():
+                if not l.strip():
+                    continue
+                e = json.loads(l)
+                if e.get('arbol') == clave and e.get('comando'):
+                    c = e['comando']
+                    if c not in orden_cmds:
+                        orden_cmds.append(c)
+                    estado_cmds[c] = (e.get('codigo') == 0) and not e.get('cambio_en_vuelo')
+            cmds = [c for c in orden_cmds if estado_cmds.get(c)]
             if cmds:
                 cabecera += (f'Verificado en verde sobre este árbol ({clave[:10]}): '
                              f'{", ".join(f"`{c}`" for c in cmds)}. No los relances.\n\n')
@@ -2260,12 +2268,13 @@ def suite(root, a=None):
 
 
 def verificar(root, cmd):
-    """Ejecuta cmd sobre el árbol actual, o reutiliza su resultado en verde para ese mismo árbol."""
+    """Ejecuta cmd sobre el árbol actual, o reutiliza su último resultado real en verde para ese mismo árbol."""
     excluir(root)
     clave = arbol(root)
     f = root / EVIDENCIAS
     previas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()] if f.exists() else []
-    if any(e['arbol'] == clave and e['comando'] == cmd and e['codigo'] == 0 for e in previas):
+    mismas = [e for e in previas if e.get('arbol') == clave and e.get('comando') == cmd]
+    if mismas and mismas[-1].get('codigo') == 0 and not mismas[-1].get('cambio_en_vuelo'):
         print(f'[orquestar] verificación reutilizada: {cmd} ya pasó sobre este mismo árbol ({clave[:10]}).')
         registrar(root, {'tipo': 'verificacion', 'fecha': ahora(), 'comando': cmd, 'arbol': clave,
                          'reutilizada': True, 'codigo': 0, 'id': os.environ.get('ORQUESTAR_ID', '')})
@@ -2278,11 +2287,11 @@ def verificar(root, cmd):
         salida = captura.read().decode('utf-8', errors='replace')
     if salida:
         print(salida, end='' if salida.endswith('\n') else '\n', flush=True)
-    fila = {'fecha': ahora(), 'comando': cmd, 'arbol': clave, 'codigo': codigo,
+    fila = {'contrato': 'v2', 'identidad': clave, 'fecha': ahora(), 'comando': cmd, 'arbol': clave, 'codigo': codigo,
             'salida': salida, 'duracion_s': round(time.monotonic() - inicio)}
     with f.open('a', encoding='utf-8') as out:
         out.write(json.dumps(fila, ensure_ascii=False) + '\n')
-    metrica = {c: v for c, v in fila.items() if c != 'salida'}
+    metrica = {c: v for c, v in fila.items() if c not in ('salida', 'contrato', 'identidad')}
     registrar(root, {'tipo': 'verificacion', 'reutilizada': False, 'id': os.environ.get('ORQUESTAR_ID', ''), **metrica})
     return codigo
 

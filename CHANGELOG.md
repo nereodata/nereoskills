@@ -4,6 +4,10 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ## [Sin publicar]
 
+### Añadido
+
+- **T-ADV-0032** — Coordinador compartido de chequeos de calidad y release (`chequeos.py`): catálogo honesto por disponibilidad y resultado, plan explicable con origen, identidad compuesta de evidencia, coordinación concurrente entre CLI, gateway, agentes y worktrees, precedencia del último resultado real con registro de intermitencias, caché por comprobación y reutilización de preflight en el worktree integrado respetando `release.restricciones`.
+
 ### Corregido
 
 - **B-ADV-0027** — `reintentos_acumulados` no promueve indebidamente en tareas multiturno con progreso o aprobación de Hades y respeta las bajadas manuales de dificultad en Markdown reseteando contadores.

@@ -26,7 +26,7 @@ Formaliza el cierre de una versión del proyecto y su etiquetado.
   ```bash
   python -c "from pathlib import Path; from adevv.release_tools import publicar_version; publicar_version(Path.cwd(), 'vX.Y.Z')"
   ```
-- La función valida manifiestos, changelog y etiquetas; prepara el merge y ejecuta `release.preflight` en un worktree aislado. Publica `main` y la etiqueta anotada mediante un único push atómico. Un fallo anterior al push conserva la rama y el árbol originales.
+- La función valida manifiestos, changelog y etiquetas; prepara el merge en un worktree aislado y evalúa `release.preflight` reutilizando la evidencia acreditada del proyecto si el árbol integrado coincide exactamente con el árbol ya verificado (o reejecutándolo si el merge con `main` introduce cambios). Publica `main` y la etiqueta anotada mediante un único push atómico. Un fallo anterior al push conserva la rama y el árbol originales. Respeta además las políticas de `task_config.yaml::release.restricciones` para `validar`, `cerrar_local`, `etiquetar` y `publicar`.
 - Tras éxito queda en `main`. Eliminar la rama release cerrada con `git branch -d release/vX.Y`.
 - Para hotfix, si hay una release abierta, integrar después el fix en ella y publicar esa rama como antes.
 

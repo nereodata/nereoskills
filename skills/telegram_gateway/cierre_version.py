@@ -76,6 +76,9 @@ def validar(root, version, motor):
     config_path = root / 'task_config.yaml'
     cfg = (motor.yaml.safe_load(config_path.read_text(encoding='utf-8'))
            if hasattr(motor.yaml, 'safe_load') else motor.yaml.load_yaml(config_path))
+    coordinador = release_tools._chequeos()
+    for accion_req in ('validar', 'cerrar_local', 'etiquetar', 'publicar'):
+        coordinador.verificar_restriccion_release(root, 'gateway', accion_req, cfg=cfg)
     tag = str(cfg.get('project', {}).get('version', ''))
     tag = 'v' + tag.removeprefix('v')
     if not re.fullmatch(re.escape(version) + r'\.\d+', tag):
