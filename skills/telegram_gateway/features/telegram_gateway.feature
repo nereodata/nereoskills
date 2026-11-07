@@ -278,3 +278,28 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Cuando ejecuto adevv telegram --autoarranque on desde la raíz del proyecto
     Entonces termina con código distinto de cero e informa que el autoarranque no está soportado en este sistema
     Y la carpeta conserva exactamente sus entradas y contenidos y no se solicita ningún proceso ni registro de autoarranque
+
+  @B-ADV-0026 @CA-1 @CA-5 @CA-8 @CA-9
+  Esquema del escenario: Validar autorización, referencias e idempotencia al responder preguntas por Telegram
+    Dado un proyecto ProyectoUno con usuarios autorizados 111,222 y otro proyecto ProyectoDos con pregunta Q-DOS-0001
+    Y en ProyectoUno existen las preguntas pendientes <preguntas_abiertas> y la pregunta ya cerrada Q-ADV-0009 de T-ADV-0109
+    Cuando el usuario <usuario> envía "<mensaje>" al gateway de ProyectoUno
+    Entonces <resultado>
+    Y no se mezclan decisiones entre tareas ni entre proyectos ni se conceden permisos de publicación de versión
+    Ejemplos:
+      | usuario | preguntas_abiertas | mensaje | resultado |
+      | 999 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-0001 Sí | no recibe respuesta y Q-ADV-0001 sigue pendiente sin cambios |
+      | 111 | Q-ADV-0001 (T-ADV-0101), Q-ADV-0002 (T-ADV-0102) | /responder Usar interno | se rechaza por ambigüedad indicando las referencias pendientes Q-ADV-0001 y Q-ADV-0002 sin modificar ninguna |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-9999 Usar interno | se rechaza indicando que la referencia Q-ADV-9999 no existe |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-0009 Usar interno | se rechaza indicando que Q-ADV-0009 ya está cerrada |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-DOS-0001 Usar interno | se rechaza indicando que Q-DOS-0001 no pertenece a este proyecto |
+      | 111 | Q-ADV-0001 (T-ADV-0101), Q-ADV-0002 (T-ADV-0102) | /responder Q-ADV-0002 Usar Postgres | se vincula únicamente a Q-ADV-0002 de T-ADV-0102 y Q-ADV-0001 sigue pendiente |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder T-ADV-0101 Usar OAuth interno | se vincula inequívocamente a Q-ADV-0001 de T-ADV-0101 |
+
+  @B-ADV-0026 @CA-5 @CA-8 @CA-9
+  Escenario: Gestionar entregas repetidas y consultas de preguntas pendientes sin duplicar decisiones
+    Dado un proyecto con la pregunta pendiente Q-ADV-0001 para T-ADV-0101 y bucle en marcha
+    Cuando el usuario autorizado 111 consulta /preguntas y /estado
+    Entonces ambas respuestas muestran Q-ADV-0001, la tarea T-ADV-0101, la pregunta y cómo responder con "/responder Q-ADV-0001 <respuesta>"
+    Cuando el usuario 111 envía dos veces seguidas "/responder Q-ADV-0001 Usar OAuth interno"
+    Entonces la primera entrega registra la respuesta en cola y la segunda entrega idéntica se reconoce como duplicada sin crear una segunda decisión ni reanudar dos veces

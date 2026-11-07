@@ -147,6 +147,22 @@ El `.env` del proyecto tiene precedencia independiente para el token y los IDs, 
 
 ## ⚙️ Modo orquestado
 
+### Intervenciones humanas durante una tarea
+
+Si falta una decisión o recurso sin valor por defecto seguro, ejecuta `adevv orquestar --preguntar <ID> "<pregunta concreta>" --contexto "<contexto>"` y termina el paso. El motor conserva el delta en `wip/<ID>`, registra el bloqueo local y avisa una vez por el evento `respuesta`, con referencia `Q-<PREFIJO>-NNNN`. Continúa las tareas independientes; las dependientes esperan. Los bloqueos globales de requisitos o plataforma conservan su parada global.
+
+`adevv orquestar --preguntas` y `/preguntas` en Telegram consultan preguntas y diagnóstico del aviso. Responde con `/responder <Q-ID> <respuesta>`; también admite el ID de tarea cuando identifica una pregunta. Sin referencia solo se acepta si hay una única pregunta pendiente. Las consultas no reenvían avisos. Sin credenciales, con evento desactivado o envío fallido, la pregunta permanece visible en disco.
+
+La respuesta se recibe en un registro local duradero y solo se incorpora entre pasos. `PENDIENTE: <qué falta>` o `INSUFICIENTE: <qué falta>` conserva el bloqueo; una decisión concreta devuelve la tarea al circuito para que el agente continúe y valide el recurso. Si aún falta información, debe registrar otra pregunta y terminar. Recibir una respuesta no equivale a completar la tarea ni concede permisos de publicación.
+
+Sin tareas elegibles el bucle permanece esperando y atiende respuestas con el gateway disponible. Con `--espera-max 0` devuelve el control; una respuesta por Telegram relanza automáticamente si se encontraba en ese bloqueo. Una señal `orquestar.parar` impide el relanzamiento. Al retomar, el agente recibe la decisión y el delta conservado; si hay conflicto al restaurarlo, Git conserva el conflicto para resolverlo sin sobrescribir el trabajo independiente.
+
+Preguntas y respuestas se almacenan juntas en `orquestar_preguntas.json`, excluido de Git. Una cola dentro de cada pregunta y un bloqueo del sistema operativo serializan gateway y motor; el reemplazo atómico conserva la respuesta durante reinicios y recargas. No edites el registro mientras corre un proceso.
+
+Cada intervención conserva su rama de destino. Si hay trabajo ajeno sin confirmar, la respuesta sigue en cola con diagnóstico; no se confirma en otra rama. Las fases incompletas del bloqueo se recuperan entre pasos o al reintentar la solicitud. Un envío interrumpido queda indicado sin reenvío automático para evitar duplicados. Si una tarea tiene varias preguntas pendientes, responder por su ID exige una referencia más concreta y la tarea conserva el bloqueo hasta resolverlas.
+
+Si el propio bloqueo aún no pudo persistirse por cambios ajenos, se informa de un **bloqueo global de persistencia** y no se ejecuta ningún paso sobre ese árbol. Conserva o aparta esos cambios y relanza: el motor completa la recuperación antes de planificar tareas. Este impedimento del árbol se distingue de una tarea ya bloqueada con seguridad, que permite avanzar a las independientes.
+
 1. **Un paso por ejecución.** Ejecuta solo el paso indicado y termina: el bucle decide el siguiente.
 2. **Sin preguntas.** Donde una skill pida algo al usuario, elige la opción recomendada o el valor por defecto y regístralo (DEC/SUP en el documento de la fase, o en la revisión de versión).
 3. **Sin HITL.** `/task-dev` y `/bug-fix` no se detienen en sus HITL: lo que se habría validado va a la revisión de versión. Las revisiones de Hades se mantienen.

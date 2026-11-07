@@ -385,3 +385,66 @@ Característica: Continuidad con arneses ausentes
     Cuando envío "/tarea Arreglar login --perfil claude/opus/high --estricto"
     Entonces la tarea se crea sin versión con perfil {harness: claude, model: opus, effort: high, estricto: true}
     Y un perfil inválido se rechaza sin crear la tarea
+
+  @B-ADV-0026 @CA-1 @CA-2 @CA-3 @CA-4
+  Escenario: Bloquear localmente una tarea con pregunta humana, conservar su trabajo en wip y continuar con la independiente
+    Dado un proyecto en release/v1.1 con Telegram habilitado y usuarios autorizados 111,222
+    Y las tareas T-ADV-0101 sin dependencias, T-ADV-0102 independiente y T-ADV-0103 dependiente de T-ADV-0101 en estado planned
+    Cuando el paso task-dev de T-ADV-0101 modifica src/modulo_a.py y solicita intervención humana con la pregunta "¿Usar proveedor OAuth interno o externo?" y contexto "Falta decidir proveedor sin valor por defecto seguro"
+    Entonces el paso libera el bucle sin esperar entrada interactiva por stdin y mantiene las decisiones autónomas con valor por defecto seguro del modo orquestado
+    Y se registra la pregunta Q-ADV-0001 vinculada a T-ADV-0101 con estado pendiente, su contexto y marca de aviso enviado
+    Y el trabajo de T-ADV-0101 en src/modulo_a.py queda guardado y aislado en la rama wip/T-ADV-0101
+    Y release/v1.1 queda con el árbol limpio, T-ADV-0101 en status blocked y pendiente_de humano y la pregunta anotada en docs/review/versions/v1.1-revision.md
+    Y los usuarios 111 y 222 reciben un único aviso del evento respuesta con T-ADV-0101, la referencia Q-ADV-0001, la pregunta y la instrucción "/responder Q-ADV-0001 <respuesta>"
+    Y en la siguiente vuelta del bucle se ejecuta T-ADV-0102 con árbol y base_calidad limpios sin incluir src/modulo_a.py, mientras T-ADV-0103 permanece en espera por depender de T-ADV-0101
+
+  @B-ADV-0026 @CA-1 @CA-3
+  Esquema del escenario: Conservar el bloqueo y diagnosticar sin duplicar avisos cuando el canal de Telegram falla o no está disponible
+    Dado un proyecto en release/v1.1 con la tarea T-ADV-0101 que requiere la intervención humana "¿Puerto de escucha de producción?"
+    Y configuración de canal <situacion_canal>
+    Cuando se registra el bloqueo local de T-ADV-0101 y posteriormente se consulta --estado, /estado y avanza otro paso del bucle
+    Entonces la pregunta Q-ADV-0001 permanece en estado pendiente y consultable con diagnóstico <diagnostico>
+    Y no se pierde la pregunta ni se reenvían avisos duplicados en pasos o consultas posteriores
+    Ejemplos:
+      | situacion_canal | diagnostico |
+      | sin credenciales de Telegram | canal no disponible |
+      | evento respuesta desactivado en orchestration.json | evento desactivado |
+      | fallo de envío HTTP al transporte de Telegram | fallo de envío |
+
+  @B-ADV-0026 @CA-4 @CA-6 @CA-7 @CA-8
+  Escenario: Incorporar entre pasos una respuesta recibida durante otra tarea y reanudar conservando el trabajo previo
+    Dado que T-ADV-0101 está bloqueada con la pregunta Q-ADV-0001 y su trabajo previo src/modulo_a.py aislado en wip/T-ADV-0101
+    Y el bucle está en marcha ejecutando la tarea independiente T-ADV-0102 mientras T-ADV-0103 espera a T-ADV-0101
+    Cuando el usuario autorizado 111 envía "/responder Q-ADV-0001 Usar proveedor OAuth interno" mientras corre T-ADV-0102
+    Entonces el gateway guarda la respuesta de forma duradera sin modificar ni commitear archivos rastreados del repositorio durante T-ADV-0102
+    Y confirma al usuario "Respuesta recibida para Q-ADV-0001 (T-ADV-0101); se incorporará al terminar el paso en curso" distinguiéndola de la reanudación efectiva
+    Y al terminar T-ADV-0102 el bucle incorpora la respuesta entre pasos, actualiza el contexto de T-ADV-0101 y v1.1-revision.md, pasa T-ADV-0101 a planned sin pendiente_de y marca Q-ADV-0001 como incorporada
+    Y notifica que T-ADV-0101 ha sido reanudada efectivamente
+    Y al ejecutarse T-ADV-0101 recupera src/modulo_a.py desde wip/T-ADV-0101, recibe la respuesta en su contexto, se completa y desbloquea T-ADV-0103
+
+  @B-ADV-0026 @CA-6
+  Escenario: Mantener el bloqueo cuando la respuesta incorporada no resuelve el impedimento
+    Dado que T-ADV-0101 está bloqueada con la pregunta Q-ADV-0001 pidiendo "Indica la URL base y el puerto del servicio"
+    Cuando el usuario autorizado 111 envía una respuesta insuficiente "PENDIENTE: falta definir URL y puerto" y el bucle procesa la cola entre pasos
+    Entonces T-ADV-0101 conserva status blocked y pendiente_de humano y Q-ADV-0001 sigue pendiente explicando qué falta resolver
+    Y se informa al usuario de que la respuesta no resuelve el impedimento y T-ADV-0101 permanece bloqueada
+
+  @B-ADV-0026 @CA-4 @CA-7 @CA-8
+  Esquema del escenario: Esperar intervención cuando no queda trabajo elegible y reanudar sin segunda orden salvo parada manual
+    Dado que T-ADV-0101 está bloqueada con la pregunta pendiente Q-ADV-0001, T-ADV-0102 ya está completed y T-ADV-0103 depende de T-ADV-0101
+    Y no quedan tareas elegibles en release/v1.1 y el estado de parada manual es <parada_manual>
+    Cuando el bucle alcanza la falta de tareas elegibles y después el usuario autorizado 111 responde "/responder Q-ADV-0001 Usar proveedor OAuth interno"
+    Entonces antes de la respuesta el estado distingue el bloqueo de la tarea T-ADV-0101 de un bloqueo global y mantiene el gateway disponible mostrando el motivo
+    Y tras la respuesta T-ADV-0101 actualiza su contexto con la decisión y <resultado_reanudacion>
+    Ejemplos:
+      | parada_manual | resultado_reanudacion |
+      | sin parada manual con bucle en espera | el bucle incorpora la respuesta y continúa con T-ADV-0101 y T-ADV-0103 sin segunda orden manual de lanzamiento |
+      | sin parada manual con bucle ya detenido por falta de elegibles | el gateway incorpora la respuesta, pasa T-ADV-0101 a planned y relanza el bucle en segundo plano sin exigir /lanzar |
+      | con parada manual explícita activa | la respuesta queda registrada pero se respeta la parada manual sin relanzar el bucle |
+
+  @B-ADV-0026 @CA-8
+  Escenario: Conservar preguntas, respuestas y estado de incorporación tras reinicios y recargas sin reanudar dos veces
+    Dado que Q-ADV-0001 de T-ADV-0101 recibió una respuesta pendiente de incorporar y Q-ADV-0002 de T-ADV-0104 ya fue incorporada
+    Cuando el proceso del bucle se recarga o se reinicia antes de ejecutar el siguiente paso
+    Entonces el estado de Q-ADV-0001 y Q-ADV-0002 se conserva íntegro en disco
+    Y el nuevo ciclo incorpora Q-ADV-0001 exactamente una vez y no vuelve a reanudar ni duplicar Q-ADV-0002

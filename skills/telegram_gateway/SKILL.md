@@ -15,6 +15,11 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 - Modelo conversacional: configurable en `orchestration.json` bajo la clave `"telegram"` (`harness`, `model`, `effort`). Si no se define, hereda por defecto la configuración de `"atenea"`.
 
 ## 📋 Comandos y Conversación Libre
+
+- `/preguntas` (`/pendientes`, `/questions`): muestra preguntas pendientes, ID de tarea, contexto, referencia y diagnóstico de aviso.
+- `/responder <Q-ID> <respuesta>` (`/reply`, `/answer`): registra una decisión para esa pregunta. Admite ID de tarea inequívoco; sin referencia requiere una única pregunta pendiente. Solo usuarios autorizados; rechaza preguntas ajenas, inexistentes o cerradas y detecta entregas repetidas.
+
+Con el bucle activo la confirmación indica «respuesta recibida»: el repositorio se actualiza entre pasos. Una respuesta concreta devuelve la tarea a planificación para continuar su validación. `PENDIENTE:` o `INSUFICIENTE:` conserva el bloqueo y explica qué falta. Si el bucle esperaba sin tareas elegibles, retoma automáticamente; `orquestar.parar` mantiene la parada manual. Las respuestas no conceden permisos de publicación y no sustituyen `/cerrar vX.Y confirmo`.
 - `/estado` o `/status`: resumen conciso del bucle, fase, versión y backlog; los agentes y porcentajes se consultan con `/agentes`.
 - `/agentes` o `/agents`: roles declarados, variantes por dificultad, reservas y perfiles del paso actual, incluso en FIN/PARAR. Cada modelo muestra el porcentaje consumido: agotamiento vigente al 100%, cuota primaria nativa reciente de Codex o estimación de tokens locales en 5 h frente a `cuota_tokens_5h` o referencias por familia. Incluye reinicio si aplica; ver `/orquestar`, «Estado y agentes», para fuentes y límites. Equivale a `adevv orquestar --agentes` / `--agents` y no arranca ni modifica el bucle.
 - `/lanzar` o `/run`: solicita el arranque en segundo plano en el proyecto del gateway y anuncia el siguiente paso previsto. Si hay un bucle vivo (`orquestar.pid` con un proceso en ejecución), informa de que ya está en marcha. El hijo usa la configuración habitual del proyecto y escribe en `orquestar.log`; la confirmación indica que el proceso fue lanzado, cuyo inicio puede detenerse por las validaciones normales del motor. Consulta `/estado` para seguirlo.

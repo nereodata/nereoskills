@@ -40,6 +40,7 @@ PID = 'telegram.pid'
 LOG = 'telegram.log'
 PARADA = 'telegram.parar'
 AYUDA = ('Comandos:\n/estado — cómo va el bucle y el backlog\n'
+         '/preguntas — preguntas humanas pendientes\n/responder <Q-ID> <respuesta> — registra una decisión\n'
          '/agentes (o /agents) — roles, modelos y porcentaje de cuota consumida\n'
          '/lanzar (o /run) — lanza el bucle en segundo plano\n'
          '/parar (o /stop) — para al terminar el paso en curso\n'
@@ -275,6 +276,10 @@ def responder(root, usuario, texto, autorizados):
     comando, argumento = comando.split('@')[0].lower(), argumento.strip()
     if comando in ('/estado', '/status'):
         resp = motor.parte(root)
+    elif comando in ('/preguntas', '/pendientes', '/questions'):
+        resp = motor.intervencion.consulta(root)
+    elif comando in ('/responder', '/reply', '/answer'):
+        resp = motor.responder_pregunta(root, usuario, argumento, autorizados)
     elif comando == '/cerrar':
         resp = motor.cargar_cierre_version().cerrar(root, argumento, motor)
     elif comando in ('/agentes', '/agents'):

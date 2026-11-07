@@ -6,6 +6,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0026** — Preguntas humanas persistentes y accionables por Telegram, aislamiento del trabajo bloqueado y continuación de tareas independientes; respuestas incorporadas entre pasos y reanudación respetando parada manual.
+
 - **B-ADV-0025** — `/cerrar` y `/release` comparten validaciones y publicación en `release_tools`, con preflight aislado y push atómico de main y la etiqueta solicitada.
 
 - **B-ADV-0023** — Tras un bloqueo local, Clio resuelve los cambios pendientes o se conservan en stash con aviso antes de seguir con otra tarea, también en la misma rama; si no queda limpio, el bucle para.
