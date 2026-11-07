@@ -147,7 +147,7 @@ class CierreTests(unittest.TestCase):
             'manual': 'revisión final', 'architecture': 'arquitectura',
             'product_pending': 'producto', 'product_apply': 'aplicar',
             'tracked': 'sucio', 'untracked': 'sucio', 'manifest': 'manifiesto',
-            'changelog': 'changelog', 'preflight': 'preflight', 'local_tag': 'local', 'remote_tag': 'remota',
+            'changelog': 'changelog', 'preflight': 'preflight', 'local_tag': 'local', 'remote_tag': 'publicada',
         }
         for case, fragment in cases.items():
             with self.subTest(case=case):

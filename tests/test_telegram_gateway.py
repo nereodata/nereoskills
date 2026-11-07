@@ -90,8 +90,26 @@ class GatewayTests(unittest.TestCase):
                 patch.object(motor, 'git', return_value=''):
             texto = self.responder('/status')
         self.assertIn('bucle en marcha', texto)
-        self.assertIn('v0.1.0:* 0/1 cerradas · en curso T-ADV-0002', texto)
+        self.assertIn('v0.1.0:* 0/1 tareas cerradas, 0/0 bugs cerrados · en curso T-ADV-0002', texto)
         self.assertIn('Por registrar:* 1', texto)
+
+    def test_status_separates_tasks_and_bugs_and_groups_by_vkey(self):
+        """B-ADV-0028: /estado distingue tareas y bugs y agrupa variantes de version por vkey."""
+        t1 = self.root / 'docs/plan/tasks/T-ADV-0001-base.md'
+        t1.write_text('---\nid: T-ADV-0001\ntitle: "Base"\nversion: v0.1.0\nstatus: completed\n'
+                      'depende_de: []\n---\n', encoding='utf-8')
+        b1 = self.root / 'docs/plan/bugs/B-ADV-0001-fallo-corto.md'
+        b1.parent.mkdir(parents=True, exist_ok=True)
+        b1.write_text('---\nid: B-ADV-0001\ntitle: "Fallo corto"\nversion: v0.1\nstatus: completed\n---\n',
+                      encoding='utf-8')
+        b2 = self.root / 'docs/plan/bugs/B-ADV-0002-bloqueado.md'
+        b2.write_text('---\nid: B-ADV-0002\ntitle: "Bloqueado"\nversion: v0.1.0\nstatus: blocked\n---\n',
+                      encoding='utf-8')
+        with patch.object(motor, 'pid_vivo', return_value=True), \
+                patch.object(motor, 'git', return_value=''):
+            texto = self.responder('/estado')
+        self.assertIn('*v0.1.0:* 1/2 tareas cerradas, 1/2 bugs cerrados · en curso T-ADV-0002 · bloqueadas B-ADV-0002',
+                      texto)
 
     def test_unauthorized_other_messages_are_ignored(self):
         self.assertIsNone(self.responder('hola', usuario='99999'))

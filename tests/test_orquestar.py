@@ -685,7 +685,7 @@ class EscaladaTests(unittest.TestCase):
              patch.object(motor, 'ejecutar', side_effect=mock_ejecutar), \
              patch.object(motor, 'esperar', side_effect=esperar_cuota), \
              patch.object(motor, 'ahora', side_effect=lambda: instante[0].isoformat()), \
-             patch.object(motor, 'firma', side_effect=['a', 'a', 'b']), \
+             patch.object(motor, 'firma', side_effect=['a', 'a', 'b', 'b']), \
              patch.object(motor, 'git', return_value=''), \
              patch.object(motor, 'ingerir', return_value=[]), \
              patch.object(motor, 'avisar'), \
@@ -934,6 +934,48 @@ class DificultadTests(unittest.TestCase):
         debe_d, _ = motor.comprobar_promocion(self.root, 'T2')
         self.assertFalse(debe_d)
 
+    def test_comprobar_promocion_no_promueve_en_multiturno_con_progreso_y_aprobado_hades(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'APROBADO'})
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1', 'progreso': True})
+
+        pasos, rech = motor.reintentos_acumulados(self.root, 'T1')
+        self.assertEqual((pasos, rech), (0, 0))
+        debe, motivo = motor.comprobar_promocion(self.root, 'T1')
+        self.assertFalse(debe)
+        self.assertEqual(motivo, '')
+
+    def test_comprobar_promocion_respeta_bajada_manual_de_dificultad_en_markdown(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        tarea_f = tareas / 'T1.md'
+        tarea_f.write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        with patch('builtins.print'):
+            motor.promover_dificultad(self.root, 'T1')
+            motor.promover_dificultad(self.root, 'T1')
+
+        self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'dificil')
+
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1'})
+        motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'RECHAZADO'})
+        self.assertGreater(motor.rechazos(self.root, 'T1'), 0)
+
+        # Bajada manual en el frontmatter del Markdown
+        tarea_f.write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        debe, motivo = motor.comprobar_promocion(self.root, 'T1')
+        self.assertFalse(debe)
+        self.assertEqual(motivo, '')
+        self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'sencilla')
+        self.assertEqual(motor.reintentos_acumulados(self.root, 'T1'), (0, 0))
+        self.assertEqual(motor.rechazos(self.root, 'T1'), 0)
+
     def test_bucle_promotes_difficulty_on_sin_progreso_and_retries(self):
         self.root.joinpath('task_config.yaml').write_text('validation:\n  command: true\n', encoding='utf-8')
         tareas = self.root / 'docs/plan/tasks'
@@ -1164,7 +1206,7 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(len(metricas), 2)
         self.assertTrue(metricas[0].get('sin_cuota'))
         pasos, _ = motor.reintentos_acumulados(self.root, 'T-ADV-0001')
-        self.assertEqual(pasos, 1)
+        self.assertEqual(pasos, 0)
 
     def test_loop_exhausts_all_reservas_enters_wait(self):
         cfg = {
@@ -1543,6 +1585,37 @@ class BloqueoSinProgresoTests(unittest.TestCase):
                               capture_output=True, text=True).stdout.strip()
 
 
+    def test_bloqueo_resuelve_con_clio_o_informa_fallo(self):
+        """El bloqueo conserva metadatos y solo permite continuar con árbol limpio."""
+        for resuelve in (True, False):
+            with self.subTest(resuelve=resuelve):
+                resto = self.root / 'resto.txt'
+                contenido = f'pendiente-{resuelve}'
+                resto.write_text(contenido, encoding='utf-8')
+
+                def clio(root, rol, prompt):
+                    self.assertEqual(rol, 'clio')
+                    if resuelve:
+                        self.git('add', '.')
+                        self.git('commit', '-qm', 'preservar trabajo')
+
+                real_run = subprocess.run
+
+                def run(command, **kwargs):
+                    if command[:3] == ['git', 'stash', 'push']:
+                        return subprocess.CompletedProcess(command, 1)
+                    return real_run(command, **kwargs)
+
+                with (patch.object(motor, 'agente', side_effect=clio),
+                      patch.object(motor.subprocess, 'run', side_effect=run),
+                      patch.object(motor, 'avisar')):
+                    self.assertEqual(motor.bloquear_sin_progreso(
+                        self.root, 'T-DEM-0001', 2, 'rechazo'), resuelve)
+                self.assertEqual(motor.frontmatter(motor.fichero_de(
+                    self.root, 'T-DEM-0001'))['status'], 'blocked')
+                self.assertEqual(bool(self.git('status', '--porcelain')), not resuelve)
+                self.assertEqual(resto.read_text(encoding='utf-8'), contenido)
+
     def test_bloquea_solo_atascada_y_completa_independiente(self):
         """Ambos pasos aíslan el bloqueo; media promociona antes de bloquear."""
         for paso, nivel in [('task-dev', 'dificil'), ('bug-fix', 'dificil'), ('task-dev', 'media')]:
@@ -1575,6 +1648,9 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         cola = 'Z' * 1989 + 'FIN RECHAZO'
         def ejecutar(a, root, prompt, **kwargs):
             actual = kwargs['env']['ORQUESTAR_ID']
+            if actual == iid and not llamadas:
+                (root / 'resto.txt').write_text('trabajo interrumpido', encoding='utf-8')
+                revision.write_text(revision.read_text(encoding='utf-8') + 'Edición pendiente.\n', encoding='utf-8')
             llamadas.append((actual, motor.dificultad_de(root, actual)))
             if actual != iid:
                 self.assertEqual(actual, 'T-DEM-0002')
@@ -1588,6 +1664,7 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         with (patch.object(motor, 'ejecutar', side_effect=ejecutar),
               patch.object(motor, 'construir_prompt_paso', return_value='prompt'),
               patch.object(motor, 'comprobar_promocion', return_value=(False, '')),
+              patch.object(motor, 'agente', side_effect=SystemExit('sin arnés')),
               patch.object(motor, 'avisar') as aviso, patch('builtins.print')):
             self.assertEqual(motor.bucle(args, self.root), 2)
         fm = motor.frontmatter(atascada)
@@ -1605,8 +1682,11 @@ class BloqueoSinProgresoTests(unittest.TestCase):
         self.assertIn('2 intentos', informe)
         self.assertIn('dificil', informe)
         self.assertTrue(any(iid in c.args[2] and cola in c.args[2] for c in aviso.call_args_list))
-        self.assertEqual(llamadas, [(iid, 'media')] * 2 + [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')]
-                         if nivel == 'media' else [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')])
+        self.assertEqual(llamadas, [(iid, 'media')] * 3 + [(iid, 'dificil')] * 2 + [('T-DEM-0002', 'media')]
+                         if nivel == 'media' else [(iid, 'dificil')] * 3 + [('T-DEM-0002', 'media')])
+        self.assertFalse((self.root / 'resto.txt').exists())
+        self.assertIn('resto.txt', self.git('stash', 'show', '--include-untracked', '--name-only', 'stash@{0}'))
+        self.assertIn('Edición pendiente.', informe)
         self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0002'))['status'], 'completed')
         self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, 'T-DEM-0003'))['status'], 'planned')
         estado = motor.estado(self.root, 'docs')

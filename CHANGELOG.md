@@ -2,6 +2,30 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.0] - 2026-11-07
+
+### Añadido
+
+- **T-ADV-0032** — Coordinador compartido de chequeos de calidad y release (`chequeos.py`): catálogo honesto por disponibilidad y resultado, plan explicable con origen, identidad compuesta de evidencia, coordinación concurrente entre CLI, gateway, agentes y worktrees, precedencia del último resultado real con registro de intermitencias, caché por comprobación y reutilización de preflight en el worktree integrado respetando `release.restricciones`.
+
+### Corregido
+
+- **B-ADV-0030** — Adaptados tests de regresión de orquestación (`test_orquestar.py`) para abastecer las llamadas sucesivas a `firma()` en turnos con espera de cuota y verificar que los pasos completados con progreso no acumulan reintentos indebidos tras B-ADV-0027.
+
+- **B-ADV-0028** — `/estado` en Telegram desglosa por separado tareas y bugs de la versión abierta, agrupando variantes numéricas por `vkey`.
+
+- **B-ADV-0024** — El gateway clasifica las marcas de cuota sin hora como supuestas de 300 s mediante `fallo_cuota`, permite su sondeo periódico con `configuraciones_con_cuota`, registra la recuperación tras éxito y avisa de falta de créditos una sola vez por episodio.
+
+- **B-ADV-0027** — `reintentos_acumulados` no promueve indebidamente en tareas multiturno con progreso o aprobación de Hades y respeta las bajadas manuales de dificultad en Markdown reseteando contadores.
+
+- **B-ADV-0026** — Preguntas humanas persistentes y accionables por Telegram, aislamiento del trabajo bloqueado y continuación de tareas independientes; respuestas incorporadas entre pasos y reanudación respetando parada manual.
+
+- **B-ADV-0025** — `/cerrar` y `/release` comparten validaciones y publicación en `release_tools`, con preflight aislado y push atómico de main y la etiqueta solicitada.
+
+- **B-ADV-0023** — Tras un bloqueo local, Clio resuelve los cambios pendientes o se conservan en stash con aviso antes de seguir con otra tarea, también en la misma rama; si no queda limpio, el bucle para.
+
+- **B-ADV-0029** — Las reservas del bucle conservan su arnés al usar `--harness`; comandos, sesiones, cuotas y métricas usan el perfil efectivo, sin reutilizar la sesión de otro arnés.
+
 ## [1.0.0] - 2026-10-27
 
 ### Añadido

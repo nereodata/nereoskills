@@ -4,18 +4,18 @@ title: "Visor gráfico: registro de proyectos y estado de cada uno"
 type: funcional
 weight: 100
 dificultad: dificil
-version: "v1.1.0"
+version: "v1.2.0"
 status: planned
 depende_de: []
-origen: "Petición del usuario: visor gráfico del estado de los proyectos (v1.1)"
+origen: "Petición del usuario: visor gráfico del estado de los proyectos (v1.2)"
 created_at: 2026-10-26
-updated_at: 2026-10-26
+updated_at: 2026-11-02
 ---
 
 # T-ADV-0027: Visor gráfico: registro de proyectos y estado de cada uno
 
 ## 🎯 Objetivo de Negocio
-Ver de un vistazo, en una sola ventana, todos los proyectos que gestiona Adevv en la máquina y en qué punto está cada uno, sin abrir cada repositorio ni preguntar en cada arnés. Es la base del visor de v1.1, sobre la que se montan la vista de agentes (T-ADV-0028) y el chat (T-ADV-0029).
+Ver de un vistazo, en una sola ventana, todos los proyectos que gestiona Adevv en la máquina y en qué punto está cada uno, sin abrir cada repositorio ni preguntar en cada arnés. Es la base del visor de v1.2, sobre la que se montan la vista de agentes (T-ADV-0028) y el chat (T-ADV-0029).
 
 ## 📋 Criterios de Aceptación (Nivel Máster)
 - [ ] **CA-M-1 (Registro de proyectos):** un registro por máquina en el almacén de Adevv (p. ej. `~/.adevv/proyectos.json`) con los proyectos gestionados. Desde el visor (y con `adevv proyectos añadir|quitar|listar`) se añade un proyecto existente (carpeta con `task_config.yaml`) o se quita del registro sin tocar el proyecto. `adevv orquestar` registra automáticamente el proyecto en el que se lanza.

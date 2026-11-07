@@ -150,6 +150,25 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Cuando la reanudación falla y el reintento sin sesión también falla sin cuota ni error de arranque
     Entonces se conserva el tratamiento de error ordinario sin invocar reservas
 
+  @B-ADV-0024
+  Escenario: Tratar cuotas sin hora como supuestas de 300 segundos y permitir sondeo periódico
+    Dado telegram con titular codex/m1 y reserva claude/m2
+    Y que todos los instantes del escenario están en UTC el 26 de octubre de 2026
+    Cuando a las 12:00:00 codex/m1 falla por cuota sin hora de reinicio
+    Entonces la métrica registra cuota_tipo supuesta, origen sin hora en la respuesta y cuota_espera_s de 300 segundos
+    Y claude/m2 responde como reserva a las 12:00:00
+    Cuando a las 12:04:59 se envía otro mensaje
+    Entonces no se sondea codex/m1 y responde claude/m2
+    Cuando a las 12:05:00 se envía otro mensaje y codex/m1 responde con éxito
+    Entonces se sondea e invoca primero codex/m1 y se registra la recuperación de cuota para codex/m1
+
+  @B-ADV-0024
+  Escenario: Notificar créditos en fallo de cuota una sola vez por episodio
+    Dado telegram con titular codex/m1 como único modelo y sin reservas
+    Cuando a las 12:00:00 codex/m1 falla por agotamiento de créditos
+    Entonces se emite un aviso de cuota informando de la falta de créditos en codex
+    Y una repetición del fallo dentro del mismo episodio no duplica el aviso
+
   @T-ADV-0030 @CA-M-3 @CA-M-4
   Esquema del escenario: Rechazar cada entrada de escucha con token ambiental antes de cualquier efecto
     Dado un proyecto temporal ProyectoDemo sin variables TELEGRAM_* heredadas y con restauración del entorno al terminar incluso ante fallos
@@ -278,3 +297,28 @@ Característica: Continuidad de la conversación de Telegram con reservas
     Cuando ejecuto adevv telegram --autoarranque on desde la raíz del proyecto
     Entonces termina con código distinto de cero e informa que el autoarranque no está soportado en este sistema
     Y la carpeta conserva exactamente sus entradas y contenidos y no se solicita ningún proceso ni registro de autoarranque
+
+  @B-ADV-0026 @CA-1 @CA-5 @CA-8 @CA-9
+  Esquema del escenario: Validar autorización, referencias e idempotencia al responder preguntas por Telegram
+    Dado un proyecto ProyectoUno con usuarios autorizados 111,222 y otro proyecto ProyectoDos con pregunta Q-DOS-0001
+    Y en ProyectoUno existen las preguntas pendientes <preguntas_abiertas> y la pregunta ya cerrada Q-ADV-0009 de T-ADV-0109
+    Cuando el usuario <usuario> envía "<mensaje>" al gateway de ProyectoUno
+    Entonces <resultado>
+    Y no se mezclan decisiones entre tareas ni entre proyectos ni se conceden permisos de publicación de versión
+    Ejemplos:
+      | usuario | preguntas_abiertas | mensaje | resultado |
+      | 999 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-0001 Sí | no recibe respuesta y Q-ADV-0001 sigue pendiente sin cambios |
+      | 111 | Q-ADV-0001 (T-ADV-0101), Q-ADV-0002 (T-ADV-0102) | /responder Usar interno | se rechaza por ambigüedad indicando las referencias pendientes Q-ADV-0001 y Q-ADV-0002 sin modificar ninguna |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-9999 Usar interno | se rechaza indicando que la referencia Q-ADV-9999 no existe |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-ADV-0009 Usar interno | se rechaza indicando que Q-ADV-0009 ya está cerrada |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder Q-DOS-0001 Usar interno | se rechaza indicando que Q-DOS-0001 no pertenece a este proyecto |
+      | 111 | Q-ADV-0001 (T-ADV-0101), Q-ADV-0002 (T-ADV-0102) | /responder Q-ADV-0002 Usar Postgres | se vincula únicamente a Q-ADV-0002 de T-ADV-0102 y Q-ADV-0001 sigue pendiente |
+      | 111 | Q-ADV-0001 (T-ADV-0101) | /responder T-ADV-0101 Usar OAuth interno | se vincula inequívocamente a Q-ADV-0001 de T-ADV-0101 |
+
+  @B-ADV-0026 @CA-5 @CA-8 @CA-9
+  Escenario: Gestionar entregas repetidas y consultas de preguntas pendientes sin duplicar decisiones
+    Dado un proyecto con la pregunta pendiente Q-ADV-0001 para T-ADV-0101 y bucle en marcha
+    Cuando el usuario autorizado 111 consulta /preguntas y /estado
+    Entonces ambas respuestas muestran Q-ADV-0001, la tarea T-ADV-0101, la pregunta y cómo responder con "/responder Q-ADV-0001 <respuesta>"
+    Cuando el usuario 111 envía dos veces seguidas "/responder Q-ADV-0001 Usar OAuth interno"
+    Entonces la primera entrega registra la respuesta en cola y la segunda entrega idéntica se reconoce como duplicada sin crear una segunda decisión ni reanudar dos veces

@@ -22,25 +22,13 @@ Formaliza el cierre de una versión del proyecto y su etiquetado.
 - Cerrar la tarea de release en el backlog.
 
 ### 3. Merge y Etiquetado (Requiere confirmación)
-- **Para Release normal (`release/vX.Y`)**:
+- Desde la rama `release/vX.Y` o `hotfix/vX.Y.Z`, usar la misma implementación que `/cerrar`:
   ```bash
-  git checkout main
-  git pull --ff-only
-  git merge --no-ff release/vX.Y -m "chore(release): vX.Y.Z"
-  git tag -a vX.Y.Z -m "Release vX.Y.Z"
-  git push origin main --follow-tags
-  git branch -d release/vX.Y
+  python -c "from pathlib import Path; from adevv.release_tools import publicar_version; publicar_version(Path.cwd(), 'vX.Y.Z')"
   ```
-- **Para Hotfix (`hotfix/vX.Y.Z`)**:
-  ```bash
-  git checkout main
-  git pull --ff-only
-  git merge --no-ff hotfix/vX.Y.Z -m "chore(release): vX.Y.Z"
-  git tag -a vX.Y.Z -m "Release vX.Y.Z"
-  git push origin main --follow-tags
-  # Si hay rama release activa, integrar el fix:
-  git checkout release/vA.B && git merge hotfix/vX.Y.Z && git push
-  ```
+- La función valida manifiestos, changelog y etiquetas; prepara el merge en un worktree aislado y evalúa `release.preflight` reutilizando la evidencia acreditada del proyecto si el árbol integrado coincide exactamente con el árbol ya verificado (o reejecutándolo si el merge con `main` introduce cambios). Publica `main` y la etiqueta anotada mediante un único push atómico. Un fallo anterior al push conserva la rama y el árbol originales. Respeta además las políticas de `task_config.yaml::release.restricciones` para `validar`, `cerrar_local`, `etiquetar` y `publicar`.
+- Tras éxito queda en `main`. Eliminar la rama release cerrada con `git branch -d release/vX.Y`.
+- Para hotfix, si hay una release abierta, integrar después el fix en ella y publicar esa rama como antes.
 
 ### 4. Verificación Post-Tag
 - Vigilar compilación/CI: `gh run watch` u observar panel.

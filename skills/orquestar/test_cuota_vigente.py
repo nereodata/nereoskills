@@ -104,17 +104,18 @@ class CuotaVigenteTests(unittest.TestCase):
         self.assertEqual(self.invocar(), ['intermedia'])
 
     def test_bucle_omite_cuota_y_respeta_harness_forzado_y_cmd(self):
-        """El paso usa cuotas; las opciones explícitas de arnés y comando conservan su selección."""
-        for harness, cmd, arnes, esperado in (
-                (None, None, 'claude', 'intermedia'),
-                ('codex', None, 'codex', 'titular'),
-                ('codex', None, 'claude', 'titular'),
-                (None, 'personalizado {prompt}', 'claude', 'titular')):
+        """El paso filtra pares efectivos; una plantilla explícita conserva su selección."""
+        for harness, cmd, arnes, modelo_agotado, esperado, arnes_esperado in (
+                (None, None, 'claude', 'titular', 'intermedia', 'claude'),
+                ('codex', None, 'codex', 'titular', 'predeterminado', 'codex'),
+                ('codex', None, 'claude', 'titular', 'predeterminado', 'codex'),
+                ('codex', None, 'codex', 'predeterminado', 'intermedia', 'codex'),
+                (None, 'personalizado {prompt}', 'claude', 'titular', 'titular', 'claude')):
             with self.subTest(harness=harness, cmd=cmd, arnes=arnes):
                 ruta = self.root / motor.METRICAS
                 if ruta.exists():
                     ruta.unlink()
-                self.agotamiento(arnes=arnes)
+                self.agotamiento(arnes=arnes, modelo=modelo_agotado)
                 args = motor.argparse.Namespace(idea=None, docs='docs', test=None, harness=harness,
                     estado=False, max_pasos=1, reintentos=2, espera_max=2, cmd=cmd)
                 with (patch.object(motor, 'iniciar_gateway'),
@@ -128,7 +129,9 @@ class CuotaVigenteTests(unittest.TestCase):
                       patch.object(motor, 'esperar') as esperar):
                     motor.bucle(args, self.root)
                 ejecutar.assert_called_once()
-                self.assertEqual(ejecutar.call_args.kwargs['rol']['model'], esperado)
+                perfil = ejecutar.call_args.kwargs['rol']
+                self.assertEqual(perfil.get('model') or 'predeterminado', esperado)
+                self.assertEqual(perfil['harness'], arnes_esperado)
                 esperar.assert_not_called()
 
 

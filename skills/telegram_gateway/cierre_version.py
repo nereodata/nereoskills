@@ -3,9 +3,7 @@
 import os
 import re
 import subprocess
-import sys
-import tempfile
-from pathlib import Path
+from adevv import release_tools
 
 def resumen(root, version):
     """Resume la revisión y conserva siempre la orden de confirmación."""
@@ -78,64 +76,24 @@ def validar(root, version, motor):
     config_path = root / 'task_config.yaml'
     cfg = (motor.yaml.safe_load(config_path.read_text(encoding='utf-8'))
            if hasattr(motor.yaml, 'safe_load') else motor.yaml.load_yaml(config_path))
+    coordinador = release_tools._chequeos()
+    for accion_req in ('validar', 'cerrar_local', 'etiquetar', 'publicar'):
+        coordinador.verificar_restriccion_release(root, 'gateway', accion_req, cfg=cfg)
     tag = str(cfg.get('project', {}).get('version', ''))
     tag = 'v' + tag.removeprefix('v')
     if not re.fullmatch(re.escape(version) + r'\.\d+', tag):
         raise ValueError('Versión del proyecto desalineada con la release.')
-    scripts = Path(__file__).resolve().parents[1] / 'release/scripts'
     try:
-        ejecutar(root, [sys.executable, str(scripts / 'check_manifests_versions.py'), '--dir', str(root)])
-    except RuntimeError as error:
-        raise ValueError(f'Versión desalineada del manifiesto: {error}') from error
-    changelog = root / 'CHANGELOG.md'
-    if not changelog.exists() or not re.search(r'^##\s+\[?v?' + re.escape(tag[1:]) + r'\]?(?:\s|$)', changelog.read_text(encoding='utf-8'), re.MULTILINE):
-        raise ValueError('Falta el changelog de la versión.')
-    if git(root, 'tag', '--list', tag):
-        raise ValueError('La etiqueta local ya existe.')
-    if git(root, 'ls-remote', '--tags', 'origin', f'refs/tags/{tag}'):
-        raise ValueError('La etiqueta remota ya existe.')
+        release_tools.validar_publicacion(root, tag, cfg=cfg)
+    except release_tools.ReleaseValidationError as error:
+        raise ValueError(f'Validación de manifiestos/publicación: {error}') from error
     return rama, tag, cfg
 
 
 def publicar(root, rama, tag, cfg):
-    """Prepara en un worktree aislado y publica main y tag en una transacción."""
-    original = git(root, 'rev-parse', 'refs/heads/main')
-    release = git(root, 'rev-parse', rama)
-    remoto = git(root, 'ls-remote', 'origin', 'refs/heads/main').split()
-    if not remoto:
-        raise ValueError('No existe main en el remoto.')
-    git(root, 'fetch', '--no-tags', '--no-write-fetch-head', 'origin', remoto[0])
-    published = False
-    created_tag = False
-    with tempfile.TemporaryDirectory(prefix='adevv-cierre-') as tmp:
-        worktree = Path(tmp).resolve() / 'release'
-        try:
-            git(root, 'worktree', 'add', '--detach', str(worktree), original)
-            git(worktree, 'merge', '--ff-only', remoto[0])
-            git(worktree, 'merge', '--no-ff', release, '-m', f'chore(release): {tag}')
-            timeout = (cfg.get('release') or {}).get('preflight_timeout', 600)
-            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout < float('inf'):
-                raise ValueError('release.preflight_timeout debe ser positivo y finito (segundos).')
-            for command in (cfg.get('release') or {}).get('preflight', []):
-                try:
-                    ejecutar(worktree, command, shell=True, timeout=timeout)
-                except (RuntimeError, subprocess.TimeoutExpired) as error:
-                    raise RuntimeError(f'Fallo de preflight: {error}') from error
-            if git(worktree, 'status', '--porcelain'):
-                raise RuntimeError('El preflight dejó el árbol sucio.')
-            git(worktree, 'tag', '-a', tag, '-m', f'Release {tag}')
-            created_tag = True
-            commit = git(worktree, 'rev-parse', 'HEAD')
-            git(worktree, 'push', '--atomic', 'origin', f'{commit}:refs/heads/main', f'refs/tags/{tag}:refs/tags/{tag}')
-            published = True
-        finally:
-            if worktree.exists():
-                git(root, 'worktree', 'remove', '--force', str(worktree))
-            if created_tag and not published:
-                git(root, 'tag', '-d', tag)
+    """Publica con la transacción común y elimina la rama cerrada tras el éxito."""
+    release_tools.publicar_version(root, tag, rama=rama, cfg=cfg)
     try:
-        git(root, 'update-ref', 'refs/heads/main', commit, original)
-        git(root, 'checkout', 'main')
         git(root, 'branch', '-d', rama)
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
         raise RuntimeError(f'{tag} publicada; falta completar el cierre local: {error}') from error
