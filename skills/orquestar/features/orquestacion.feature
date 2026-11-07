@@ -351,6 +351,35 @@ Característica: Continuidad con arneses ausentes
     Cuando el bucle promueve su dificultad
     Entonces el campo perfil queda intacto
 
+  @B-ADV-0029
+  Esquema del escenario: La reserva conserva su arnés aunque el principal se elija por CLI
+    Dado un rol <rol> de dificultad dificil con principal codex modelo gpt-6.1-sol esfuerzo max
+    Y reservas agy modelo gemini-4-argon esfuerzo high y claude modelo claude-opus-5-5 esfuerzo high
+    Y un bucle lanzado con --harness codex y una sesión previa codex-principal
+    Cuando Codex agota cuota y después agy agota cuota
+    Entonces los comandos lanzados usan codex, agy y claude en ese orden con sus respectivos modelos y esfuerzos
+    Y agy y claude no reciben la sesión de Codex ni la de otro arnés
+    Y las métricas atribuyen cada intento a su arnés, modelo y sesión reales
+    Y Claude continúa el paso sin esperar la cuota de Codex
+    Ejemplos:
+      | rol |
+      | development |
+      | artemisa |
+
+  @B-ADV-0029
+  Escenario: Una reserva del mismo arnés conserva la sesión tras agotar cuota
+    Dado un principal codex con --harness codex y una reserva que solo redefine su modelo
+    Cuando el principal agota cuota
+    Entonces la reserva usa codex con su propio modelo y reanuda la sesión del principal
+
+  @B-ADV-0029
+  Escenario: Forzar un principal diferente no traslada su modelo incompatible
+    Dado un principal agy modelo gemini-4-argon esfuerzo high y una reserva claude modelo claude-opus-5-5 esfuerzo high
+    Cuando el bucle usa --harness codex y Codex agota cuota
+    Entonces el principal se lanza con codex sin el modelo ni el esfuerzo de agy
+    Y las métricas del principal indican codex y modelo predeterminado
+    Y la reserva usa claude modelo claude-opus-5-5 esfuerzo high con sesión nueva
+
   @T-ADV-0031
   Escenario: Fijar el perfil al crear una tarea desde Telegram
     Cuando envío "/tarea Arreglar login --perfil claude/opus/high --estricto"

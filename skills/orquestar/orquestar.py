@@ -7,6 +7,7 @@ backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
 Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 """
 import argparse
+import copy
 import ctypes
 import hashlib
 import importlib.util
@@ -2652,7 +2653,7 @@ def en_fondo(root, argumentos=None):
 def main():
     ap = argparse.ArgumentParser(description='Orquestador: de la idea al producto, paso a paso.')
     ap.add_argument('--harness', choices=HARNESS, default=None,
-                    help=f'arnés de todos los pasos (por defecto, el de cada rol en {CONFIG}, o claude)')
+                    help=f'arnés principal de cada paso; las reservas conservan el suyo (por defecto, {CONFIG}, o claude)')
     ap.add_argument('--cmd', help='plantilla propia del arnés, con {prompt} (sustituye a --harness)')
     ap.add_argument('--docs', default='docs/requirements', help='carpeta de requisitos y planes')
     ap.add_argument('--test', help='comando de la suite (por defecto, validation.command de task_config.yaml)')
@@ -2894,13 +2895,20 @@ def bucle(a, root):
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
+        args_paso = a
+        if a.harness and not a.cmd:
+            args_paso = copy.copy(a)
+            args_paso.harness = None
+            if a.harness != cfg_rol.get('harness', 'claude'):
+                cfg_rol = {k: v for k, v in cfg_rol.items() if k not in ('model', 'effort')}
+            cfg_rol = {**cfg_rol, 'harness': a.harness}
         reservas = lista_reservas(cfg_rol)
         configs_originales = [cfg_rol] + reservas
         contexto_cuota = {'desde': len(leer_metricas(root)), 'pares': {
             (cfg.get('harness', 'claude'), cfg.get('model') or 'predeterminado')
             for cfg in configs_originales}}
         configs_a_probar = configs_originales
-        if not a.cmd and not a.harness:
+        if not args_paso.cmd and not args_paso.harness:
             configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
         cede = 'sin cuota' if cfg_rol.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg_rol else ''
         ausencia_fijada = False
@@ -2919,7 +2927,7 @@ def bucle(a, root):
         ultimo_registrado = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-            arnes_paso = a.cmd or arnes(a, cfg_actual)
+            arnes_paso = args_paso.cmd or arnes(args_paso, cfg_actual)
             if idx_cfg == 0:
                 nueva_sesion = (recuperacion and recuperacion['indice'] > 0
                                 and not recuperacion.get('perfil_iniciado', False))
@@ -2939,9 +2947,9 @@ def bucle(a, root):
                     if recuperacion is not None:
                         recuperacion['perfil_iniciado'] = True
                     if sesion_paso:
-                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
+                        resultado = ejecutar(args_paso, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
                     else:
-                        resultado = ejecutar(a, root, prompt, env=env, rol=cfg_actual)
+                        resultado = ejecutar(args_paso, root, prompt, env=env, rol=cfg_actual)
                 except ArnesAusente:
                     posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
                     registrar_ausencia(root, 'paso', posicion,
@@ -3061,7 +3069,7 @@ def bucle(a, root):
                     if not ultimo_registrado:
                         registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                          'rama': git('branch', '--show-current'), 'rol': rol,
-                                         'arnes': a.cmd or arnes(a, cfg_usada),
+                                         'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
                                          'modelo': cfg_usada.get('model') or 'predeterminado',
                                          'codigo': codigo, **m, **marca_fijado(cfg_usada),
                                          **({'sin_cuota': True} if 'cuota_espera_s' in m else {}),
@@ -3069,10 +3077,10 @@ def bucle(a, root):
                     cfg_usada = cfg_recuperable
                     m = {'modelos': {}}
         if not codigo:
-            recuperar_cuota(root, arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
+            recuperar_cuota(root, arnes(args_paso, cfg_usada), cfg_usada.get('model') or 'predeterminado')
         if not ultimo_registrado or cuota is not None:
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
-                             'rol': rol, 'arnes': a.cmd or arnes(a, cfg_usada),
+                             'rol': rol, 'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
                              **marca_fijado(cfg_usada),
                              **({'escalado': True} if escalado else {}),

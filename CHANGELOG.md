@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [Sin publicar]
+
+### Corregido
+
+- **B-ADV-0029** — Las reservas del bucle conservan su arnés al usar `--harness`; comandos, sesiones, cuotas y métricas usan el perfil efectivo, sin reutilizar la sesión de otro arnés.
+
 ## [1.0.0] - 2026-10-27
 
 ### Añadido
