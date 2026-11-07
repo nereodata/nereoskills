@@ -6,6 +6,7 @@ weight: 20
 dificultad: dificil
 version: "v1.1.0"
 status: planned
+depende_de: ["B-ADV-0023"]
 origen: "Incidencia comunicada por el usuario y alcance acordado en conversación (2026-11-02)"
 created_at: 2026-11-02
 updated_at: 2026-11-02

@@ -6,7 +6,7 @@ weight: 100
 dificultad: dificil
 version: "v1.1.0"
 status: planned
-depende_de: []
+depende_de: ["B-ADV-0025"]
 origen: "Petición del usuario (2026-11-02): suites de cierre duplicadas en Afinn y verdes antiguos que ocultan fallos posteriores"
 created_at: 2026-11-02
 updated_at: 2026-11-02
