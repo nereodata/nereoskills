@@ -928,6 +928,38 @@ def siguiente_dificultad(dif):
     return None
 
 
+DIFICULTADES = {'sencilla': 1, 'media': 2, 'dificil': 3}
+
+
+def nivel_dificultad(dif):
+    """Nivel numérico de dificultad: sencilla=1, media=2, dificil=3."""
+    dif = (dif or 'media').strip().lower().replace('í', 'i')
+    return DIFICULTADES.get(dif, 2)
+
+
+def sincronizar_dificultad(root, iid):
+    """Detecta si la dificultad en Markdown es menor que la última registrada en métricas.
+    Si es así, persiste un evento de promoción manual para resetear contadores y fijar la nueva base."""
+    if not iid or not (root / METRICAS).exists():
+        return False
+    dif_md = dificultad_de(root, iid)
+    if not dif_md:
+        return False
+    ultima_dif = None
+    for f in leer_metricas(root):
+        if f.get('id') == iid:
+            if f.get('tipo') == 'promocion' and f.get('dificultad'):
+                ultima_dif = f.get('dificultad')
+            elif f.get('tipo', 'paso') == 'paso' and f.get('dificultad'):
+                ultima_dif = f.get('dificultad')
+    if ultima_dif and nivel_dificultad(dif_md) < nivel_dificultad(ultima_dif):
+        print(f'[orquestar] {iid}: detectada bajada manual de dificultad de {ultima_dif} a {dif_md}; reinicio contadores.', flush=True)
+        registrar(root, {'tipo': 'promocion', 'fecha': ahora(), 'id': iid,
+                         'de': ultima_dif, 'dificultad': dif_md, 'manual': True})
+        return True
+    return False
+
+
 def fichero_de(root, iid):
     """Ruta al fichero .md de una tarea o bug."""
     if not iid:
@@ -1409,6 +1441,7 @@ def cuota_descartada(root, configuraciones, seleccionadas, incluir_recuperadas=F
 
 def rechazos(root, iid):
     """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
+    sincronizar_dificultad(root, iid)
     n = 0
     if iid and (root / METRICAS).exists():
         for f in leer_metricas(root):
@@ -1421,17 +1454,12 @@ def rechazos(root, iid):
 
 def reintentos_acumulados(root, iid):
     """(ejecuciones_paso, rechazos_hades) desde la última subida o inicio."""
+    sincronizar_dificultad(root, iid)
     pasos = 0
     rech = 0
     if not iid or not (root / METRICAS).exists():
         return 0, 0
-    for linea in (root / METRICAS).read_text(encoding='utf-8').splitlines():
-        if not linea.strip():
-            continue
-        try:
-            f = json.loads(linea)
-        except Exception:
-            continue
+    for f in leer_metricas(root):
         if f.get('id') != iid:
             continue
         if f.get('tipo') == 'promocion':
@@ -1439,15 +1467,23 @@ def reintentos_acumulados(root, iid):
             rech = 0
             continue
         if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota'):
-            pasos += 1
+            if f.get('progreso'):
+                pasos = 0
+            else:
+                pasos += 1
         elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('veredicto'):
-            rech = rech + 1 if f['veredicto'] == 'RECHAZADO' else 0
+            if f['veredicto'] == 'RECHAZADO':
+                rech += 1
+            else:
+                rech = 0
+                pasos = 0
     return pasos, rech
 
 
 def comprobar_promocion(root, iid):
     """Comprueba si un ID debe promocionar de dificultad tras reintentos o rechazos seguidos.
     Retorna (debe_promover, motivo)."""
+    sincronizar_dificultad(root, iid)
     dif = dificultad_de(root, iid)
     if dif not in ('sencilla', 'media'):
         return False, ''
@@ -3071,6 +3107,7 @@ def bucle(a, root):
                                  'rama': git('branch', '--show-current'), 'rol': rol,
                                  'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
                                  'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                 **({'dificultad': dif} if dif else {}),
                                  **({'escalado': True} if escalado else {})})
                 demora = (60, 300, 900)[min(intento, 2)]
                 inicio = time.monotonic()
@@ -3102,7 +3139,8 @@ def bucle(a, root):
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
                                      'rol': rol, 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
-                                 'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                     'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                     **({'dificultad': dif} if dif else {}),
                                      **({'escalado': True} if escalado else {}),
                                      'sin_cuota': True})
                     print(f'[orquestar] sin cuota en {rol} ({cfg_actual.get("model") or arnes_paso}); '
@@ -3121,6 +3159,7 @@ def bucle(a, root):
                                  'rama': git('branch', '--show-current'), 'rol': rol,
                                  'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
                                  'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                                 **({'dificultad': dif} if dif else {}),
                                  **({'escalado': True} if escalado else {})})
                 ultimo_registrado = True
                 print(f'[orquestar] fallo persistente en {rol} ({cfg_actual.get("model") or arnes_paso}); '
@@ -3167,10 +3206,14 @@ def bucle(a, root):
                     m = {'modelos': {}}
         if not codigo:
             recuperar_cuota(root, arnes(args_paso, cfg_usada), cfg_usada.get('model') or 'predeterminado')
+        despues = firma(root, a.docs)
+        hubo_progreso = bool(paso_completado or (despues != antes))
         if not ultimo_registrado or cuota is not None:
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
+                             **({'dificultad': dif} if dif else {}),
+                             'progreso': hubo_progreso,
                              **marca_fijado(cfg_usada),
                              **({'escalado': True} if escalado else {}),
                              **({'sin_cuota': True, 'espera_s': cuota} if cuota else {})})
@@ -3205,7 +3248,7 @@ def bucle(a, root):
                 return 2
             continue
         if codigo or cuota is not None:
-            if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+            if despues != antes and not git('status', '--porcelain'):
                 print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
                 sin_progreso = 0
                 recuperaciones_analisis.pop(clave_analisis, None)
@@ -3217,7 +3260,7 @@ def bucle(a, root):
                          + (f'\nÚltima salida del arnés:\n{salida[-2000:]}' if cuota is None else ''))
         esperado = 0
 
-        if firma(root, a.docs) == antes:
+        if despues == antes:
             if recuperacion is not None:
                 recuperacion['intentos'] += 1
                 print(f'[orquestar] {paso} {arg or ""}: sin progreso '

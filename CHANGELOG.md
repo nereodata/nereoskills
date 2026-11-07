@@ -6,6 +6,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0027** — `reintentos_acumulados` no promueve indebidamente en tareas multiturno con progreso o aprobación de Hades y respeta las bajadas manuales de dificultad en Markdown reseteando contadores.
+
 - **B-ADV-0026** — Preguntas humanas persistentes y accionables por Telegram, aislamiento del trabajo bloqueado y continuación de tareas independientes; respuestas incorporadas entre pasos y reanudación respetando parada manual.
 
 - **B-ADV-0025** — `/cerrar` y `/release` comparten validaciones y publicación en `release_tools`, con preflight aislado y push atómico de main y la etiqueta solicitada.

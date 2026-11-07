@@ -5,10 +5,10 @@ type: bug
 weight: 50
 dificultad: media
 version: "v1.1.0"
-status: planned
+status: completed
 origen: "Incidencia detectada en Afinn (T-AFN-0139) y comunicada por el usuario (2026-11-06)"
 created_at: 2026-11-06
-updated_at: 2026-11-06
+updated_at: 2026-11-07
 ---
 
 # B-ADV-0027: `reintentos_acumulados` sube la dificultad en tareas multiturno con progreso y deshace las bajadas manuales en el Markdown
@@ -42,3 +42,27 @@ updated_at: 2026-11-06
 
 - `skills/orquestar/orquestar.py`: funciones `rechazos` (líneas 1358–1367), `reintentos_acumulados` (líneas 1370–1393), `comprobar_promocion` (líneas 1396–1411), `agotado_estricto` (líneas 866–875) y llamada en `bucle` (líneas 2868–2873).
 - Caso real reportado en el proyecto Afinn (`T-AFN-0139`).
+
+## Triaje
+- base_calidad: 80a482d04a24e15ab3e55a65efae784053a22940
+- Subfase A: Definición: [SKIP] Contrato existente de subida automática de dificultad y reintentos; no añade nuevos requisitos funcionales.
+- Subfase B: Diseño: [SKIP] Corrección localizada en `skills/orquestar/orquestar.py` (`reintentos_acumulados`, `comprobar_promocion`, `sincronizar_dificultad` y registro de pasos con `progreso` y `dificultad`), sin alteración arquitectónica.
+- Subfase C1: Pruebas: [EXEC] Tests unitarios en `tests/test_orquestar.py` (`DificultadTests`) reproduciendo en rojo: (1) multiturno con progreso y `APROBADO` de Hades no promueve, y (2) bajada manual de dificultad en Markdown de `dificil`/`media` a `sencilla` resetea contadores y no es revertida.
+- Subfase C2: Corrección: [EXEC] Ajustar `reintentos_acumulados`, `rechazos`, `comprobar_promocion`, helper `sincronizar_dificultad` y registro de paso en `skills/orquestar/orquestar.py`.
+- Subfase D: QA: [EXEC] Revisión de Hades (`/review-code`) sobre el delta completo de B-ADV-0027.
+- Subfase E: Documentación: [EXEC] Documentación de resolución en este fichero de bug y `docs/review/versions/v1.1-revision.md`.
+- Subfase F: Cierre: [EXEC] Calidad del delta, verificación al cierre, completed y commit semántico `fix(B-ADV-0027): ...`.
+- Verificación al cierre: `python -m unittest tests.test_orquestar.DificultadTests tests.test_orquestar.BloqueoSinProgresoTests` porque valida directamente la promoción/reintentos de dificultad y que la gestión de bloqueos sin progreso permanezca intacta.
+
+## Resolución
+- En `skills/orquestar/orquestar.py`:
+  - `reintentos_acumulados` reinicia el contador `pasos = 0` cuando un paso registra `progreso: True` o Hades emite `veredicto: APROBADO`, evitando subidas indebidas de dificultad en tareas multiturno que avanzan con éxito.
+  - Implementado `sincronizar_dificultad` y `nivel_dificultad`: detecta si la dificultad en el frontmatter del Markdown es menor que la última dificultad registrada en métricas para ese ID; en tal caso persiste un evento de promoción manual que resetea contadores (`pasos = 0, rech = 0`) y fija la nueva base respetando la edición manual.
+  - Invocado `sincronizar_dificultad` en `rechazos`, `reintentos_acumulados` y `comprobar_promocion`.
+  - En `bucle`, cada paso registra `progreso` (deducido de `despues != antes`) y `dificultad` efectiva en `orquestar_metricas.jsonl`, optimizando `despues = firma(root, a.docs)` sin llamadas redundantes a Git.
+- En `tests/test_orquestar.py`:
+  - Añadidas pruebas unitarias en `DificultadTests` verificando en rojo y verde el comportamiento multiturno con progreso/aprobado y el respeto a la bajada manual en Markdown, incorporando las sugerencias H-01 y H-02 de Hades.
+- Revisiones de Hades:
+  - Pruebas (`/review-test`): APROBADO (9.0/10) en `docs/review/test_reviews/B-ADV-0027-test-review.md`.
+  - Código (`/review-code`): APROBADO (9.3/10) en `docs/review/code_reviews/B-ADV-0027-code-review.md` con hallazgo H-01 cosmético (`destino: descartar`).
+- Verificación: 14 pruebas en verde vía `adevv orquestar --verificar`, `git diff --check` limpio y calidad del delta ejecutada.

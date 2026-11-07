@@ -934,6 +934,48 @@ class DificultadTests(unittest.TestCase):
         debe_d, _ = motor.comprobar_promocion(self.root, 'T2')
         self.assertFalse(debe_d)
 
+    def test_comprobar_promocion_no_promueve_en_multiturno_con_progreso_y_aprobado_hades(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        (tareas / 'T1.md').write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'APROBADO'})
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1', 'progreso': True})
+
+        pasos, rech = motor.reintentos_acumulados(self.root, 'T1')
+        self.assertEqual((pasos, rech), (0, 0))
+        debe, motivo = motor.comprobar_promocion(self.root, 'T1')
+        self.assertFalse(debe)
+        self.assertEqual(motivo, '')
+
+    def test_comprobar_promocion_respeta_bajada_manual_de_dificultad_en_markdown(self):
+        tareas = self.root / 'docs/plan/tasks'
+        tareas.mkdir(parents=True)
+        tarea_f = tareas / 'T1.md'
+        tarea_f.write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        with patch('builtins.print'):
+            motor.promover_dificultad(self.root, 'T1')
+            motor.promover_dificultad(self.root, 'T1')
+
+        self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'dificil')
+
+        for _ in range(3):
+            motor.registrar(self.root, {'tipo': 'paso', 'paso': 'task-dev', 'id': 'T1'})
+        motor.registrar(self.root, {'tipo': 'agente', 'rol': 'hades', 'id': 'T1', 'veredicto': 'RECHAZADO'})
+        self.assertGreater(motor.rechazos(self.root, 'T1'), 0)
+
+        # Bajada manual en el frontmatter del Markdown
+        tarea_f.write_text('---\nid: T1\ndificultad: sencilla\nstatus: in_progress\n---\n', encoding='utf-8')
+
+        debe, motivo = motor.comprobar_promocion(self.root, 'T1')
+        self.assertFalse(debe)
+        self.assertEqual(motivo, '')
+        self.assertEqual(motor.dificultad_de(self.root, 'T1'), 'sencilla')
+        self.assertEqual(motor.reintentos_acumulados(self.root, 'T1'), (0, 0))
+        self.assertEqual(motor.rechazos(self.root, 'T1'), 0)
+
     def test_bucle_promotes_difficulty_on_sin_progreso_and_retries(self):
         self.root.joinpath('task_config.yaml').write_text('validation:\n  command: true\n', encoding='utf-8')
         tareas = self.root / 'docs/plan/tasks'
