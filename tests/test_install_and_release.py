@@ -179,6 +179,10 @@ class TestInstallAndRelease(unittest.TestCase):
         )
         self.assertEqual(res.returncode, 0, f"check_manifests_versions fallo: {res.stderr}\n{res.stdout}")
 
+        (self.repo_dir / "CHANGELOG.md").write_text("## [0.1.0]\nCambios\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.repo_dir), "add", "CHANGELOG.md"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.repo_dir), "commit", "-m", "docs: changelog"], check=True, capture_output=True)
+
         # 3. Publicar versión con release_tools
         publicar_version(self.repo_dir, "v0.1.0", origin_url=str(self.origin_dir))
 
