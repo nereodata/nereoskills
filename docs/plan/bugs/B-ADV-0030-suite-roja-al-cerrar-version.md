@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.1"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-07
 suite_cierre: true
@@ -20,8 +20,24 @@ suite_intentos: 0
 ## Descripción del fallo
 La suite completa de cierre devuelve un código distinto de cero. Debe pasar antes de revisar o cerrar la versión.
 
-## Reproducir
-Ejecutar el comando indicado en la evidencia desde la raíz del proyecto.
+## Triaje
+- base_calidad: 2cce40f3828c3d68622878f0c11c8253f294f65d
+- Subfase A: Definición: [SKIP] Contrato existente de tests de regresión y política de cuotas/progreso; no altera requisitos de producto ni añade nuevos contratos funcionales.
+- Subfase B: Diseño: [SKIP] Corrección puramente de tests en `tests/test_orquestar.py` para adaptar los mocks y aserciones a la firma de progreso de B-ADV-0027.
+- Subfase C1: Pruebas: [SKIP] Los tests que capturan y reproducen exactamente el fallo ya existen en `tests/test_orquestar.py` (`test_loop_resumes_developer_session_after_quota_wait` y `test_loop_retries_immediately_with_reserva_on_quota_without_waiting`).
+- Subfase C2: Corrección: [EXEC] Ajustar en `tests/test_orquestar.py` el `side_effect` de `firma` (4 elementos) en `test_loop_resumes_developer_session_after_quota_wait` y la aserción de `reintentos_acumulados` (`pasos == 0` tras progreso) en `test_loop_retries_immediately_with_reserva_on_quota_without_waiting`.
+- Subfase D: QA: [EXEC] Revisión de Hades (`/review-code`) sobre el delta de B-ADV-0030.
+- Subfase E: Documentación: [EXEC] Documentar resolución en este fichero de bug y en `docs/review/versions/v1.1-revision.md`.
+- Subfase F: Cierre: [EXEC] Comprobaciones de calidad del delta, verificación al cierre en verde, marcar completed y commit semántico `fix(B-ADV-0030)`.
+- Verificación al cierre: `python -m unittest tests.test_orquestar.EscaladaTests.test_loop_resumes_developer_session_after_quota_wait tests.test_orquestar.ReservaCuotaTests.test_loop_retries_immediately_with_reserva_on_quota_without_waiting` porque comprueba de manera directa e inmediata los dos tests unitarios afectados por la regresión de B-ADV-0027.
+
+## Resolución
+- En `tests/test_orquestar.py`:
+  - `test_loop_resumes_developer_session_after_quota_wait`: ampliado el mock de `motor.firma` a `side_effect=['a', 'a', 'b', 'b']` para alimentar las dos llamadas por vuelta que realiza `bucle()` (al inicio y al cierre de cada turno con `despues = firma(root, a.docs)` introducido en B-ADV-0027), eliminando el fallo por `StopIteration`.
+  - `test_loop_retries_immediately_with_reserva_on_quota_without_waiting`: actualizada la aserción de `motor.reintentos_acumulados(self.root, 'T-ADV-0001')` a `self.assertEqual(pasos, 0)` conforme al contrato de B-ADV-0027, dado que el paso ejecutado con reserva experimenta progreso (`'a'` -> `'b'`) y por tanto no acumula reintentos indebidos de atasco.
+- Revisión de Hades:
+  - Código (`/review-code`): APROBADO (media 9.7 / 10) en `docs/review/code_reviews/B-ADV-0030-code-review.md` sin hallazgos.
+- Verificación del triaje: 2 pruebas en verde vía `adevv orquestar --verificar`, comprobación de calidad del delta y `git diff --check` limpios.
 
 ## Último fallo de suite
 - Comando: "python -m unittest discover -s tests"

@@ -10,6 +10,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0030** — Adaptados tests de regresión de orquestación (`test_orquestar.py`) para abastecer las llamadas sucesivas a `firma()` en turnos con espera de cuota y verificar que los pasos completados con progreso no acumulan reintentos indebidos tras B-ADV-0027.
+
 - **B-ADV-0028** — `/estado` en Telegram desglosa por separado tareas y bugs de la versión abierta, agrupando variantes numéricas por `vkey`.
 
 - **B-ADV-0024** — El gateway clasifica las marcas de cuota sin hora como supuestas de 300 s mediante `fallo_cuota`, permite su sondeo periódico con `configuraciones_con_cuota`, registra la recuperación tras éxito y avisa de falta de créditos una sola vez por episodio.

@@ -685,7 +685,7 @@ class EscaladaTests(unittest.TestCase):
              patch.object(motor, 'ejecutar', side_effect=mock_ejecutar), \
              patch.object(motor, 'esperar', side_effect=esperar_cuota), \
              patch.object(motor, 'ahora', side_effect=lambda: instante[0].isoformat()), \
-             patch.object(motor, 'firma', side_effect=['a', 'a', 'b']), \
+             patch.object(motor, 'firma', side_effect=['a', 'a', 'b', 'b']), \
              patch.object(motor, 'git', return_value=''), \
              patch.object(motor, 'ingerir', return_value=[]), \
              patch.object(motor, 'avisar'), \
@@ -1206,7 +1206,7 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(len(metricas), 2)
         self.assertTrue(metricas[0].get('sin_cuota'))
         pasos, _ = motor.reintentos_acumulados(self.root, 'T-ADV-0001')
-        self.assertEqual(pasos, 1)
+        self.assertEqual(pasos, 0)
 
     def test_loop_exhausts_all_reservas_enters_wait(self):
         cfg = {
