@@ -2,7 +2,7 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
-## [1.1.1] - En desarrollo
+## [1.1.1] - 2026-11-10
 
 ### Corregido
 
