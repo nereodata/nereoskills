@@ -19,6 +19,67 @@ motor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(motor)
 
 
+class HallazgosHadesRoutingTests(unittest.TestCase):
+    """B-ADV-0033: cada destino de Hades conserva su flujo propio."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        tarea = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+        tarea.parent.mkdir(parents=True)
+        tarea.write_text(
+            '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\npendiente_de: humano\n---\n\n'
+            '# T-ADV-0101\n\n## Hallazgo\nDestino: especificador\n', encoding='utf-8')
+        revision = self.root / 'docs/review/versions/v1.1-revision.md'
+        revision.parent.mkdir(parents=True)
+        revision.write_text('# Revisión\n', encoding='utf-8')
+        for nombre, contenido in [('requirements.md', '# Idea\n'), ('req_analysis.md', 'APROBADO\n'),
+                                  ('platform_plan.md', '# Plan\n'), ('platform_review.md', 'APROBADO\n'),
+                                  ('work_plan.md', '# Plan\n')]:
+            ruta = self.root / 'docs' / nombre
+            ruta.parent.mkdir(parents=True, exist_ok=True)
+            ruta.write_text(contenido, encoding='utf-8')
+        (self.root / 'task_config.yaml').write_text('project:\n  prefix: ADV\n', encoding='utf-8')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reiniciar_tarea(self):
+        p = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+        p.write_text(p.read_text(encoding='utf-8').replace('status: planned', 'status: blocked')
+                     .replace('pendiente_de: especificador', 'pendiente_de: humano'), encoding='utf-8')
+
+    def test_regresion_tres_destinos_de_hades(self):
+        """Artemisa reanuda, especificador conserva bloqueo técnico y humano abre pregunta."""
+        contexto = 'H-02: Destino: especificador; ajustar la especificación.'
+        motor.enrutar_hallazgo(self.root, 'T-ADV-0101', 'especificador', contexto=contexto)
+        fm = motor.frontmatter(motor.fichero_de(self.root, 'T-ADV-0101'))
+        self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
+        self.assertEqual(motor.listar_preguntas(self.root), [])
+        item = {'paso': 'task-dev', 'id': 'T-ADV-0101', 'status': 'blocked',
+                'pendiente_de': 'especificador', 'version': 'v1.1.1', 'depende_de': [], 'weight': 1}
+        with (patch.object(motor, 'backlog', return_value=[item]), patch.object(motor, 'config', return_value={}),
+              patch.object(motor, 'revisada', return_value=True),
+              patch.object(motor, 'git', return_value='hotfix/v1.1.1')):
+            self.assertEqual(motor.estado(self.root, 'docs')[0:3], ('PASO', 'especificar', 'T-ADV-0101'))
+
+        motor.enrutar_hallazgo(self.root, 'T-ADV-0101', 'artemisa', contexto='H-03: Destino: artemisa.')
+        fm = motor.frontmatter(motor.fichero_de(self.root, 'T-ADV-0101'))
+        self.assertEqual(fm['status'], 'planned')
+        self.assertNotIn('pendiente_de', fm)
+        self.assertEqual(motor.listar_preguntas(self.root), [])
+
+        self.reiniciar_tarea()
+        with patch.object(motor.intervencion, 'solicitar', return_value={'id': 'Q-ADV-0001'}) as solicitar:
+            q = motor.enrutar_hallazgo(self.root, 'T-ADV-0101', 'humano', contexto='Falta navegador visual.')
+        self.assertEqual(q['id'], 'Q-ADV-0001')
+        solicitar.assert_called_once()
+
+        trazas = (self.root / 'docs/review/versions/v1.1-revision.md').read_text(encoding='utf-8')
+        self.assertIn('Destino: `especificador`', trazas)
+        self.assertIn('Destino: `artemisa`', trazas)
+
+
 class OrquestarRegressionTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.object(motor, 'iniciar_gateway'))
@@ -1906,3 +1967,79 @@ class RecuperacionAnalisisTests(unittest.TestCase):
         self.assertEqual(posiciones, sorted(posiciones))
         for inicio, fin in zip(posiciones, posiciones[1:] + [len(texto)]):
             self.assertIn('2 intentos', texto[inicio:fin])
+
+
+class SubprocesoColgadoTests(unittest.TestCase):
+    """B-ADV-0032: subprocesos agy/claude colgados tras emitir JSON o antes de cerrar."""
+
+    def setUp(self):
+        self.enterContext(patch.object(motor, 'iniciar_gateway'))
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lanzar_agy_cierra_con_gracia_cuando_proceso_se_cuelga_tras_emitir_json(self):
+        script = (
+            'import sys, time; '
+            'sys.stdout.write(\'{"status":"SUCCESS","response":"Veredicto: APROBADO",'
+            '"conversation_id":"conv-colgada-1","num_turns":2,'
+            '"usage":{"input_tokens":12,"output_tokens":6,"cache_read_tokens":3,"thinking_tokens":1}}\\n\'); '
+            'sys.stdout.flush(); '
+            'time.sleep(60)'
+        )
+        cmd = [sys.executable, '-c', script, '--output-format', 'json', '--model', 'gemini-3.8-flash-medium']
+        with patch('builtins.print'):
+            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=5.0, gracia_cierre=0.1)
+        self.assertEqual(codigo, 0)
+        self.assertTrue(m.get('cierre_forzado'))
+        self.assertFalse(m.get('error'))
+        self.assertEqual(m.get('sesion'), 'conv-colgada-1')
+        self.assertEqual(m.get('turnos'), 2)
+        self.assertEqual(
+            m['modelos']['gemini-3.8-flash-medium'],
+            {'entrada': 12, 'salida': 6, 'cache_leida': 3, 'razonamiento': 1},
+        )
+        self.assertIn('Veredicto: APROBADO', salida)
+
+    def test_lanzar_agy_corta_por_timeout_cuando_proceso_se_cuelga_antes_del_json(self):
+        script = 'import sys, time; sys.stdout.write("escribiendo informes...\\n"); sys.stdout.flush(); time.sleep(60)'
+        cmd = [sys.executable, '-c', script, '--output-format', 'json']
+        with patch('builtins.print'):
+            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=0.2, gracia_cierre=0.1)
+        self.assertEqual(codigo, 124)
+        self.assertTrue(m.get('timeout'))
+        self.assertTrue(m.get('error'))
+        self.assertIn('escribiendo informes...', salida)
+
+    def test_agente_con_agy_pasa_entrada_none_y_timeout_configurable_sin_reintentar_en_timeout(self):
+        (self.root / motor.METRICAS).write_text(
+            json.dumps({'tipo': 'agente', 'rol': 'hades', 'id': 'T-ADV-0001', 'arnes': 'agy',
+                        'sesion': 'sess-agy-prev', 'codigo': 0}) + '\n',
+            encoding='utf-8',
+        )
+        llamadas = []
+
+        def fake_lanzar(cmd, root, harness, entrada=None, timeout=None):
+            llamadas.append((cmd, harness, entrada, timeout))
+            return 124, {'timeout': True, 'error': True}, 'timeout'
+
+        cfg = {'hades': {'harness': 'agy', 'model': 'gemini-3.8-flash-medium', 'timeout_s': 420}}
+        env = {'ORQUESTAR_PASO': 'task-dev', 'ORQUESTAR_ID': 'T-ADV-0001'}
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.dict(motor.os.environ, env, clear=True),
+              patch.object(motor, 'lanzar', side_effect=fake_lanzar),
+              patch.object(motor.shutil, 'which', side_effect=lambda x: x),
+              patch.object(motor, 'excluir'),
+              patch.object(motor, 'git', return_value=''),
+              patch('builtins.print')):
+            codigo = motor.agente(self.root, 'hades', 'revisa A10')
+
+        self.assertEqual(codigo, 124)
+        self.assertEqual(len(llamadas), 1)
+        cmd, harness, entrada, timeout = llamadas[0]
+        self.assertEqual(harness, 'agy')
+        self.assertIsNone(entrada)
+        self.assertEqual(timeout, 420.0)
+        self.assertIn('--conversation', cmd)

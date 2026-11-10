@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 from contextlib import contextmanager
@@ -329,8 +330,57 @@ def restaurar(root, motor, iid):
             guardar(root / PREGUNTAS, preguntas)
 
 
-def detectar_bloqueo(root, motor, iid, base_commit):
-    """Vincula bloqueos humanos escritos por un paso que no invocó la CLI de preguntas."""
+DESTINOS_HALLAZGO = {'artemisa', 'especificador', 'humano'}
+
+
+def destino_hallazgo(texto):
+    """Extrae el destino explícito de un hallazgo de Hades, sin inferirlo del estado del árbol."""
+    coincidencia = re.search(
+        r'\bdestino\s*(?::|=|\|)\s*[*`_ ]*(artemisa|especificador|humano)\b',
+        texto or '', re.IGNORECASE,
+    )
+    return coincidencia.group(1).lower() if coincidencia else ''
+
+
+def anotar_hallazgo(root, motor, iid, destino, contexto):
+    """Conserva la decisión de Hades en la tarea y en la revisión de su versión."""
+    tarea = motor.fichero_de(root, iid)
+    informe = revision(root, motor, iid)
+    cambios = {'status': 'planned'} if destino == 'artemisa' else {
+        'status': 'blocked', 'pendiente_de': 'especificador',
+    }
+    cabecera, cuerpo = motor.reescribir_frontmatter(tarea.read_text(encoding='utf-8'), cambios)
+    if destino == 'artemisa':
+        cabecera = '\n'.join(linea for linea in cabecera.splitlines() if not linea.startswith('pendiente_de:'))
+    texto = (f'## Hallazgo de Hades enrutado\n'
+             f'- Destino: `{destino}`\n'
+             f'- Decisión: {"reanudar desarrollo" if destino == "artemisa" else "ejecutar especificar"}\n'
+             f'- Evidencia: {contexto.strip() or "destino declarado por Hades"}\n')
+    if texto not in cuerpo:
+        cuerpo = cuerpo.rstrip('\n') + '\n\n' + texto
+    informe.parent.mkdir(parents=True, exist_ok=True)
+    previo = informe.read_text(encoding='utf-8') if informe.exists() else ''
+    bloque = f'\n## {iid} · Hallazgo de Hades\n{texto}'
+    contenidos = {tarea: cabecera + '\n---\n' + cuerpo.rstrip('\n') + '\n',
+                  informe: previo if texto in previo else previo.rstrip('\n') + bloque}
+    for ruta, contenido in contenidos.items():
+        ruta.write_text(contenido, encoding='utf-8')
+
+
+def enrutar_hallazgo(root, motor, iid, destino, contexto='', base_commit=None):
+    """Aplica el destino de Hades; solo `humano` abre una pregunta persistente."""
+    destino = (destino or '').strip().lower()
+    if destino not in DESTINOS_HALLAZGO:
+        raise ValueError(f'Destino de hallazgo inválido: {destino or "(vacío)"}')
+    if destino == 'humano':
+        return solicitar(root, motor, iid, f'Resuelve el impedimento de {iid}: {contexto}',
+                         contexto=contexto, base_commit=base_commit)
+    anotar_hallazgo(root, motor, iid, destino, contexto)
+    return None
+
+
+def detectar_bloqueo(root, motor, iid, base_commit, salida=''):
+    """Convierte solo bloqueos realmente humanos en preguntas y conserva los destinos de Hades."""
     tarea = motor.fichero_de(root, iid) if iid else None
     if not tarea:
         return
@@ -339,6 +389,6 @@ def detectar_bloqueo(root, motor, iid, base_commit):
         return
     if any(q['tarea_id'] == iid for q in listar(root, True)):
         return
-    contexto = tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1][-2000:]
-    solicitar(root, motor, iid, f'Resuelve el impedimento de {iid}: {contexto}',
-              contexto=contexto, base_commit=base_commit)
+    contexto = (tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1] + '\n' + (salida or ''))[-4000:]
+    destino = destino_hallazgo(contexto)
+    enrutar_hallazgo(root, motor, iid, destino or 'humano', contexto=contexto, base_commit=base_commit)

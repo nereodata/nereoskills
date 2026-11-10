@@ -398,6 +398,18 @@ Característica: Continuidad con arneses ausentes
     Y los usuarios 111 y 222 reciben un único aviso del evento respuesta con T-ADV-0101, la referencia Q-ADV-0001, la pregunta y la instrucción "/responder Q-ADV-0001 <respuesta>"
     Y en la siguiente vuelta del bucle se ejecuta T-ADV-0102 con árbol y base_calidad limpios sin incluir src/modulo_a.py, mientras T-ADV-0103 permanece en espera por depender de T-ADV-0101
 
+  @B-ADV-0033 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5
+  Esquema del escenario: Enrutar un hallazgo de Hades según su destino sin escalarlo al humano
+    Dado una tarea bloqueada con un hallazgo de Hades que declara destino <destino>
+    Cuando el orquestador procesa el hallazgo y conserva su decisión en la tarea y en la revisión de versión
+    Entonces <resultado>
+    Y <preguntas>
+    Ejemplos:
+      | destino | resultado | preguntas |
+      | artemisa | la tarea pasa a planned para retomar desarrollo | no se crea una entrada en orquestar_preguntas.json |
+      | especificador | la tarea permanece bloqueada con pendiente_de especificador y se ejecuta el paso especificar | no se crea una entrada en orquestar_preguntas.json |
+      | humano | la tarea queda bloqueada con pendiente_de humano | se crea una pregunta humana persistente |
+
   @B-ADV-0026 @CA-1 @CA-3
   Esquema del escenario: Conservar el bloqueo y diagnosticar sin duplicar avisos cuando el canal de Telegram falla o no está disponible
     Dado un proyecto en release/v1.1 con la tarea T-ADV-0101 que requiere la intervención humana "¿Puerto de escucha de producción?"

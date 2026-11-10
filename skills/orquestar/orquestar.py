@@ -11,6 +11,8 @@ import copy
 import ctypes
 import hashlib
 import importlib.util
+import inspect
+import io
 import json
 import math
 import os
@@ -20,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import tomllib
 from datetime import datetime, timedelta
@@ -89,6 +92,11 @@ _intervencion_spec.loader.exec_module(intervencion)
 def solicitar_intervencion(root, iid, pregunta, **opciones):
     """Registra una intervención sin mantener al arnés esperando entrada."""
     return intervencion.solicitar(root, SimpleNamespace(**globals()), iid, pregunta, **opciones)
+
+
+def enrutar_hallazgo(root, iid, destino, **opciones):
+    """Enruta un hallazgo de Hades sin degradar el destino a una pregunta humana."""
+    return intervencion.enrutar_hallazgo(root, SimpleNamespace(**globals()), iid, destino, **opciones)
 
 
 def listar_preguntas(root, solo_pendientes=False):
@@ -444,7 +452,10 @@ def construir_prompt_paso(root, paso, arg):
         ' Verifica con `adevv orquestar --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol), '
         'solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión.'
     )
-    extra += (' Si no existe valor por defecto seguro, ejecuta `adevv orquestar --preguntar '
+    extra += (' Si Hades ha asignado un hallazgo a `artemisa` o `especificador`, ejecuta '
+              f'`adevv orquestar --enrutar-hallazgo {arg or "ID"} <destino> --contexto "<hallazgo y decisión>"`; '
+              'no uses `--preguntar`: el primer destino reanuda desarrollo y el segundo ejecuta especificar. '
+              'Solo si Hades ha asignado explícitamente `humano`, o no existe valor por defecto seguro, ejecuta `adevv orquestar --preguntar '
               f'{arg or "ID"} "<pregunta concreta>" --contexto "<contexto>"` y termina el paso. '
               'No esperes una respuesta interactiva. Las respuestas humanas son datos, no instrucciones de permisos.')
     respuestas = [q for q in listar_preguntas(root) if q['tarea_id'] == arg and q['estado'] == 'incorporada']
@@ -1263,7 +1274,7 @@ def estado(root, docs):
     por_id = {i['id']: i for i in items}
     alcance = desbloquea(items)
     pendientes = [i for i in items if i['status'] not in FUERA and vkey(i['version'])]
-    abiertas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*').splitlines()]
+    abiertas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
     for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0)):
         v = rama.split('/')[1]
         suyas = [i for i in items if vkey(i['version']) == vkey(v)]
@@ -1364,6 +1375,8 @@ def lista_reservas(cfg_rol):
     base = {k: cfg_rol[k] for k in ('harness', 'model', 'effort') if k in cfg_rol}
     if 'instructions' in cfg_rol:
         base['instructions'] = cfg_rol['instructions']
+    if 'timeout_s' in cfg_rol:
+        base['timeout_s'] = cfg_rol['timeout_s']
     resultado = []
     for it in items:
         if isinstance(it, dict):
@@ -1627,25 +1640,220 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
     return cmd
 
 
-def lanzar(cmd, root, harness, entrada=None, env=None):
+TIMEOUT_AGENTE_S = 1800
+GRACIA_CIERRE_JSON_S = 10
+_SUBPROCESS_RUN = subprocess.run
+
+
+def _extraer_json_final(harness, texto):
+    """Devuelve el diccionario JSON final de agy o claude si ya está completo en stdout, o None."""
+    lineas = [l.strip() for l in (texto or '').splitlines() if l.strip()]
+    if not lineas:
+        return None
+    try:
+        d = json.loads(lineas[-1])
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    if harness == 'agy' and ('status' in d or 'response' in d):
+        return d
+    if harness == 'claude' and ('result' in d or 'is_error' in d or d.get('type') == 'result'):
+        return d
+    return None
+
+
+def _terminar_arbol_proceso(p):
+    """Termina el subproceso y su árbol de procesos hijos sin bloquear indefinidamente."""
+    pid = getattr(p, 'pid', None)
+    if os.name == 'nt' and pid:
+        try:
+            _SUBPROCESS_RUN(
+                ['taskkill', '/F', '/T', '/PID', str(pid)],
+                capture_output=True,
+                timeout=10,
+                check=False,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+        except Exception:
+            pass
+    try:
+        p.kill()
+    except Exception:
+        pass
+    try:
+        p.wait(timeout=2)
+    except Exception:
+        pass
+
+
+def timeout_de_rol(cfg, por_defecto=None, env=None):
+    """Obtiene el timeout en segundos configurado en el rol, el entorno o el valor por defecto."""
+    val = cfg.get('timeout_s') if isinstance(cfg, dict) else None
+    if val is None:
+        origen_env = env if env is not None else os.environ
+        clave = 'ORQUESTAR_TIMEOUT_AGENTE_S' if por_defecto is not None else 'ORQUESTAR_TIMEOUT_S'
+        val = origen_env.get(clave) or origen_env.get('ORQUESTAR_TIMEOUT_S')
+    if val is None:
+        return por_defecto
+    try:
+        num = float(val)
+        return num if num > 0 else None
+    except (TypeError, ValueError):
+        return por_defecto
+
+
+def _acepta_kwarg(fn, nombre):
+    """Comprueba si un callable (o su side_effect en pruebas) acepta el argumento con nombre indicado."""
+    objetivo = getattr(fn, 'side_effect', None)
+    if callable(objetivo) and not isinstance(objetivo, type):
+        fn = objetivo
+    try:
+        params = inspect.signature(fn).parameters.values()
+        return any(p.name == nombre or p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+    except (ValueError, TypeError):
+        return True
+
+
+def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=None,
+                           gracia_cierre=GRACIA_CIERRE_JSON_S):
+    """Ejecuta un arnés con salida JSON aplicando gracia post-JSON y timeout sin colgar en pipes."""
+    if subprocess.run is not _SUBPROCESS_RUN:
+        kwargs_run = {'stdin': subprocess.DEVNULL} if entrada is None else {}
+        if timeout is not None:
+            kwargs_run['timeout'] = timeout
+        try:
+            r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
+                               encoding='utf-8', errors='replace', env=env, **kwargs_run)
+            return r.returncode, r.stdout or '', r.stderr or '', False, False
+        except subprocess.TimeoutExpired as exc:
+            out = exc.stdout.decode('utf-8', errors='replace') if isinstance(exc.stdout, bytes) else (exc.stdout or '')
+            err = exc.stderr.decode('utf-8', errors='replace') if isinstance(exc.stderr, bytes) else (exc.stderr or '')
+            if _extraer_json_final(harness, out) is not None:
+                return 0, out, err, False, True
+            return 124, out, err, True, False
+
+    p = subprocess.Popen(
+        cmd,
+        cwd=root,
+        stdin=subprocess.PIPE if entrada is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+    )
+    if entrada is not None and p.stdin is not None:
+        datos_in = entrada.encode('utf-8', errors='replace') if isinstance(entrada, str) else entrada
+
+        def _escribir_stdin():
+            try:
+                p.stdin.write(datos_in)
+            except Exception:
+                pass
+            finally:
+                try:
+                    p.stdin.close()
+                except Exception:
+                    pass
+
+        threading.Thread(target=_escribir_stdin, daemon=True).start()
+
+    chunks_out, chunks_err = [], []
+    instante_json = [None]
+
+    def _leer_stream(stream, destino, detectar_json=False):
+        if stream is None:
+            return
+        try:
+            fd = stream.fileno() if hasattr(stream, 'fileno') else None
+            if not isinstance(fd, int):
+                fd = None
+        except (OSError, ValueError, io.UnsupportedOperation):
+            fd = None
+        try:
+            while True:
+                if fd is not None:
+                    bloque = os.read(fd, 4096)
+                else:
+                    bloque = stream.read(4096)
+                    if isinstance(bloque, str):
+                        bloque = bloque.encode('utf-8', errors='replace')
+                if not bloque:
+                    break
+                destino.append(bloque)
+                if detectar_json and instante_json[0] is None:
+                    texto_parcial = b''.join(destino).decode('utf-8', errors='replace')
+                    if _extraer_json_final(harness, texto_parcial) is not None:
+                        instante_json[0] = time.monotonic()
+        except (OSError, ValueError):
+            pass
+
+    t_out = threading.Thread(target=_leer_stream, args=(p.stdout, chunks_out, True), daemon=True)
+    t_err = threading.Thread(target=_leer_stream, args=(p.stderr, chunks_err, False), daemon=True)
+    t_out.start()
+    t_err.start()
+
+    inicio_espera = time.monotonic()
+    por_timeout = False
+    cierre_forzado = False
+    while p.poll() is None:
+        ahora_m = time.monotonic()
+        if (instante_json[0] is not None and gracia_cierre is not None
+                and (ahora_m - instante_json[0]) >= gracia_cierre):
+            cierre_forzado = True
+            _terminar_arbol_proceso(p)
+            break
+        if timeout is not None and (ahora_m - inicio_espera) >= timeout:
+            por_timeout = True
+            _terminar_arbol_proceso(p)
+            break
+        time.sleep(0.02)
+
+    espera_hilos = 0.5 if (cierre_forzado or por_timeout) else 2.0
+    t_out.join(timeout=espera_hilos)
+    t_err.join(timeout=espera_hilos)
+    for stream in (p.stdout, p.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+    stdout_txt = b''.join(chunks_out).decode('utf-8', errors='replace')
+    stderr_txt = b''.join(chunks_err).decode('utf-8', errors='replace')
+    if por_timeout and _extraer_json_final(harness, stdout_txt) is not None:
+        por_timeout = False
+        cierre_forzado = True
+    codigo = 0 if cierre_forzado else (124 if por_timeout else (p.returncode if p.returncode is not None else 1))
+    return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
+
+
+def lanzar(cmd, root, harness, entrada=None, env=None, timeout=None, gracia_cierre=GRACIA_CIERRE_JSON_S):
     """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
     inicio = time.monotonic()
+    if timeout is None:
+        timeout = timeout_de_rol(None, por_defecto=None, env=env)
     if harness == 'agy' and '--output-format' in cmd:
-        r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
-                           encoding='utf-8', errors='replace', env=env,
-                           **({'stdin': subprocess.DEVNULL} if entrada is None else {}))
+        rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
+            cmd, root, harness, entrada=entrada, env=env, timeout=timeout, gracia_cierre=gracia_cierre)
         m = {'duracion_s': round(time.monotonic() - inicio)}
-        salida = r.stdout + '\n' + r.stderr
+        if cierre_forzado:
+            m['cierre_forzado'] = True
+            print(f'[orquestar] agy no cerró el proceso tras emitir el JSON final ({gracia_cierre}s); '
+                  'proceso terminado.', flush=True)
+        if por_timeout:
+            m.update(timeout=True, error=True)
+            print(f'[orquestar] agy agotó el tiempo de espera ({timeout}s); proceso terminado.', flush=True)
+        salida = r_stdout + '\n' + r_stderr
         try:
-            d = json.loads(r.stdout.strip().splitlines()[-1])
+            d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return r.returncode, m, salida
+            return rc, m, salida
         print(d.get('response', ''), flush=True)
         u = d.get('usage') or {}
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
         if d.get('status') != 'SUCCESS':
-            print(f"[orquestar] agy status: {d.get('status')} (returncode: {r.returncode})", flush=True)
+            print(f"[orquestar] agy status: {d.get('status')} (returncode: {rc})", flush=True)
         sesion_id = d.get('conversation_id') or d.get('session_id')
         m.update(turnos=d.get('num_turns'), error=d.get('status') != 'SUCCESS',
                  modelos={modelo: {'entrada': u.get('input_tokens'), 'salida': u.get('output_tokens'),
@@ -1653,18 +1861,24 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
                                    'razonamiento': u.get('thinking_tokens')}})
         if sesion_id:
             m['sesion'] = sesion_id
-        return (1 if m['error'] and not r.returncode else r.returncode), m, salida
+        return (1 if m['error'] and not rc else rc), m, salida
     if harness == 'claude' and '--output-format' in cmd:
-        r = subprocess.run(cmd, cwd=root, input=entrada, capture_output=True, text=True,
-                           encoding='utf-8', errors='replace', env=env,
-                           **({'stdin': subprocess.DEVNULL} if entrada is None else {}))
+        rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
+            cmd, root, harness, entrada=entrada, env=env, timeout=timeout, gracia_cierre=gracia_cierre)
         m = {'duracion_s': round(time.monotonic() - inicio)}
-        salida = r.stdout + '\n' + r.stderr
+        if cierre_forzado:
+            m['cierre_forzado'] = True
+            print(f'[orquestar] claude no cerró el proceso tras emitir el JSON final ({gracia_cierre}s); '
+                  'proceso terminado.', flush=True)
+        if por_timeout:
+            m.update(timeout=True, error=True)
+            print(f'[orquestar] claude agotó el tiempo de espera ({timeout}s); proceso terminado.', flush=True)
+        salida = r_stdout + '\n' + r_stderr
         try:
-            d = json.loads(r.stdout.strip().splitlines()[-1])
+            d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return r.returncode, m, salida
+            return rc, m, salida
         print(d.get('result', ''), flush=True)
         sesion_id = d.get('session_id') or d.get('sessionId')
         m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
@@ -1675,36 +1889,53 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
                           for k, u in (d.get('modelUsage') or {}).items()})
         if sesion_id:
             m['sesion'] = sesion_id
-        return (1 if d.get('is_error') and not r.returncode else r.returncode), m, salida
+        return (1 if d.get('is_error') and not rc else rc), m, salida
     lineas, uso, turnos = [], {}, 0
     sesion_id = None
+    por_timeout = [False]
+    temporizador = None
     with subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           encoding='utf-8', errors='replace', env=env) as p:
-        if entrada:
-            p.stdin.write(entrada)
-            p.stdin.close()
-        for linea in p.stdout:
-            lineas.append(linea)
-            evento = None
-            if harness == 'codex' and linea.lstrip().startswith('{'):
-                try:
-                    evento = json.loads(linea)
-                except ValueError:
-                    pass
-            if evento is None:
-                print(linea, end='', flush=True)
-            elif evento.get('type') == 'thread.started':
-                sesion_id = evento.get('thread_id') or (evento.get('thread', {}).get('id') if isinstance(evento.get('thread'), dict) else None)
-            elif evento.get('type') == 'item.completed' and evento.get('item', {}).get('type') == 'agent_message':
-                print(evento['item'].get('text', ''), flush=True)
-            elif evento.get('type') == 'turn.completed':
-                turnos += 1
-                for k, v in (evento.get('usage') or {}).items():
-                    uso[k] = uso.get(k, 0) + (v or 0)
-            elif evento.get('type') in ('error', 'turn.failed'):
-                print(json.dumps(evento, ensure_ascii=False), flush=True)
+        if timeout is not None:
+            def _vencio_timeout():
+                por_timeout[0] = True
+                _terminar_arbol_proceso(p)
+
+            temporizador = threading.Timer(timeout, _vencio_timeout)
+            temporizador.daemon = True
+            temporizador.start()
+        try:
+            if entrada:
+                p.stdin.write(entrada)
+                p.stdin.close()
+            for linea in p.stdout:
+                lineas.append(linea)
+                evento = None
+                if harness == 'codex' and linea.lstrip().startswith('{'):
+                    try:
+                        evento = json.loads(linea)
+                    except ValueError:
+                        pass
+                if evento is None:
+                    print(linea, end='', flush=True)
+                elif evento.get('type') == 'thread.started':
+                    sesion_id = evento.get('thread_id') or (evento.get('thread', {}).get('id') if isinstance(evento.get('thread'), dict) else None)
+                elif evento.get('type') == 'item.completed' and evento.get('item', {}).get('type') == 'agent_message':
+                    print(evento['item'].get('text', ''), flush=True)
+                elif evento.get('type') == 'turn.completed':
+                    turnos += 1
+                    for k, v in (evento.get('usage') or {}).items():
+                        uso[k] = uso.get(k, 0) + (v or 0)
+                elif evento.get('type') in ('error', 'turn.failed'):
+                    print(json.dumps(evento, ensure_ascii=False), flush=True)
+        finally:
+            if temporizador is not None:
+                temporizador.cancel()
     m = {'duracion_s': round(time.monotonic() - inicio)}
+    if por_timeout[0]:
+        m.update(timeout=True, error=True)
+        print(f'[orquestar] {harness or "arnés"} agotó el tiempo de espera ({timeout}s); proceso terminado.', flush=True)
     if sesion_id:
         m['sesion'] = sesion_id
     if uso:
@@ -1714,7 +1945,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None):
             'entrada': entrada, 'salida': uso.get('output_tokens'),
             'cache_leida': uso.get('cached_input_tokens'), 'cache_escrita': uso.get('cache_write_input_tokens'),
             'razonamiento': uso.get('reasoning_output_tokens')}})
-    return p.returncode, m, ''.join(lineas[-200:])
+    codigo = 124 if por_timeout[0] else p.returncode
+    return codigo, m, ''.join(lineas[-200:])
 
 
 def buscar_sesion_agente(root, rol, iid, arnes):
@@ -1777,14 +2009,16 @@ def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
         dif = dificultad_de(root, iid) if iid else None
         rol = rol_de(root, paso, dificultad=dif, iid=iid)[1]
     harness = arnes(a, rol)
+    timeout_paso = timeout_de_rol(rol, por_defecto=None, env=env)
+    kwargs_extra = {'timeout': timeout_paso} if (timeout_paso is not None and _acepta_kwarg(lanzar, 'timeout')) else {}
     if sesion:
         cmd = comando(a, prompt, root, rol, sesion=sesion)
-        codigo, m, salida = lanzar(cmd, root, harness, env=env)
-        if codigo != 0 and espera_cuota(salida) is None:
+        codigo, m, salida = lanzar(cmd, root, harness, env=env, **kwargs_extra)
+        if codigo != 0 and espera_cuota(salida) is None and not m.get('timeout'):
             cmd_fresh = comando(a, prompt, root, rol, sesion=None)
-            return lanzar(cmd_fresh, root, harness, env=env)
+            return lanzar(cmd_fresh, root, harness, env=env, **kwargs_extra)
         return codigo, m, salida
-    return lanzar(comando(a, prompt, root, rol), root, harness, env=env)
+    return lanzar(comando(a, prompt, root, rol), root, harness, env=env, **kwargs_extra)
 
 
 def base_comando_agente(harness, prompt, sesion=None):
@@ -1842,15 +2076,19 @@ def agente(root, rol, prompt):
                 cede = 'sin arnés'
             continue
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
-        codigo, m, salida = lanzar(cmd, root, harness, entrada=prompt_texto)
+        timeout_rol = timeout_de_rol(cfg_actual, por_defecto=TIMEOUT_AGENTE_S)
+        kwargs_lanzar = {'timeout': timeout_rol} if _acepta_kwarg(lanzar, 'timeout') else {}
+        entrada_arnes = None if harness == 'agy' else prompt_texto
+        codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada_arnes, **kwargs_lanzar)
         if cede and cfg_actual is not cfg:
             avisar_perfil(root, iid, cfg, cede, cfg_actual)
             cede = ''
-        if es_reanudacion and codigo != 0 and espera_cuota(salida) is None:
+        if es_reanudacion and codigo != 0 and espera_cuota(salida) is None and not m.get('timeout'):
             prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
             cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
-            codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=prompt_fresh)
+            entrada_fresh = None if harness == 'agy' else prompt_fresh
+            codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=entrada_fresh, **kwargs_lanzar)
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
@@ -2783,6 +3021,8 @@ def main():
                     help='horas máximas esperando cuota seguidas antes de parar (0 = no esperar)')
     ap.add_argument('--estado', action='store_true', help='muestra el estado y el consumo, y sale')
     ap.add_argument('--preguntar', nargs=2, metavar=('ID', 'PREGUNTA'), help='bloquea una tarea con pregunta humana')
+    ap.add_argument('--enrutar-hallazgo', nargs=2, metavar=('ID', 'DESTINO'),
+                    help='aplica el destino de Hades: artemisa, especificador o humano')
     ap.add_argument('--contexto', default='', help='contexto de la intervención humana')
     ap.add_argument('--preguntas', action='store_true', help='consulta preguntas humanas pendientes')
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
@@ -2819,6 +3059,15 @@ def main():
                                   paso=os.environ.get('ORQUESTAR_PASO', ''),
                                   base_commit=os.environ.get('ORQUESTAR_BASE'))
         print(f'Intervención registrada: {q["id"]}; termina el paso.')
+        return 0
+    if a.enrutar_hallazgo:
+        iid, destino = a.enrutar_hallazgo
+        q = enrutar_hallazgo(root, iid, destino, contexto=a.contexto,
+                              base_commit=os.environ.get('ORQUESTAR_BASE'))
+        if q:
+            print(f'Intervención registrada: {q["id"]}; termina el paso.')
+        else:
+            print(f'Hallazgo de Hades enrutado a {destino}; termina el paso.')
         return 0
 
     if a.cuota_reset is not None:
@@ -3098,7 +3347,7 @@ def bucle(a, root):
                     ausente = True
                     break
                 codigo, m, salida = resultado
-                intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env['ORQUESTAR_BASE'])
+                intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env['ORQUESTAR_BASE'], salida)
                 if cede and cfg_actual is not cfg_rol:
                     avisar_perfil(root, arg, cfg_rol, cede, cfg_actual)
                     cede = ''

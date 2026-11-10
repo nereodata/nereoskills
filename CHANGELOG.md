@@ -2,6 +2,13 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.1] - En desarrollo
+
+### Corregido
+
+- **B-ADV-0032** — Evitar bloqueos del orquestador cuando un arnés emite su resultado pero no cierra el proceso.
+- **B-ADV-0033** — Enrutar los hallazgos de Hades destinados al especificador sin crear bloqueos humanos falsos.
+
 ## [1.1.0] - 2026-11-07
 
 ### Añadido
