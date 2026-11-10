@@ -6,6 +6,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0035** — La limpieza del test de orquestación en fondo comprueba fallos de taskkill y espera de forma acotada la salida del proceso temporal.
 - **B-ADV-0032** — Evitar bloqueos del orquestador cuando un arnés emite su resultado pero no cierra el proceso.
 - **B-ADV-0033** — Enrutar los hallazgos de Hades destinados al especificador sin crear bloqueos humanos falsos.
 

@@ -52,12 +52,49 @@ def _kill_pid_tree(pid: int) -> None:
     if not _pid_is_alive(pid):
         return
     if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True)
+        resultado = subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True,
+            text=True, timeout=10,
+        )
+        if resultado.returncode and _pid_is_alive(pid):
+            raise RuntimeError(f"No se pudo terminar el proceso temporal {pid}: {resultado.stderr.strip()}")
     else:
         try:
             os.kill(pid, signal.SIGKILL)
         except OSError:
             pass
+    limite = time.monotonic() + 5
+    while _pid_is_alive(pid):
+        if time.monotonic() >= limite:
+            raise TimeoutError(f"El proceso temporal {pid} sigue vivo tras solicitar su cierre")
+        time.sleep(0.05)
+
+
+class LimpiezaProcesoTests(unittest.TestCase):
+    """La limpieza no oculta fallos de permisos ni supone un cierre inmediato."""
+
+    def test_informa_taskkill_denegado(self):
+        with (patch.object(os, 'name', 'nt'),
+              patch(__name__ + '._pid_is_alive', return_value=True),
+              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'Acceso denegado'))):
+            with self.assertRaisesRegex(RuntimeError, 'Acceso denegado'):
+                _kill_pid_tree(12345)
+
+    def test_espera_hasta_confirmar_salida(self):
+        with (patch.object(os, 'name', 'nt'),
+              patch(__name__ + '._pid_is_alive', side_effect=[True, True, False]),
+              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)),
+              patch.object(time, 'sleep') as esperar):
+            _kill_pid_tree(12345)
+        esperar.assert_called_once_with(0.05)
+
+    def test_cierre_que_no_termina_agota_plazo(self):
+        with (patch.object(os, 'name', 'nt'),
+              patch(__name__ + '._pid_is_alive', return_value=True),
+              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)),
+              patch.object(time, 'monotonic', side_effect=[0, 6])):
+            with self.assertRaises(TimeoutError):
+                _kill_pid_tree(12345)
 
 
 class TestCliCommands(unittest.TestCase):
@@ -186,7 +223,6 @@ class TestCliCommands(unittest.TestCase):
         finally:
             if child_pid:
                 _kill_pid_tree(child_pid)
-                time.sleep(0.5)
             if pid_file.exists():
                 try:
                     pid_file.unlink()
