@@ -2379,9 +2379,9 @@ class SubprocesoColgadoTests(unittest.TestCase):
                     self.assertTrue(pid_file.exists(), 'El padre no llegó a crear al hijo')
                     consulta = subprocess.run(
                         ['tasklist', '/FI', f'PID eq {int(pid_file.read_text())}', '/FO', 'CSV', '/NH'],
-                        capture_output=True, text=True, timeout=3)
+                        capture_output=True, timeout=3)
                     self.assertEqual(consulta.returncode, 0, consulta.stderr)
-                    self.assertNotIn(f'"{int(pid_file.read_text())}"', consulta.stdout,
+                    self.assertNotIn(f'"{int(pid_file.read_text())}"'.encode('ascii'), consulta.stdout,
                                      'El descendiente continúa vivo tras devolver el control')
                 finally:
                     if proceso.poll() is None:

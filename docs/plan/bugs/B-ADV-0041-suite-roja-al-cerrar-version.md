@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 suite_cierre: true
@@ -370,3 +370,21 @@ Ejecutar el comando indicado en la evidencia desde la raíz del proyecto.
     Ran 261 tests in 395.828s
     
     FAILED (errors=3, skipped=1)
+
+## Triaje
+- base_calidad: 76f434ef7e9b6a8076851df33ca8e62892a5b4f9
+- Causa: la consulta nativa tasklist usa la página de códigos de Windows; text=True puede intentar UTF-8 al heredar el entorno de la suite. Un byte 0xe0 provoca UnicodeDecodeError en el lector de subprocess y stdout queda None. El PID y las comillas son ASCII y no requieren decodificación.
+- Subfase A: [SKIP] El contrato de terminación de descendientes ya existe; no cambia ningún requisito.
+- Subfase B: [SKIP] Corrección local de la representación de salida en una prueba, sin decisión arquitectónica.
+- Subfase C1: [EXEC] Reparar la comprobación existente de tasklist conservando las aserciones reales de los tres modos; rojo registrado en Último fallo de suite (tres errores). La reproducción dirigida previa pasa (1 prueba, 10.839 s), compatible con dependencia del entorno; no se atribuye un rojo nuevo.
+- Subfase C2: [SKIP] No se cambia código de producción.
+- Subfase D: [EXEC] Hades /review-test sobre la comprobación corregida y /review-code N/A sobre el delta sin producción.
+- Subfase E: [SKIP] No cambia comportamiento documentado de usuario; se registra evidencia y validación en este bug y la revisión de versión.
+- Subfase F: [EXEC] Cierre y commit semántico tras revisión aprobada.
+- Verificación al cierre: `python -m unittest tests.test_orquestar.SubprocesoColgadoTests` cubre los lectores JSON/líneas y la terminación de procesos sin ejecutar la suite completa. Adicionales: `git diff --check` y compilación del archivo de pruebas. Formato/lint mediante --calidad; no hay herramientas de lint/tipado declaradas.
+- Decisión: conservar hotfix/v1.1.2 activa y capturar tasklist como bytes para comparar el PID ASCII sin depender del idioma ni de la página de códigos; los errores conservan stderr binario como diagnóstico.
+
+## Resultado
+- Corrección: captura binaria de tasklist y comparación del PID ASCII; no hay cambios de producción.
+- Evidencia dirigida: 12 pruebas correctas en 15.172 s, una omisión POSIX en Windows; compilación y diff-check verdes mediante --verificar. Formato/lint omitidos por ausencia de herramientas, tipado no configurado.
+- Hades: /review-test APROBADO 9,25/10 sin hallazgos; /review-code N/A. Dictámenes transcritos de stdout con limitación de acceso a disco declarada.
