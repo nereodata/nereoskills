@@ -132,6 +132,7 @@ class FallosArnesTests(unittest.TestCase):
     def test_completado_en_disco_no_repite(self):
         """Un retorno incorrecto con paso completado y limpio no se repite."""
         def ejecutar(*args, **kwargs):
+            self.registrar_cierre()
             self.progreso = True
             return 1, {}, 'network'
         self.ejecutar.side_effect = ejecutar

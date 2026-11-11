@@ -52,3 +52,8 @@ Construir el hotfix sobre v1.1.2, ejecutar las regresiones y la suite completa a
 - E [EXEC] Documentar el límite y la persistencia en la guía del orquestador.
 - F [EXEC] Registrar validación de versión y cerrar mediante commit cuando las revisiones estén aprobadas.
 - Verificación dirigida: `python -m unittest skills.orquestar.test_progreso skills.orquestar.test_fallos_arnes skills.orquestar.test_recarga skills.orquestar.test_perfil_fijado.BucleTests tests.test_orquestar.RecuperacionAnalisisTests tests.test_orquestar.DificultadTests tests.test_orquestar.OrquestarRegressionTests`. Cubre avance, cierre revisado, cuota, perfiles y recarga. Higiene mediante `git diff --check` y calidad del delta.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 /review-test RECHAZADO (7,50/10), para desarrollo. H1 exige observar los perfiles de Hades autorizados antes y después de la recarga. H2 exige comprobar la espera efectiva por cuota. H3 y H4 piden reformular las dos notas con fechas fijas y comprobar el informe del ID correcto. Artemisa ha corregido las cuatro observaciones en skills/orquestar/test_progreso.py. Verificación dirigida del árbol 4260a399190751a42391073489643364dcc282c8: 84 pruebas, 12 fallos de comportamiento esperados antes de C2, sin errores de preparación. Reevaluar C1 con Hades adjuntando el informe literal docs/review/test_reviews/B-ADV-0044-test-review.md, el delta desde 68247f62b598e7f1ec3fd6c5e63eaed4208fff89, los escenarios y la última evidencia. La especificación sigue aprobada. Tras el aprobado de pruebas, implementar C2 según docs/design/B-ADV-0044-design.md y completar las fases pendientes del triaje.
