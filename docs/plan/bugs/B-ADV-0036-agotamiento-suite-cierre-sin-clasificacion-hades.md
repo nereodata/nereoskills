@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: dificil
 version: "v1.1.2"
-status: planned
+status: completed
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Caso observado en Afinn release/v0.7, B-AFN-0185, con Adevv 1.1.1"
@@ -258,3 +258,7 @@ El historial JSON del cierre conserva el presupuesto por causa, los commits, las
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades aprueba las regresiones de H1/H2 (8,75/10). Hallazgo medio para Artemisa: complementar el fallo de commit del destino humano con un fallo de git add al aplicar la estrategia del desarrollador. Se implementa y verifica en este paso.
+
+## Resolución de H1 y H2
+
+Cada grupo recupera su propio nivel y contador al reaparecer. Al aplicar un dictamen, el planificador comprueba que Git haya confirmado el destino antes de continuar. Las tres regresiones del intento anterior pasaron junto con el resto de `SuiteRecoveryTests` (23 en total). Hades aprobó el delta de producción con 8,50/10 y cerró ambos hallazgos. El informe maestro conserva el alcance de su revisión sobre adjuntos.

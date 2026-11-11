@@ -729,7 +729,7 @@ def backlog(root):
                 dif = 'media'
             perfil, perfil_errores = perfil_del_fichero(f)
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
-                        'suite_accion': fm.get('suite_accion', ''),
+                        'suite_accion': accion_suite(root, f, fm),
                         'perfil': perfil, 'perfil_errores': perfil_errores,
                         'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
@@ -1026,10 +1026,10 @@ def actualizar_dificultad(root, iid, nueva_dif):
     return True
 
 
-def promover_dificultad(root, iid, motivo=''):
+def promover_dificultad(root, iid, motivo='', actual=None):
     """Sube la dificultad de la tarea/bug un escalón (sencilla -> media -> dificil).
     Actualiza el frontmatter, registra métrica e informa por consola."""
-    actual = dificultad_de(root, iid)
+    actual = actual or dificultad_de(root, iid)
     nueva = siguiente_dificultad(actual)
     if not nueva:
         return None
@@ -2786,10 +2786,23 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
 def confirmar_suite(root, iid, mensaje, *ficheros):
     """Confirma únicamente los artefactos modificados en la transición del cierre."""
     rutas = [str(f.relative_to(root)) for f in ficheros]
-    subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True, check=True)
-    if git('diff', '--cached', '--name-only', '--', *rutas):
-        subprocess.run(['git', 'commit', '-qm', f'fix({iid}): {mensaje}', '--', *rutas],
-                       cwd=root, capture_output=True, check=True)
+    try:
+        intervencion.git(root, 'add', '--', *rutas)
+        if intervencion.git(root, 'diff', '--cached', '--name-only', '--', *rutas):
+            intervencion.git(root, 'commit', '-qm', f'fix({iid}): {mensaje}', '--', *rutas)
+    except subprocess.CalledProcessError as exc:
+        raise diagnostico_suite.DiagnosticoPendiente(f'{mensaje}: {exc.stderr or exc}') from exc
+
+
+def accion_suite(root, fichero, fm):
+    """El planificador acepta el destino escrito solo después del commit de la transición."""
+    accion = fm.get('suite_accion', '')
+    if accion == 'resuelta':
+        confirmado = intervencion.git(root, 'show', f'HEAD:{fichero.relative_to(root).as_posix()}')
+        cabecera = confirmado.partition('\n---')[0]
+        if 'suite_accion: pendiente' in cabecera.splitlines():
+            return 'pendiente'
+    return accion
 
 
 def aplicar_diagnostico_suite(root, fichero):
@@ -2797,40 +2810,45 @@ def aplicar_diagnostico_suite(root, fichero):
     ruta = fichero.with_suffix('.json')
     historial = json.loads(ruta.read_text(encoding='utf-8'))
     grupo = historial['grupos'][historial['actual']]
-    iid = frontmatter(fichero)['id']
+    fm = frontmatter(fichero)
+    iid = fm['id']
     if 'dictamen' not in grupo:
         grupo['dictamen'] = diagnostico_suite.solicitar(root, iid, historial['comando'], grupo, ruta)
         write_json_atomic(ruta, historial)
-        confirmar_suite(root, iid, 'conservar dictamen de Hades', ruta)
     dictamen = grupo['dictamen']
     accion = dictamen['terminal'] if grupo.get('recaida_tras_estrategia') else dictamen
     contexto = (f'{dictamen["causa"]}. {dictamen["decision"]}\n'
                 f'Solicitud {grupo["solicitud"]}. Arreglos y evidencias: {ruta.name}.')
     cambios = {'suite_accion': 'resuelta'}
-    revision = root / f'docs/review/versions/{nombre_version(vkey(frontmatter(fichero)["version"]))}-revision.md'
+    revision = root / f'docs/review/versions/{nombre_version(vkey(fm["version"]))}-revision.md'
     ficheros = [fichero, ruta]
     motivo = ''
     destino = accion['destino']
     if destino == 'humano':
-        pregunta = solicitar_intervencion(root, iid, accion['pregunta'], contexto=contexto + '\n' + accion['motivo'],
-                                          paso='diagnosticar-suite', aislar=False)
-        if not pregunta['bloqueo_aplicado']:
-            raise diagnostico_suite.DiagnosticoPendiente(pregunta.get('impedimento_incorporacion', 'Bloqueo pendiente'))
         motivo = f'{iid}: {accion["pregunta"]} {accion["motivo"]}'
     elif destino == 'tecnico':
         cambios.update(status='blocked', pendiente_de='intervencion_tecnica')
         motivo = f'{iid}: {accion["responsable"]}: {accion["intervencion"]}'
     else:
-        enrutar_hallazgo(root, iid, 'artemisa' if destino == 'desarrollador' else destino, contexto=contexto)
         ficheros.append(revision)
-        grupo['estrategia_aplicada'] = True
-    cabecera, cuerpo = reescribir_frontmatter(fichero.read_text(encoding='utf-8'), cambios)
-    if motivo:
-        cuerpo = cuerpo.rstrip() + f'\n\n## Conclusión del diagnóstico\n{contexto}\n{motivo}\n'
-        motivo += '\nCola de la última salida:\n' + grupo['evidencias'][-1]['salida'][-1200:]
-    write_json_atomic(ruta, historial)
-    fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
+    if fm.get('suite_accion') != 'resuelta':
+        confirmar_suite(root, iid, 'conservar dictamen de Hades', ruta)
+        if destino == 'humano':
+            pregunta = solicitar_intervencion(root, iid, accion['pregunta'], contexto=contexto + '\n' + accion['motivo'],
+                                              paso='diagnosticar-suite', aislar=False)
+            if not pregunta['bloqueo_aplicado']:
+                raise diagnostico_suite.DiagnosticoPendiente(pregunta.get('impedimento_incorporacion', 'Bloqueo pendiente'))
+        elif destino in ('desarrollador', 'especificador'):
+            enrutar_hallazgo(root, iid, 'artemisa' if destino == 'desarrollador' else destino, contexto=contexto)
+            grupo['estrategia_aplicada'] = True
+        cabecera, cuerpo = reescribir_frontmatter(fichero.read_text(encoding='utf-8'), cambios)
+        if motivo:
+            cuerpo = cuerpo.rstrip() + f'\n\n## Conclusión del diagnóstico\n{contexto}\n{motivo}\n'
+        write_json_atomic(ruta, historial)
+        fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
     confirmar_suite(root, iid, 'aplicar diagnóstico de la suite', *ficheros)
+    if motivo:
+        motivo += '\nCola de la última salida:\n' + grupo['evidencias'][-1]['salida'][-1200:]
     return iid, motivo
 
 
@@ -2851,7 +2869,7 @@ def registrar_fallo_suite(root, version, cmd):
     if fichero:
         fm = frontmatter(fichero)
         iid = fm['id']
-        if fm.get('suite_accion') == 'pendiente' and fm['status'] != 'cancelled':
+        if fm['status'] != 'cancelled' and accion_suite(root, fichero, fm) == 'pendiente':
             return aplicar_diagnostico_suite(root, fichero)
         if fm.get('status') in ('blocked', 'cancelled'):
             return iid, f'{iid}: el bug de cierre está {fm["status"]}; no se reabre. Cola de la última salida:\n{cola_aviso}'
@@ -2881,8 +2899,10 @@ def registrar_fallo_suite(root, version, cmd):
         base = git('log', '-1', '--format=%H', '--', str(ruta.relative_to(root))) if ruta.exists() else git(
             'log', '-1', '--format=%H', '--fixed-strings', '--grep', f'fix({iid}): registrar fallo de suite al cierre')
         arreglos = git('log', '--reverse', '--format=%H %s', f'{base}..HEAD' if base else '-1').splitlines()
+    anterior = historial.get('actual')
     grupo, nueva = diagnostico_suite.registrar_observacion(historial, ultima, dificultad, completado, arreglos)
-    if not nueva and ruta.exists() and not completado:
+    dificultad = grupo['dificultad']
+    if not nueva and anterior == historial['actual'] and ruta.exists() and not completado:
         return iid, ''
     pendiente = False
     if completado and nueva and (grupo.get('estrategia_aplicada') or grupo['intentos'] >= 3):
@@ -2892,10 +2912,10 @@ def registrar_fallo_suite(root, version, cmd):
                 grupo['recaida_tras_estrategia'] = True
             grupo.setdefault('solicitud', diagnostico_suite.clave([iid, clave_comando, historial['actual'], ultima['arbol']]))
         else:
-            dificultad = promover_dificultad(root, iid, motivo='3 recaídas de la misma causa')
+            dificultad = promover_dificultad(root, iid, motivo='3 recaídas de la misma causa', actual=dificultad)
             grupo.update(dificultad=dificultad, intentos=0)
             texto = fichero.read_text(encoding='utf-8')
-    cambios = {'status': 'planned', 'updated_at': hoy, 'suite_dificultad': dificultad,
+    cambios = {'status': 'planned', 'updated_at': hoy, 'dificultad': dificultad, 'suite_dificultad': dificultad,
                'suite_intentos': str(grupo['intentos']), 'suite_accion': 'pendiente' if pendiente else 'ninguna'}
     cabecera, cuerpo = reescribir_frontmatter(texto, cambios)
     cuerpo = re.sub(r'\n## Último fallo de suite\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)

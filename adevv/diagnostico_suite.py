@@ -81,9 +81,10 @@ def cargar(ruta, texto, fm, dificultad):
 def registrar_observacion(historial, fila, dificultad, completado, arreglos):
     """Asocia la evidencia a los arreglos y cuenta solo recaídas de un grupo ya observado."""
     salida = fila.get('salida') or '(el comando no produjo salida)'
+    anterior = historial['grupos'].get(historial.get('actual'))
+    if anterior and anterior['dificultad'] != dificultad:
+        anterior.update(intentos=0, dificultad=dificultad)
     grupo = grupo_de(historial, salida, dificultad)
-    if grupo['dificultad'] != dificultad:
-        grupo.update(intentos=0, dificultad=dificultad)
     if any(e['arbol'] == fila['arbol'] and e['salida'] == salida and e['codigo'] == fila['codigo']
            for e in grupo['evidencias']):
         return grupo, False

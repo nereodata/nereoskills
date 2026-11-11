@@ -1,6 +1,20 @@
-**Veredicto:** RECHAZADO
+**Veredicto:** APROBADO
 
 # B-ADV-0036 · Revisión de código
+
+## Reevaluación de Hades · 8,50/10
+
+Hades dio por resueltos H1 y H2. Al reaparecer A después de promocionar B, el registro recupera el nivel y las dos recaídas de A. Si Git falla al confirmar un destino, el planificador detecta que HEAD conserva la solicitud pendiente. La reanudación confirma el destino preparado con el dictamen original. Las regresiones cubren tanto el fallo de `git commit` del destino humano como el de `git add` de la estrategia de desarrollo.
+
+| Corrección | Seguridad | Conformidad | Calidad | Eficiencia | Documentación |
+|---|---|---|---|---|---|
+| 9 | 9 | 9 | 8 | 8 | 8 |
+
+Hades revisó por stdout el delta de producción completo respecto a `45edca8`, incluidas la guía y la entrada de changelog. Reutilizó la evidencia del árbol `2dd37bd84c8e1992251a05dac6585863d33d4c3d`. Pasaron las 23 pruebas de `SuiteRecoveryTests` en 58,390 s, la compilación, las comprobaciones de diff y la búsqueda dirigida de secretos. Formato y lint se omitieron por ausencia de herramientas. No se identificaron nuevos hallazgos ni se asignó deuda.
+
+El perfil principal devolvió acceso por suscripción deshabilitado. La reserva autorizada no pudo iniciar procesos de lectura local («registered Core launch requires an installed app»). Su evaluación se limita al material adjunto. No pudo consultar el perfil y la skill en disco, contrastar el checkout, ejecutar personalmente la calidad sin escritura ni comprobar el límite temporal externo del lanzador de Hades. Dejó este último punto como límite de la evaluación.
+
+## Dictamen anterior · RECHAZADO
 
 Hades revisó el delta completo de producción de `adevv/diagnostico_suite.py`, `skills/orquestar/orquestar.py`, `skills/orquestar/SKILL.md` y `CHANGELOG.md`. Los dos hallazgos altos corresponden a Artemisa, con disposición `resolver`.
 
