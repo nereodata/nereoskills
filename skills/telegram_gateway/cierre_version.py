@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 from adevv import release_tools
+from adevv.revisiones import pendientes_cierre, clave_version, nombre_version
 
 def resumen(root, version):
     """Resume la revisión y conserva siempre la orden de confirmación."""
@@ -35,13 +36,15 @@ def git(root, *args):
 
 def validar(root, version, motor):
     """Rechaza toda precondición incumplida antes de preparar la publicación."""
-    if not re.fullmatch(r'v\d+\.\d+', version):
+    if not re.fullmatch(r'v\d+\.\d+(?:\.\d+)?', version):
         raise ValueError('Uso: /cerrar vX.Y [confirmo]')
     if motor.pid_vivo(root):
         raise ValueError('Existe un bucle vivo; espera su parada.')
-    rama = 'release/' + version
-    if git(root, 'branch', '--show-current') != rama:
-        raise ValueError(f'La versión solicitada no coincide con la revisión final o la rama activa no es {rama}.')
+    clave = clave_version(version)
+    version = nombre_version(clave)
+    rama = git(root, 'branch', '--show-current')
+    if rama not in ('release/' + version, 'hotfix/' + version):
+        raise ValueError(f'La versión solicitada no coincide con la revisión final o la rama activa no es release/{version} ni hotfix/{version}.')
     if (root / motor.PARADA).exists():
         raise ValueError('La parada no corresponde a revisión final: petición manual.')
     log = root / motor.LOG
@@ -56,6 +59,9 @@ def validar(root, version, motor):
         if item['status'] not in ('completed', 'cancelled'):
             motivo = 'bloqueo' if item['status'] == 'blocked' else 'trabajo pendiente'
             raise ValueError(f"{motivo}: {item['id']} ({item['status']}).")
+    pendientes = pendientes_cierre(root, version)
+    if pendientes:
+        raise ValueError('Cierre pendiente de revisión:\n' + '\n'.join(pendientes))
     review = root / f'docs/review/versions/{version}-revision.md'
     if not review.exists():
         raise ValueError('Falta la revisión final de versión.')
@@ -81,7 +87,7 @@ def validar(root, version, motor):
         coordinador.verificar_restriccion_release(root, 'gateway', accion_req, cfg=cfg)
     tag = str(cfg.get('project', {}).get('version', ''))
     tag = 'v' + tag.removeprefix('v')
-    if not re.fullmatch(re.escape(version) + r'\.\d+', tag):
+    if clave_version(tag) != clave or not re.fullmatch(r'v\d+\.\d+\.\d+', tag):
         raise ValueError('Versión del proyecto desalineada con la release.')
     try:
         release_tools.validar_publicacion(root, tag, cfg=cfg)
@@ -105,7 +111,7 @@ def cerrar(root, argumento, motor):
     if not partes or len(partes) > 2 or (len(partes) == 2 and partes[1] != 'confirmo'):
         return 'Uso: /cerrar vX.Y [confirmo]'
     version = partes[0]
-    if not re.fullmatch(r'v\d+\.\d+', version):
+    if not re.fullmatch(r'v\d+\.\d+(?:\.\d+)?', version):
         return 'Uso: /cerrar vX.Y [confirmo]'
     if len(partes) == 1:
         return resumen(root, version)

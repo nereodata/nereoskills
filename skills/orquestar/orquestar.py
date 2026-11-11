@@ -29,6 +29,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from adevv.revisiones import clave_version as vkey, nombre_version, motivo_revision, diagnostico_revision
+
 try:
     import winreg
 except ImportError:
@@ -82,7 +85,6 @@ except ImportError:
         _metricas_spec = importlib.util.spec_from_file_location('adevv_metricas', Path(__file__).with_name('metricas.py'))
         metricas = importlib.util.module_from_spec(_metricas_spec)
         _metricas_spec.loader.exec_module(metricas)
-vkey = metricas.clave_version_numerica
 
 _intervencion_spec = importlib.util.spec_from_file_location('adevv_intervencion', SKILL.with_name('intervencion.py'))
 intervencion = importlib.util.module_from_spec(_intervencion_spec)
@@ -1217,9 +1219,8 @@ def primera_linea(path):
 
 
 def revisada(root, iid):
-    """Hades solo escribe el reporte de review-code si aprueba (o N/A sin código)."""
-    d = root / 'docs/review/code_reviews'
-    return d.is_dir() and any(d.glob(f'{iid}*'))
+    """Exige aprobación formal o N/A justificado en el informe canónico."""
+    return not motivo_revision(root, iid)
 
 
 def producto_activa(root, v):
@@ -1275,7 +1276,7 @@ def estado(root, docs):
     alcance = desbloquea(items)
     pendientes = [i for i in items if i['status'] not in FUERA and vkey(i['version'])]
     abiertas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
-    for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0)):
+    for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0, 0)):
         v = rama.split('/')[1]
         suyas = [i for i in items if vkey(i['version']) == vkey(v)]
         recien_abierta = all(i['status'] in ('backlog', 'planned') for i in suyas)
@@ -1329,7 +1330,7 @@ def estado(root, docs):
         return ('FIN', 'Todas las tareas con versión están cerradas'
                        + (f'; quedan {mejoras} mejoras registradas como deuda.' if mejoras else '.'))
     v = min(vkey(i['version']) for i in pendientes)
-    return ('PASO', 'start-version', f'v{v[0]}.{v[1]}', None)
+    return ('PASO', 'start-version', nombre_version(v), None)
 
 
 def firma(root, docs):
@@ -2567,7 +2568,7 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
                        encoding='utf-8')
     rutas = [str(fichero.relative_to(root))]
     if version:
-        revision = root / f'docs/review/versions/v{version[0]}.{version[1]}-revision.md'
+        revision = root / f'docs/review/versions/{nombre_version(version)}-revision.md'
         revision.parent.mkdir(parents=True, exist_ok=True)
         previo = revision.read_text(encoding='utf-8') if revision.exists() else ''
         revision.write_text(previo.rstrip('\n') + f'\n\n## {iid} · Bloqueo sin progreso\n' + motivo, encoding='utf-8')
@@ -2927,6 +2928,8 @@ def parte(root, docs='docs/requirements'):
         marcha = 'en marcha' if pid_vivo(root) else 'parado'
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
+    if e[0] == 'PASO' and e[1] == 'revisar-tarea':
+        lineas.append(diagnostico_revision(root, e[2]))
     items = backlog(root)
     abiertas = sorted({vkey(i['version']) for i in items if vkey(i['version']) and i['status'] not in CERRADO})
     for vk in abiertas[:1]:

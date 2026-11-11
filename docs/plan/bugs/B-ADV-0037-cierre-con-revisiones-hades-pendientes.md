@@ -84,7 +84,7 @@ parche.
 - base_calidad: c29d8c67bdbdc8d587e78faf2dd2025007113ea8
 - Se conserva hotfix/v1.1.2, rama autorizada ya abierta. No se publica ni etiqueta.
 - A, B, C1, C2, D, E y F: [EXEC], con el alcance descrito arriba.
-- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas tests.test_orquestar.HallazgosHadesRoutingTests skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
+- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas tests.test_orquestar.HallazgosHadesRoutingTests skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun tests.test_publicacion_compartida tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_03_version_mismatch_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_04_already_published_tag_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_05_publicacion_correcta_y_etiqueta_anotada`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
 - Calidad: `git diff --check` y `adevv orquestar --calidad --base c29d8c67bdbdc8d587e78faf2dd2025007113ea8`; no hay lint, tipado ni escáner configurados. No cambian dependencias.
 - Delta-first CA3: ya existen informes formales RECHAZADO para B-ADV-0032 y B-ADV-0033, con hallazgos enrutados a artemisa en sus fichas. No se simula aprobación ni se duplica su desarrollo dentro de este bug.
 - DEC: separar identidad operativa completa de versión de la agrupación estadística mayor/menor. vX.Y equivale a vX.Y.0; parches positivos se aíslan.
@@ -182,3 +182,70 @@ parche.
   luego repetir review-test. Adaptar las fixtures operativas identificadas en
   el diseño. C2/D/E/F siguen pendientes, sin cambios de producción ni aprobación
   de código. Documentación pública del comportamiento futuro no se ha aplicado.
+
+## Reanudación de Artemisa (2026-11-11)
+
+- Hades review-test: APROBADO sobre materiales adjuntos; RT-01/RT-02 resueltos.
+  El informe conserva la limitación de acceso local y de lectura de la skill.
+- Corrección compartida en adevv/revisiones.py para informe canónico y versión
+  completa; preflight, API y Telegram reutilizan la regla; selector y rutas
+  conservan parche sin cambiar agrupación de métricas.
+- 15 regresiones nuevas verdes. La primera verificación ampliada detectó 19
+  fallos de métricas CLI por resolver el paquete instalado antiguo desde la
+  ejecución directa del motor. Se corrige el bootstrap para usar su propio árbol.
+- Se amplía el triaje con publicación compartida y solo los tres casos CA-F05
+  de TestInstallAndRelease: consumidores directos de validar/publicar_version.
+  No se ejecutan instalación, actualización ni suite completa.
+- Compatibilidad documentada: se aceptan los formatos formales Markdown ya
+  existentes (viñetas, títulos y puntuación tras veredicto). Se amplían los
+  ejemplos positivos de la prueba existente; no se cambia el contrato aprobado.
+
+- La verificación ampliada a 71 tests pasó salvo el diagnóstico de rama ajena
+  en Telegram: mostraba main en vez de las ramas esperadas. Se corrigió el
+  mensaje y su test dirigido quedó verde (1 test, subcasos de precondiciones).
+- Formato/lint omitidos por ausencia de herramientas; compilación del delta y
+  diff-check verdes mediante --verificar. No hay tipado ni escáner de seguridad
+  configurados. No cambian manifiestos de dependencias.
+
+- Hades /review-test reevaluó la adaptación mecánica de fixtures y los formatos
+  históricos siguiendo perfil y skill adjuntos: APROBADO, 9/10, sin hallazgos
+  nuevos. Informe conservado literalmente de stdout por fallo de escritura local.
+
+- Verificación final del triaje: 71 pruebas OK (98,961 s), exclusivamente los
+  grupos declarados. Se normalizan los finales de línea del informe recibido
+  por stdout para dejar diff-check limpio; se vuelve a acreditar el árbol antes
+  de review-code. Suite completa reservada al bucle.
+
+## Resultado del intento actual de Artemisa
+
+- C1: Hades /review-test APROBADO, media 9/10, RT-01/RT-02 resueltos,
+  sin nuevos hallazgos. Perfil y skill adjuntos al mandato de reevaluación.
+- C2: corrección implementada; comando final del triaje con 71 pruebas OK
+  (112,002 s) sobre el árbol 656dbf2cada563c0acee44a3c971c83a5ba2f857.
+  Compilación y diff-check verdes mediante --verificar en ese mismo árbol.
+- Calidad: formato/lint omitidos por ausencia de herramientas; no hay tipado
+  ni escáner configurados. Dependencias intactas. Suite completa no ejecutada.
+- D: Hades /review-code RECHAZADO, media 7,83/10. RC-01 ALTA: el cierre
+  PARAR de una hotfix reconstruye release/<versión> y puede verificar otra
+  rama o detenerse. RC-02 MEDIA resolver: avisar() omite el resumen Telegram
+  para versiones con parche. Ambos para desarrollador/artemisa, sin cambio de
+  especificación ni intervención humana.
+- Los informes se conservan literalmente desde stdout, normalizando solo
+  terminadores de línea. Hades no pudo acceder al filesystem ni ejecutar
+  calidad por fallo local del arnés; aceptó la evidencia aportada. No se
+  presenta esa limitación como análisis ejecutado ni como aprobación de código.
+- Se aplica el enrutado obligatorio a artemisa para reanudar desarrollo. No se
+  corrigen RC-01/RC-02 dentro de este paso después de ese enrutado. Pendiente:
+  preservar la rama concreta en el cierre PARAR, reconocer parche en avisos,
+  ampliar triaje con sus pruebas dirigidas y repetir las revisiones necesarias.
+- E: README y CHANGELOG actualizados; F pendiente. El bug no está completed;
+  no se publica, etiqueta ni declara cerrada ninguna versión.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-code RECHAZADO (7,83/10), informe docs/review/code_reviews/B-ADV-0037-code-review.md. RC-01 ALTA para desarrollador/artemisa: cierre PARAR reconstruye release/version en vez de conservar hotfix/version, y verifica otra rama o falla. RC-02 MEDIA resolver para desarrollador/artemisa: avisar no reconoce parche y omite resumen Telegram. Decision: reanudar desarrollo, ampliar triaje con pruebas dirigidas y reevaluar; sin cambio de especificacion ni pregunta humana. 71 pruebas del triaje verdes; no equivalen a aprobacion de codigo.
+
+- La CLI instalada aún agrupó la huella del enrutado en v1.1-revision.md.
+  Se trasladó únicamente esa nueva entrada a v1.1.2-revision.md y se conservó
+  intacto el histórico de v1.1; el comando obligatorio sí dejó status planned.

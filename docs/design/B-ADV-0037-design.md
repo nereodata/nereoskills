@@ -75,3 +75,11 @@ Impacto adicional encontrado mecánicamente: HallazgosHadesRoutingTests usa
 v1.1.1 y esperaba el informe v1.1; conserva el parche. DeudaMenorTests
 comprobaba identidad entre vkey y la clave estadística: ahora verifica su
 separación explícita. Se amplía el triaje solo con esos grupos afectados.
+
+Ejecución directa: orquestar.py antepone la raíz de su propio paquete antes de
+importar la regla compartida, igual que el script de completitud, para evitar
+mezclar el motor de desarrollo con un paquete instalado anterior. Los formatos
+formales históricos Markdown se admiten, conservando el primer veredicto formal.
+Gateway admite ramas release/ y hotfix/ de la identidad solicitada. Se añaden al
+triaje los consumidores directos de publicación compartida y tres casos CA-F05 de
+TestInstallAndRelease; las pruebas de instalación quedan fuera.

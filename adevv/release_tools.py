@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from adevv.yaml_lite import load_yaml
+from adevv.revisiones import pendientes_cierre
 
 try:
     import tomllib
@@ -130,6 +131,9 @@ def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None 
     declared = str((config.get("project") or {}).get("version", "")).lstrip("vV")
     if config and declared != norm_target:
         raise ReleaseValidationError("Versión desalineada del manifiesto task_config.yaml.")
+    pendientes = pendientes_cierre(repo_dir, target_tag, config)
+    if pendientes:
+        raise ReleaseValidationError("Cierre pendiente de revisión/trabajo:\n" + "\n".join(pendientes))
     remote_origin = _get_origin_url(repo_dir, origin_url)
     try:
         remote_tags = _ejecutar(repo_dir, ["git", "ls-remote", "--tags", remote_origin], timeout=5)

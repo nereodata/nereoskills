@@ -26,6 +26,36 @@ class RevisionesReleaseTests(unittest.TestCase):
             self.write(f'docs/{name}.md', 'APROBADO\n')
         self.item('B-ADV-0100', 'v1.1.2', 'completed')
 
+    def preparar_git(self):
+        """Prepara referencias publicables y un remoto bare exclusivamente local."""
+        self.remote = self.root / 'remote.git'
+        self.git('init', '-q', '-b', 'main')
+        self.git('config', 'user.email', 'test@example.invalid')
+        self.git('config', 'user.name', 'Test')
+        self.write('.gitignore', 'remote.git/\n')
+        subprocess.run(['git', 'init', '--bare', '-q', str(self.remote)], check=True)
+        self.git('remote', 'add', 'origin', str(self.remote))
+        self.git('add', '.')
+        self.git('commit', '-qm', 'fixture')
+        self.git('push', '-q', 'origin', 'main')
+        self.git('checkout', '-qb', 'hotfix/v1.1.2')
+
+    def git(self, *args):
+        """Ejecuta Git en la fixture sin configuración personal."""
+        env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull)
+        return subprocess.run(['git', *args], cwd=self.root, env=env,
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    def snapshot(self, excluir=()):
+        """Observa referencias locales/remotas, índice y artefactos de cierre."""
+        files = {p.relative_to(self.root).as_posix(): p.read_bytes()
+                 for p in self.root.rglob('*') if p.is_file()
+                 and not {'.git', 'remote.git'}.intersection(p.relative_to(self.root).parts)
+                 and p.relative_to(self.root).as_posix() not in excluir
+                 and not p.name.startswith('orquestar_')}
+        return (self.git('show-ref'), self.git('branch', '--show-current'),
+                self.git('ls-files', '--stage'), self.git('ls-remote', 'origin'), files)
+
     def write(self, path, text):
         """Escribe artefactos de la fixture aislada."""
         p = self.root / path
@@ -48,21 +78,31 @@ class RevisionesReleaseTests(unittest.TestCase):
                               capture_output=True, text=True, encoding='utf-8')
 
     def test_cierre_rechaza_ausente_rechazado_vacio_y_na_sin_motivo(self):
+        self.preparar_git()
         for text in (None, '', '**Veredicto:** RECHAZADO\n', '**Veredicto:** N/A\n'):
             with self.subTest(report=text):
                 if text is not None:
                     self.report(text)
+                before = self.snapshot()
                 result = self.preflight()
+                self.assertEqual(before, self.snapshot())
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('B-ADV-0100', result.stdout)
                 self.assertIn('revisar-tarea', result.stdout)
+                if text == '**Veredicto:** N/A\n':
+                    self.assertIn('N/A sin justificación', result.stdout)
 
     def test_recuperar_hades_desbloquea_y_na_exige_motivo(self):
+        self.preparar_git()
         self.assertNotEqual(self.preflight().returncode, 0)
-        for text in ('**Veredicto:** APROBADO\n', '**Veredicto:** N/A\nMotivo: sin cambios de código; solo documentación.\n'):
+        for text in ('**Veredicto:** APROBADO\n', '- **Veredicto**: **APROBADO** (media 9/10)\n',
+                     '## Veredicto: ✅ APROBADO\n', '**Veredicto: APROBADO. Media: 9/10.**\n',
+                     '**Veredicto:** N/A\nMotivo: sin cambios de código; solo documentación.\n'):
             with self.subTest(report=text):
                 self.report(text)
+                before = self.snapshot()
                 self.assertEqual(self.preflight().returncode, 0)
+                self.assertEqual(before, self.snapshot())
 
     def test_prefijo_parecido_no_acredita_revision(self):
         self.report('**Veredicto:** APROBADO\n', 'B-ADV-01000')
@@ -119,7 +159,11 @@ class RevisionesReleaseTests(unittest.TestCase):
                     self.item(iid, 'v1.1.2', 'completed')
                     if informe:
                         self.report(informe, iid)
+                    if not (self.root / '.git').exists():
+                        self.preparar_git()
+                    before = self.snapshot()
                     result = self.preflight()
+                    self.assertEqual(before, self.snapshot())
                     self.assertNotEqual(result.returncode, 0)
                     for fragment in (iid, 'informe ausente' if informe is None else 'informe rechazado',
                                      'revisar-tarea', 'validar'):
@@ -148,6 +192,8 @@ class RevisionesReleaseTests(unittest.TestCase):
         self.write('orchestration.json', '{"hades": {"harness": "codex", "model": "modelo-test"}}')
         self.write('docs/review/versions/v1.1.2-arquitectura.md', 'APROBADO')
         self.write('docs/review/versions/v1.1.2-revision.md', 'Pendiente')
+        self.preparar_git()
+        before = self.snapshot()
         pruebas = subprocess.run([sys.executable, '-c', 'raise SystemExit(0)'], cwd=self.root)
         self.assertEqual(pruebas.returncode, 0)
         env = {'ORQUESTAR_ID': 'B-ADV-0100', 'ORQUESTAR_PASO': 'revisar-tarea'}
@@ -155,9 +201,11 @@ class RevisionesReleaseTests(unittest.TestCase):
              patch.object(motor, 'lanzar', return_value=(1, {}, 'rate limit reached')), \
              patch.object(motor, 'avisar'):
             self.assertNotEqual(motor.agente(self.root, 'hades', 'revisión formal'), 0)
+        self.assertEqual(before, self.snapshot())
         with patch.object(motor, 'git', return_value='hotfix/v1.1.2'):
             estado = motor.parte(self.root, 'docs')
         result = self.preflight()
+        self.assertEqual(before, self.snapshot())
         self.assertNotEqual(result.returncode, 0)
         for text in (estado, result.stdout):
             for fragment in ('B-ADV-0100', 'Hades sin cuota', 'recuperar', 'revisar-tarea', 'validar'):
@@ -171,9 +219,12 @@ class RevisionesReleaseTests(unittest.TestCase):
             self.report('**Veredicto:** APROBADO\n')
             return 0, {}, 'Veredicto: APROBADO'
 
+        excluir = ('docs/review/code_reviews/B-ADV-0100-code-review.md',)
+        before = self.snapshot(excluir)
         with patch.dict(os.environ, env), patch.object(motor, 'buscar_ejecutable', return_value=sys.executable), \
              patch.object(motor, 'lanzar', side_effect=emitir):
             self.assertEqual(motor.agente(self.root, 'hades', 'reanudar revisión'), 0)
+        self.assertEqual(before, self.snapshot(excluir))
         self.assertEqual(self.preflight().returncode, 0)
         with patch.object(motor, 'git', return_value='hotfix/v1.1.2'):
             self.assertEqual(motor.estado(self.root, 'docs')[0], 'PARAR')

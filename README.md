@@ -195,3 +195,15 @@ perfil. La recarga conserva sus intentos. Si se agotan, `especificar` y
 `revisar-tarea` bloquean solo la tarea y permiten continuar las independientes;
 los análisis globales paran indicando los perfiles probados. Véase
 [recuperación de análisis](skills/orquestar/SKILL.md#recuperación-de-análisis-sin-progreso).
+
+
+El cierre local, `/cerrar` por Telegram y la API de publicación exigen un informe
+formal `docs/review/code_reviews/<ID>-code-review.md` para cada tarea o bug maestro
+completado de la versión. Debe estar APROBADO, o N/A con motivo explícito de ausencia
+de código. Un informe ausente, vacío o RECHAZADO mantiene pendiente el cierre aunque
+las pruebas pasen. El diagnóstico enumera los IDs y pide reanudar `revisar-tarea`
+y volver a validar; si Hades agotó cuota, hay que recuperar su disponibilidad y
+obtener el informe. Recuperar cuota o emitir el informe no publica por sí solo.
+El selector y el cierre distinguen parches (`v1.1.1` y `v1.1.2`); `v1.1` equivale
+a `v1.1.0`. `/cerrar v1.1.2 confirmo` admite la rama hotfix o release correspondiente.
+Las métricas conservan su agrupación histórica por mayor y menor.

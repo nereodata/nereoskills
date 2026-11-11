@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.2] - 2026-11-11
+
+### Corregido
+
+- **B-ADV-0037** — El preflight, Telegram y la API de publicación bloquean el cierre con revisiones formales pendientes o rechazadas e indican cómo reanudarlas. El selector distingue parches; las métricas mantienen su agrupación histórica.
+
 ## [1.1.1] - 2026-11-10
 
 ### Corregido

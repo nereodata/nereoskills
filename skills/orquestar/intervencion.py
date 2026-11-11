@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from adevv.revisiones import nombre_version
 
 try:
     import msvcrt
@@ -80,7 +81,7 @@ def revision(root, motor, iid):
     v = motor.vkey(motor.frontmatter(motor.fichero_de(root, iid)).get('version'))
     if not v:
         raise ValueError('La intervención requiere una tarea con versión')
-    return root / f'docs/review/versions/v{v[0]}.{v[1]}-revision.md'
+    return root / f'docs/review/versions/{nombre_version(v)}-revision.md'
 
 
 def asegurar_destino(root, motor, q):

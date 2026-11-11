@@ -30,7 +30,7 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
         tarea.write_text(
             '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\npendiente_de: humano\n---\n\n'
             '# T-ADV-0101\n\n## Hallazgo\nDestino: especificador\n', encoding='utf-8')
-        revision = self.root / 'docs/review/versions/v1.1-revision.md'
+        revision = self.root / 'docs/review/versions/v1.1.1-revision.md'
         revision.parent.mkdir(parents=True)
         revision.write_text('# Revisión\n', encoding='utf-8')
         for nombre, contenido in [('requirements.md', '# Idea\n'), ('req_analysis.md', 'APROBADO\n'),
@@ -75,7 +75,7 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
         self.assertEqual(q['id'], 'Q-ADV-0001')
         solicitar.assert_called_once()
 
-        trazas = (self.root / 'docs/review/versions/v1.1-revision.md').read_text(encoding='utf-8')
+        trazas = (self.root / 'docs/review/versions/v1.1.1-revision.md').read_text(encoding='utf-8')
         self.assertIn('Destino: `especificador`', trazas)
         self.assertIn('Destino: `artemisa`', trazas)
 
@@ -163,7 +163,7 @@ class RevisionProductoTests(unittest.TestCase):
         for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
                          ('docs/req_analysis.md', '**Estado:** ASUNCIONES_REALIZADAS'),
                          ('docs/platform_plan.md', ''), ('docs/platform_review.md', '**Veredicto:** APROBADO'),
-                         ('docs/work_plan.md', ''), ('docs/review/code_reviews/T1-code-review.md', ''),
+                         ('docs/work_plan.md', ''), ('docs/review/code_reviews/T1-code-review.md', 'APROBADO'),
                          ('docs/review/versions/v0.1-arquitectura.md', '')]:
             (self.root / f).parent.mkdir(parents=True, exist_ok=True)
             (self.root / f).write_text(texto, encoding='utf-8')
@@ -1384,7 +1384,7 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(p.parent, self.root / 'backlog/bugs')
         fm = motor.frontmatter(p)
         self.assertEqual(fm['status'], 'planned')
-        self.assertEqual(motor.vkey(fm['version']), (0, 1))
+        self.assertEqual(motor.vkey(fm['version']), (0, 1, 0))
         self.assertEqual(motor.lista(fm['depende_de']), [])
         self.assertIn('format: src/app.js: error', p.read_text(encoding='utf-8'))
         self.assertIn('suite', p.read_text(encoding='utf-8'))

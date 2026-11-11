@@ -24,7 +24,7 @@ DEFECTO = (2.5, .25, 10)
 
 
 def version(valor):
-    """Normaliza versiones numéricas al bloque mayor.menor usado por vkey."""
+    """Normaliza versiones numéricas al bloque estadístico mayor.menor."""
     clave = clave_version_numerica(valor)
     return f'v{clave[0]}.{clave[1]}' if clave else ''
 
@@ -36,7 +36,7 @@ def clave_version_numerica(valor):
 
 
 def clave_version(valor):
-    """Orden numérico compatible con vkey; sin-version queda al principio."""
+    """Orden numérico de bloques estadísticos; sin-version queda al principio."""
     return clave_version_numerica(valor) if valor != 'sin-version' else (-1, -1)
 
 
