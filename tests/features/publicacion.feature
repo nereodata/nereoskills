@@ -122,3 +122,43 @@ Característica: F-05 Publicación de versiones sin contenido interno
     Dado T-ADV-0100 completada en v1.1 sin informe formal
     Cuando valido el preflight local de v1.1.0 con los demás requisitos satisfechos
     Entonces el cierre se rechaza identificando T-ADV-0100 por informe ausente
+
+
+  @B-ADV-0031
+  Escenario: Evidencia compartida entre entradas y worktrees
+    Dado dos worktrees del mismo repositorio con idéntico contenido y entorno relevante
+    Y ambos conservan historiales locales de verificaciones anteriores
+    Cuando verifico un comando con éxito desde el worktree secundario
+    Entonces verificar desde el principal y el preflight reutilizan ese resultado sin ejecutarlo
+    Y el mandato de Hades incluye el comando acreditado
+    Y consultar o reutilizar no añade ejecuciones reales al historial
+
+  @B-ADV-0031
+  Escenario: Un fallo posterior invalida un éxito compartido
+    Dado un comando verificado con éxito sobre el contenido y entorno actuales
+    Cuando un preflight posterior ejecuta ese comando sobre la misma identidad y falla
+    Entonces el historial conserva el fallo y su diagnóstico
+    Y el mandato de Hades deja de afirmar que ese comando está verificado
+    Y la siguiente verificación ejecuta el comando y explica que el último resultado falló
+    Y no reintenta automáticamente el fallo
+
+  @B-ADV-0031
+  Esquema del escenario: Evidencia sin identidad acreditable exige ejecución
+    Dado un éxito histórico del mismo comando y árbol cuyo entorno está <entorno>
+    Cuando consulto la evidencia para Hades y ejecuto verificar y preflight
+    Entonces Hades no anuncia ese éxito como acreditado
+    Y verificar y preflight ejecutan el comando al no poder reutilizar esa evidencia
+    Y el historial original permanece trazable con el motivo de no reutilización
+
+    Ejemplos:
+      | entorno                         |
+      | ausente                         |
+      | distinto del entorno actual     |
+
+  @B-ADV-0031
+  Escenario: Un comando modifica sus entradas durante la ejecución
+    Dado un comando que modifica un archivo relevante y termina con código cero
+    Cuando verifico ese comando
+    Entonces el historial registra las identidades inicial y final y el cambio en vuelo
+    Y Hades no presenta el resultado como verde reutilizable
+    Y la próxima verificación vuelve a ejecutarlo

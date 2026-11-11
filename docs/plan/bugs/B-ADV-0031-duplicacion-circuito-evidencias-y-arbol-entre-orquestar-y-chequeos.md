@@ -5,7 +5,7 @@ type: bug
 weight: 70
 dificultad: media
 version: "v1.2.0"
-status: planned
+status: in_progress
 depende_de: []
 origen: "T-ADV-0032; revisar-version v1.1 (docs/review/versions/v1.1-arquitectura.md), H-01 🟡"
 created_at: 2026-11-07
@@ -35,3 +35,28 @@ updated_at: 2026-11-11
 - [ ] El comando `--verificar`, la evidencia suministrada a Hades y el preflight consultan el mismo historial aplicable, también desde un worktree secundario.
 - [ ] Los tres identifican el último resultado real de la comprobación. Un fallo posterior impide reutilizar el verde anterior y se explica por qué procede ejecutar, esperar o reutilizar.
 - [ ] La identidad respeta las entradas y el entorno acreditables de la etapa. Si faltan datos en registros históricos, se conserva su trazabilidad y se vuelve a ejecutar cuando corresponda.
+
+## Triaje · 2026-11-11
+
+- base_calidad: `32d567cb8e1ad1c881a460b09e6742f3b3f2c6cc` (conservar en reintentos).
+- Causa confirmada: cálculo Git y acceso JSONL duplicados en el motor; el lector central prioriza el archivo local sobre el común y los consumidores por árbol no acreditan entorno ni cambios en vuelo. El preflight solo persiste éxitos.
+- Subfase A: [EXEC] Casos de historial compartido, último resultado real y entorno/históricos en `tests/features/publicacion.feature`.
+- Subfase B: [EXEC] Centralizar identidad, persistencia y consulta aplicable sin cambiar arquitectura.
+- Subfase C1: [EXEC] Regresiones focalizadas en `tests/test_evidencias_compartidas.py`; conservar pruebas de prompts, verificación y publicación existentes.
+- Subfase C2: [EXEC] `skills/orquestar/orquestar.py` y `skills/orquestar/chequeos.py`.
+- Subfase D: [EXEC] Hades sobre el delta completo del bug.
+- Subfase E: [EXEC] Nota de corrección en changelog y revisión de versión; ajustar guía de evidencias si procede.
+- Subfase F: [EXEC] Calidad, señal final y commit semántico tras aprobación.
+- Verificación al cierre: `python -m unittest discover -s tests -p test_evidencias_compartidas.py` y `python -m unittest discover -s tests -p test_publicacion_compartida.py`, más los tests de prompt y verificación de `tests.test_orquestar` identificados en el diseño. Ejercitan historial, worktrees, integración CLI/Hades/preflight y publicación sin ejecutar la suite completa.
+- Chequeos: `git diff --check` y `python -m compileall -q skills/orquestar tests/test_evidencias_compartidas.py`; calidad del delta mediante `--calidad --base`.
+- DEC: no urgente; release activa v1.2, sin publicación. No se modifica ningún perfil de agente.
+
+## Reanudación pendiente · revisión de especificación
+
+- Invocación realizada: `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`, con `ORQUESTAR_ID=B-ADV-0031` y `ORQUESTAR_PASO=bug-fix`.
+- El arnés terminó sin poder leer archivos ni ejecutar comandos: `registered Core launch requires an installed app`.
+- Hades no emitió veredicto ni escribió informe. La revisión de especificación queda pendiente; no se considera aprobada ni rechazada.
+- Se conservan el triaje y los escenarios propuestos. No hay implementación ni pruebas nuevas todavía; su discriminación contra el código actual queda pendiente de la fase C1. No se ejecuta la suite completa.
+- Próximo intento: obtener la revisión independiente de los escenarios antes de continuar con diseño, pruebas y corrección. Las reservas y perfiles siguen bajo control de `--agente`, sin cambios manuales ni pregunta humana.
+- El bug permanece `in_progress`, sin señal de completado.
+- Chequeos del intento: `adevv orquestar --verificar "git diff --check"` verde; `--calidad --base 32d567cb8e1ad1c881a460b09e6742f3b3f2c6cc --aplicar` sin errores, formato y lint omitidos por ausencia de herramientas configuradas. No acredita funcionalidad implementada.
