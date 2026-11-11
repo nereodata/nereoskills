@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 created_at: 2026-11-10
 updated_at: 2026-11-11
 origen: "Incidencia comunicada por el usuario: el único canal de desbloqueo es Telegram (2026-11-10)"
@@ -44,36 +44,36 @@ veces una tarea.
 
 ## ✅ Criterios de aceptación
 
-- [ ] **CA-1 — Operación independiente del canal:** el orquestador ofrece una
+- [x] **CA-1 — Operación independiente del canal:** el orquestador ofrece una
   operación documentada para listar preguntas pendientes y otra para registrar
   una respuesta vinculada a `Q-ID` (o a un ID de tarea inequívoco), sin requerir
   Telegram.
-- [ ] **CA-2 — Control local sin servidor:** esta entrega publica la respuesta
+- [x] **CA-2 — Control local sin servidor:** esta entrega publica la respuesta
   mediante CLI local. No requiere endpoint HTTP, socket, pipe, proceso de escucha,
   token de API ni contrato de red versionado. La autoridad local procede de los
   permisos del sistema operativo del usuario que ejecuta la orden sobre el
   proyecto; no se requieren identidad ni credenciales de Telegram. No se añade
   elevación de privilegios ni acceso remoto.
-- [ ] **CA-3 — Contrato CLI:** `adevv orquestar --preguntas` conserva su consulta
+- [x] **CA-3 — Contrato CLI:** `adevv orquestar --preguntas` conserva su consulta
   existente y `adevv orquestar --responder <Q-ID> "<respuesta>"` registra una
   respuesta no vacía. Admite un ID de tarea en lugar de Q-ID solo si identifica
   una única pregunta pendiente. Las referencias inexistentes, ajenas al proyecto,
   ambiguas y cerradas, y el texto vacío se rechazan con diagnóstico sin modificar
   preguntas ni tareas. La respuesta se trata como dato, sin ejecutarla.
-- [ ] **CA-4 — Un único dominio:** CLI y Telegram delegan en la misma operación
+- [x] **CA-4 — Un único dominio:** CLI y Telegram delegan en la misma operación
   de dominio. Conservan aislamiento por raíz de proyecto, resolución de
   ambigüedades, idempotencia, persistencia atómica y el protocolo existente de
   incorporación entre pasos. La CLI identifica al operador local sin suplantar
   un usuario Telegram ni añadirlo a la lista de autorizados del gateway; Telegram
   mantiene su validación de remitentes autorizados.
-- [ ] **CA-5 — Reanudación observable:** la respuesta distingue entre recibida,
+- [x] **CA-5 — Reanudación observable:** la respuesta distingue entre recibida,
   incorporada y tarea efectivamente reanudada. Respeta la parada manual, otra
   pregunta pendiente y las dependencias; un texto `PENDIENTE:` o
   `INSUFICIENTE:` conserva el bloqueo con diagnóstico.
-- [ ] **CA-6 — Compatibilidad:** `/preguntas` y `/responder` continúan
+- [x] **CA-6 — Compatibilidad:** `/preguntas` y `/responder` continúan
   funcionando como adaptadores compatibles, sin cambios de formato que rompan
   los flujos existentes ni reenvíos duplicados.
-- [ ] **CA-7 — Verificación:** pruebas controladas cubren CLI sin Telegram,
+- [x] **CA-7 — Verificación:** pruebas controladas cubren CLI sin Telegram,
   rechazos de CA-3, aislamiento entre dos raíces de proyecto, entregas repetidas
   por ambos canales y concurrencia entre CLI y Telegram, recepción mientras otro
   paso está activo, reinicio antes de incorporación, parada manual, respuestas
@@ -174,3 +174,65 @@ H-01 resuelto por DEC-ESP-0034-01 y aprobado por Hades (9/10, solo definición).
 Se devuelve el bug a `planned` sin `pendiente_de`. Continúa bug-fix desde subfase A;
 no hay código, tests ni escenarios aprobados en este paso. El hallazgo enrutado
 anterior y el triaje se conservan como historial, sin bloqueo vigente.
+
+## Triaje reanudado · bug-fix
+
+Se conserva `base_calidad: 424a3493a5dd58174df251166afb1f89d38872ed` y
+la rama `hotfix/v1.1.2`. DEC-ESP-0034-01 resuelve el impedimento anterior.
+Todas las subfases A–F siguen [EXEC], limitadas al adaptador CLI y los huecos
+demostrados del dominio compartido. No cambia la arquitectura.
+
+Verificación dirigida al cierre: `python -m unittest tests.test_control_intervenciones tests.test_telegram_gateway`.
+Ejercita respuesta CLI y dominio durable con dos canales, incorporación y
+compatibilidad del gateway; no se ejecuta la suite completa.
+Además `git diff --check` y calidad del delta mediante el verificador.
+
+### Evidencia A/C1
+
+Hades aprueba escenarios (8,5/10); H-02 MEDIA resolver atendido con ejemplo
+válido de ID de tarea. Revisión independiente sobre adjuntos por impedimento
+del arnés para acceder al disco. Diseño en docs/design/B-ADV-0034-design.md.
+Red dirigido mediante --verificar: 10 tests, 16 fallos y 1 error derivado de
+recepción inexistente; el parser rechaza --responder (exit 2). Sin fallos de
+sintaxis/imports. La cola de ejecución exacta está en orquestar_evidencias.jsonl.
+Compilación de pruebas verde. Formato y lint omitidos por ausencia de herramientas;
+no se presentan como comprobaciones ejecutadas. Sin tipado configurado.
+
+### Ajuste del alcance de verificación
+
+Se retira HallazgosHadesRoutingTests del comando: prueba extracción/enrutado de
+hallazgos de B-ADV-0033, que este delta no modifica. El dominio compartido y sus
+adaptadores quedan cubiertos por test_control_intervenciones y la regresión
+completa del gateway. No se ocultan fallos ejecutados: ese grupo no se ha lanzado
+en este paso. Comando definitivo: `python -m unittest tests.test_control_intervenciones tests.test_telegram_gateway`.
+
+C1 aprobado tras corregir HT-01/02/03 (8,75/10). C2 conserva canal antes de
+modificar argv en la fixture concurrente; la primera ejecución funcional detectó
+que se consultaba argv ya reemplazado y no esperaba la liberación. Caso concurrente
+corregido y verde (1 test); no es fallo de producción ni se afirma que el primer
+intento pasara. Informe final de QA pendiente.
+
+### Delta corrector HC-01/HC-02
+
+Hades code-review RECHAZADO (7,67), dos altos para desarrollador: reserva PID
+antes de liberar recepción y avisos de incorporación sin falsa reanudación.
+C1 captura ambos en rojo (13 tests: 2 fallos de aviso y 2 errores de PID).
+Se amplía triaje por tocar arranque compartido: comando final
+`python -m unittest tests.test_control_intervenciones tests.test_telegram_gateway skills.orquestar.test_intervencion_humana skills.telegram_gateway.test_gateway_control skills.telegram_gateway.test_gateway_fondo.FondoTests.test_puntos_de_entrada_y_estado tests.test_cli_commands.TestCliCommands.test_ca_f02_02_adevv_orquestar_fondo`.
+Incluye regresión durable B-ADV-0026 y los llamantes de arranque afectados,
+no la suite completa. Tipado y escáner de secretos no configurados; no dependencias.
+
+HC-02 aprobado resuelto por Hades. En reevaluación HC-01 persiste por unlink del
+PID aceptado en main: se refuerza prueba de continuidad (rojo en unlink,
+review-test APROBADO 8,75), se separa rama de PID propio y pasa el caso dirigido.
+Resto de verificación ampliada: 64 tests OK antes de este último refuerzo;
+se vuelve a acreditar el comando completo tras corregirlo.
+
+## Cierre del bug-fix
+
+CA-1–CA-7 cubiertos por escenarios y pruebas dirigidas. Hades: especificación
+APROBADO 8,5; pruebas APROBADO 8,75; código APROBADO 8,67. HC-01 y HC-02
+resueltos; no deuda ni bloqueo vigente. Informes y decisiones en la revisión
+de versión y docs/design/B-ADV-0034-design.md. Se acredita el árbol final con
+el comando definitivo de 64 casos del triaje, compilación, diff-check y calidad
+mediante --verificar; la suite completa corresponde al cierre de versión.

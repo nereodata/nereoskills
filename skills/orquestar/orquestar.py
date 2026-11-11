@@ -9,6 +9,7 @@ Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
 import argparse
 import copy
 import ctypes
+import getpass
 import hashlib
 import importlib.util
 import inspect
@@ -115,6 +116,12 @@ def incorporar_respuestas(root):
 def responder_pregunta(root, usuario, argumento, autorizados):
     """Valida y recibe respuestas del gateway."""
     return intervencion.responder(root, SimpleNamespace(**globals()), usuario, argumento, autorizados)
+
+
+def responder_pregunta_local(root, referencia, respuesta):
+    """Registra datos del operador local sin atribuirle identidad Telegram."""
+    return intervencion.recibir(root, SimpleNamespace(**globals()), f'local:{getpass.getuser()}',
+                               f'{referencia} {respuesta}', referencia_obligatoria=True)
 
 
 def esperar_intervencion(root):
@@ -3000,6 +3007,19 @@ def iniciar_gateway(root, informar=True):
         print(f'[orquestar] gateway no iniciado ({type(error).__name__}); el bucle continúa', flush=True)
 
 
+def publicar_pid(root, pid):
+    """Sustituye la titularidad sin exponer un PID vacío durante la publicación."""
+    descriptor, temporal = tempfile.mkstemp(prefix='adevv-intervencion-', dir=root)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8') as fichero:
+            fichero.write(str(pid))
+            fichero.flush()
+            os.fsync(fichero.fileno())
+        os.replace(temporal, root / PID)
+    finally:
+        Path(temporal).unlink(missing_ok=True)
+
+
 def en_fondo(root, argumentos=None):
     """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
     vivo = pid_vivo(root)
@@ -3016,6 +3036,16 @@ def en_fondo(root, argumentos=None):
     with (root / LOG).open('a', encoding='utf-8') as log:
         p = subprocess.Popen([sys.executable, '-u', str(Path(__file__).resolve()), *args], cwd=root,
                              stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, **opciones)
+        try:
+            publicar_pid(root, p.pid)
+        except OSError:
+            p.terminate()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.wait(timeout=5)
+            raise
     print(f'[orquestar] lanzado en segundo plano (pid {p.pid}); salida en {LOG}')
     return 0
 
@@ -3043,6 +3073,8 @@ def main():
                     help='aplica el destino de Hades: artemisa, especificador o humano')
     ap.add_argument('--contexto', default='', help='contexto de la intervención humana')
     ap.add_argument('--preguntas', action='store_true', help='consulta preguntas humanas pendientes')
+    ap.add_argument('--responder', nargs=2, metavar=('REFERENCIA', 'RESPUESTA'),
+                    help='responde localmente a un Q-ID o ID de tarea inequívoco')
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
     ap.add_argument('--cuota-reset', nargs='?', const='', metavar='ARNES[/MODELO]',
                     help='recupera marcas de cuota del selector, o todas si se omite')
@@ -3071,6 +3103,9 @@ def main():
 
     if a.preguntas:
         print(intervencion.consulta(root))
+        return 0
+    if a.responder:
+        print(responder_pregunta_local(root, *a.responder))
         return 0
     if a.preguntar:
         q = solicitar_intervencion(root, *a.preguntar, contexto=a.contexto,
@@ -3176,11 +3211,11 @@ def main():
     elif a.recarga is not None:
         pass
     elif (vivo := pid_vivo(root)):
-        sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.')
+        if vivo != os.getpid():
+            sys.exit(f'Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.')
     else:
-        (root / PID).unlink(missing_ok=True)
         excluir(root)
-        (root / PID).write_text(str(os.getpid()), encoding='utf-8')
+        publicar_pid(root, os.getpid())
     try:
         return bucle(a, root)
     finally:
@@ -3368,6 +3403,7 @@ def bucle(a, root):
                     ausente = True
                     break
                 codigo, m, salida = resultado
+                intervencion.notificar_reanudacion(root, SimpleNamespace(**globals()), arg)
                 intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env['ORQUESTAR_BASE'], salida)
                 if cede and cfg_actual is not cfg_rol:
                     avisar_perfil(root, arg, cfg_rol, cede, cfg_actual)

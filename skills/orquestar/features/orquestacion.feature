@@ -460,3 +460,57 @@ Característica: Continuidad con arneses ausentes
     Cuando el proceso del bucle se recarga o se reinicia antes de ejecutar el siguiente paso
     Entonces el estado de Q-ADV-0001 y Q-ADV-0002 se conserva íntegro en disco
     Y el nuevo ciclo incorpora Q-ADV-0001 exactamente una vez y no vuelve a reanudar ni duplicar Q-ADV-0002
+
+  @B-ADV-0034 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5 @CA-6
+  Esquema del escenario: Responder desde CLI sin Telegram y compartir la recepción con el gateway
+    Dado que Q-ADV-0001 bloquea T-ADV-0101 en un proyecto sin Telegram configurado
+    Y el bucle ejecuta otra tarea independiente
+    Cuando el operador consulta "adevv orquestar --preguntas"
+    Y ejecuta 'adevv orquestar --responder <referencia> "Usar OAuth interno"'
+    Entonces la consulta muestra Q-ADV-0001 y la respuesta confirma recepción durable en cola
+    Y la recepción identifica al operador como local sin autorizarlo en Telegram
+    Y no cambia ningún archivo rastreado durante el paso activo
+    Y la respuesta es un dato que nunca se ejecuta como orden
+    Y la misma respuesta enviada por un usuario Telegram autorizado no agrega otra recepción
+    Ejemplos:
+      | referencia |
+      | Q-ADV-0001 |
+      | T-ADV-0101 |
+
+  @B-ADV-0034 @CA-3 @CA-7
+  Esquema del escenario: Rechazar respuestas CLI inválidas sin mutaciones
+    Dado que el proyecto tiene preguntas pendientes y una pregunta cerrada
+    Cuando el operador responde desde CLI con <entrada>
+    Entonces recibe un diagnóstico de <motivo> sin modificar preguntas ni tareas
+    Ejemplos:
+      | entrada | motivo |
+      | Q-ADV-9999 con texto | referencia inexistente |
+      | Q-OTRO-0001 con texto | referencia ajena |
+      | T-ADV-0101 con dos preguntas pendientes | ambigüedad |
+      | Q-ADV-0002 ya incorporada | pregunta cerrada |
+      | Q-ADV-0001 con texto vacío | falta de respuesta |
+      | referencia arbitraria con texto | referencia inexistente |
+
+  @B-ADV-0034 @CA-4 @CA-7
+  Escenario: Serializar entregas de ambos canales y aislar raíces
+    Dado que dos raíces independientes contienen una pregunta Q-ADV-0001
+    Y en la primera raíz hay un paso activo
+    Cuando CLI y Telegram autorizado entregan concurrentemente el mismo texto en la primera raíz
+    Entonces se guarda una sola recepción durable en esa raíz
+    Y la segunda raíz conserva su registro intacto
+    Y un usuario Telegram no autorizado no puede consultar ni responder preguntas
+
+  @B-ADV-0034 @CA-5 @CA-7
+  Esquema del escenario: Incorporar una respuesta CLI entre pasos y mostrar su resultado real
+    Dado que Q-ADV-0001 recibió desde CLI una respuesta durable antes de reiniciar
+    Cuando se incorpora entre pasos con <condicion>
+    Entonces se observa <resultado>
+    Y otra incorporación no duplica la decisión ni la reanudación
+    Ejemplos:
+      | condicion | resultado |
+      | respuesta concreta y bucle detenido por falta de elegibles | pregunta incorporada y bucle lanzado una sola vez |
+      | parada manual activa | respuesta conservada sin relanzar |
+      | respuesta PENDIENTE: falta URL | pregunta pendiente y diagnóstico falta URL |
+      | respuesta INSUFICIENTE: falta puerto | pregunta pendiente y diagnóstico falta puerto |
+      | otra pregunta pendiente de la misma tarea | respuesta incorporada y tarea bloqueada por esa pregunta |
+      | dependencia no completada | respuesta incorporada y tarea en espera de su dependencia sin anunciar elegibilidad ni relanzar por esa tarea |

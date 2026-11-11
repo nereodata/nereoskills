@@ -24,9 +24,9 @@ RESPUESTAS = 'orquestar_respuestas.jsonl'
 
 
 @contextmanager
-def bloqueo(root):
+def bloqueo(root, nombre='adevv-intervencion.lock'):
     """Serializa gateway y motor mediante un bloqueo liberado por el sistema operativo."""
-    ruta = Path(git(root, 'rev-parse', '--absolute-git-dir')) / 'adevv-intervencion.lock'
+    ruta = Path(git(root, 'rev-parse', '--absolute-git-dir')) / nombre
     with ruta.open('a+b') as fichero:
         if os.name == 'nt':
             fichero.seek(0)
@@ -218,9 +218,22 @@ def responder(root, motor, usuario, argumento, autorizados):
     """Recibe una respuesta autorizada sin modificar el árbol durante un paso."""
     if str(usuario) not in autorizados:
         return None
+    return recibir(root, motor, usuario, argumento)
+
+
+def recibir(root, motor, usuario, argumento, referencia_obligatoria=False):
+    """Serializa recepción, incorporación y eventual arranque entre adaptadores."""
+    with bloqueo(root, 'adevv-respuesta.lock'):
+        return recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria)
+
+
+def recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria):
+    """Aplica el contrato compartido bajo el bloqueo de recepción del proyecto."""
     with bloqueo(root):
         preguntas = leer(root)
         referencia, _, texto = argumento.strip().partition(' ')
+        if referencia_obligatoria and not referencia.startswith(('Q-', 'T-', 'B-')):
+            return 'La referencia no existe.'
         q = next((x for x in preguntas if referencia == x['id']), None)
         if referencia.startswith(('T-', 'B-')):
             candidatas = [x for x in preguntas if x['tarea_id'] == referencia and x['estado'] == 'pendiente']
@@ -259,10 +272,18 @@ def responder(root, motor, usuario, argumento, autorizados):
     if (root / motor.PARADA).exists():
         return f'Respuesta recibida para {qid}; se respeta la parada manual.'
     aplicada = any(q['id'] == qid for q in incorporadas)
+    actual = next(q for q in listar(root) if q['id'] == qid)
+    if not aplicada and actual.get('motivo_insuficiente') and not actual.get('cola'):
+        return f'Respuesta recibida para {qid}; sigue bloqueada: {actual["motivo_insuficiente"]}'
     tarea = motor.fichero_de(root, iid) if aplicada else None
     reanudable = tarea and motor.frontmatter(tarea).get('status') == 'planned'
     if aplicada and not reanudable:
         return f'Respuesta incorporada para {qid}; la tarea sigue bloqueada por otra pregunta.'
+    if aplicada:
+        items = {i['id']: i for i in motor.backlog(root)}
+        pendientes = motor.pendientes_de(items[iid], items)
+        if pendientes:
+            return f'Respuesta incorporada para {qid}; tarea {iid} en espera de dependencias: {", ".join(pendientes)}.'
     if aplicada and esperando:
         motor.en_fondo(root, argumentos=[])
         return f'Respuesta incorporada; tarea {iid} reanudada.'
@@ -308,10 +329,23 @@ def incorporar(root, motor):
                 hechas.append(q.copy())
             q.pop('respuesta_en_cola', None)
             guardar(root / PREGUNTAS, preguntas)
-            mensaje = (detalle if insuficiente else f'Tarea {q["tarea_id"]} reanudada: {texto}'
+            mensaje = (detalle if insuficiente else f'Respuesta incorporada para tarea {q["tarea_id"]}: {texto}'
                        if cambios['status'] == 'planned' else f'{q["id"]} incorporada; tarea bloqueada por otra pregunta.')
             motor.avisar(root, 'respuesta', mensaje)
     return hechas
+
+
+def notificar_reanudacion(root, motor, iid):
+    """Avisa una sola vez después de que el bucle haya ejecutado la tarea retomada."""
+    if not (root / PREGUNTAS).exists():
+        return
+    with bloqueo(root):
+        preguntas = leer(root)
+        for q in preguntas:
+            if q['tarea_id'] == iid and q['estado'] == 'incorporada' and not q.get('reanudacion_avisada'):
+                q['reanudacion_avisada'] = True
+                guardar(root / PREGUNTAS, preguntas)
+                motor.avisar(root, 'respuesta', f'Tarea {iid} reanudada: {q["respuesta"]}')
 
 
 def restaurar(root, motor, iid):
