@@ -219,3 +219,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: D19 resuelto en el proveedor y el preflight. Hades rechazó el árbol e5146fc231ecc69c2fa3bb74f3443708624d2d11 (7,67/10). D20 alto, para Artemisa en C2: si la etiqueta de apertura de pre con @click se presenta entre acentos graves repartida en dos líneas, el lector pierde el rechazo propio posterior, invoca la reserva y registra su aprobación. El preflight indica informe sin veredicto formal. Conservar el rechazo en una sola llamada y el motivo informe rechazado, con el ejemplo en una línea como control. Reanudar desarrollo desde el informe canónico de código. Las 198 pruebas del triaje pasaron en 224,274 s y C1 fue aprobada con 9,75/10.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobada por Hades (9,75/10) para D20. Los dos fallos muestran la aprobación indebida de la reserva y el motivo de preflight equivocado. Pasaron cuatro controles de una línea y de HTML efectivo. Artemisa corrige D20 en C2 y presenta el delta a revisión D.

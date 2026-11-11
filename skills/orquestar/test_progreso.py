@@ -878,6 +878,21 @@ class ProgresoTests(unittest.TestCase):
     def test_preflight_rechazado_tras_atributo_pre_title(self):
         self.comprobar_informe_pendiente(self.informe_con_atributo_pre('title'), 'informe rechazado')
 
+    def informe_con_apertura_literal(self, separador):
+        return f'La apertura es `<pre{separador}@click="copiar">`.' + self.rechazo_exterior
+
+    def test_rechazo_tras_apertura_literal_multilinea(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_apertura_literal('\n'))
+
+    def test_preflight_tras_apertura_literal_multilinea(self):
+        self.comprobar_informe_pendiente(self.informe_con_apertura_literal('\n'), 'informe rechazado')
+
+    def test_rechazo_tras_apertura_literal_en_una_linea(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_apertura_literal(' '))
+
+    def test_preflight_tras_apertura_literal_en_una_linea(self):
+        self.comprobar_informe_pendiente(self.informe_con_apertura_literal(' '), 'informe rechazado')
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',

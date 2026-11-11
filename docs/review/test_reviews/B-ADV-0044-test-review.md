@@ -1,28 +1,33 @@
 **Veredicto:** APROBADO · **9,75/10**
 
-# B-ADV-0044 · Reevaluación C1 de las pruebas de D19
+# B-ADV-0044 · Reevaluación C1 de las pruebas de D20
 
-Las cuatro pruebas nuevas reproducen el caso del rechazo D y su control en los dos consumidores. Comparten el mismo fragmento. Dentro de un `<div>`, el ejemplo `<pre>` contiene una aprobación y, después de `</div>` y una línea en blanco, el revisor emite su rechazo. Entre el caso D19 y el control solo cambia el nombre del atributo, de `@click` a `title`.
+Las cuatro pruebas nuevas reproducen D20 y su control en los dos consumidores. El informe del principal muestra la apertura de `<pre>` con el atributo `@click` entre acentos graves y emite un rechazo en el párrafo siguiente. Entre las dos entradas solo cambia el separador entre `pre` y `@click`. Los controles de D19 conservan la etiqueta HTML efectiva dentro de un `<div>`, con una aprobación dentro del ejemplo y el rechazo del principal fuera de él.
 
-| Consumidor | Resultado exigido en ambos casos | Rojo observado con `@click` | Control con `title` |
-|---|---|---|---|
-| `motor.agente` | Una única llamada a Claude con el modelo principal y una única métrica de Hades con su rechazo. | La métrica atribuyó a Claude la aprobación del ejemplo. | Claude registró el rechazo en una sola llamada. |
-| `pendientes_cierre` | La ficha completada figura pendiente con su ID y el motivo «informe rechazado». | La lista de pendientes estaba vacía. | El ID figuró pendiente por «informe rechazado». |
-
-El arnés simula la salida de los proveedores con código cero y registra por separado las llamadas efectivas. Con `@click`, la primera discrepancia de métricas detuvo la prueba antes de la aserción sobre las llamadas. Esa última aserción se revisó por lectura y sí se alcanzó con `title`. El preflight consulta un repositorio Git temporal después de confirmar la ficha y el informe en su ruta canónica.
+| Entrada | Resultado observado en `motor.agente` | Resultado observado en `pendientes_cierre` |
+|---|---|---|
+| D20 · Literal con salto de línea | **Falla.** Las métricas registran a Claude sin dictamen y a Codex con la aprobación de reserva. | **Falla.** El ID figura pendiente por «informe sin veredicto formal». La prueba exige «informe rechazado». |
+| Control D20 · Mismo literal con espacio | Pasa. Una llamada a Claude con el modelo principal y una única métrica de Hades con su rechazo. | Pasa. El ID figura pendiente por «informe rechazado». |
+| Control D19 · HTML efectivo con `@click` | Pasa. El principal registra su rechazo en una sola llamada. | Pasa. El ID figura pendiente por «informe rechazado». |
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 10/10 | D19 y el control que cambia solo el atributo ejercitan ambos consumidores. Pasaron también las dos pruebas de D17 con `x<y` y las dos de D15 con `<pre>` literal dentro de un atributo multilínea. |
-| Aserciones | 9/10 | El proveedor exige el dictamen y la secuencia exacta de llamadas. El preflight comprueba el ID y el motivo por subcadena en una misma entrada. |
-| Rojo correcto | 10/10 | Ambos fallos alcanzaron la decisión observable que motivó el rechazo D. Los seis controles pasaron. |
-| Estabilidad | 10/10 | Cada prueba usa su propio repositorio, configuración Git aislada y respuestas fijas. El resultado es independiente del reloj y del orden de ejecución. |
+| Cobertura | 10/10 | Las pruebas ejercitan la selección de la reserva y el motivo de cierre pendiente para el literal en ambas presentaciones. El control D19 protege la interpretación de HTML efectivo en ambos recorridos. |
+| Aserciones | 9/10 | El arnés registra las llamadas por proveedor y modelo, y comprueba aparte las métricas de Hades. El preflight exige el ID y el motivo por subcadena en la misma entrada después de confirmar la ficha completada y el informe canónico. |
+| Rojo correcto | 10/10 | Los dos fallos son de aserción y reproducen las decisiones observadas en D20. Cambiar el salto por un espacio hace pasar las dos pruebas con los mismos datos y comprobaciones. |
+| Estabilidad | 10/10 | Cada caso crea su propio repositorio Git temporal con configuración aislada. Las respuestas de ambos proveedores son fijas y el resultado esperado es independiente del reloj. |
 
-## Evidencia y seguimiento
+## Seguimiento
 
-El delta local desde el rechazo D coincide con el adjunto. El archivo de pruebas corresponde al blob `7123f085dcc65a99155f068d7dece7f8c1507bd7`. El registro del árbol `9cff851c2b14e88253f2b816f57de1972f3fbe4f` acredita ocho pruebas en 5,557 s, dos fallos de aserción con `@click` y Ruff selectivo en verde. Se reutilizó esa ejecución. El proyecto carece de tipador configurado.
+- **Hallazgos anteriores de C1.** H1–H4 y N1–N10, resueltos en las rondas anteriores. El delta añade cuatro pruebas y su generador de texto. Conserva las aserciones y la preparación ya revisadas.
+- **Hallazgos nuevos de C1.** Ninguno.
+- **D19 · Resuelto.** Los dos controles del árbol revisado acreditan el rechazo exterior con `@click`.
+- **D20 · Persiste en el producto.** Prioridad 🟠 alta. Destino `resolver` en C2. Responsable ya asignada en D, Artemisa (`desarrollador`). La corrección debe conservar el rechazo del principal en una sola llamada y el motivo «informe rechazado» para `B-DEMO-0001`.
 
-- **Hallazgos nuevos de C1.** Ninguno. H1–H4 y N1–N10 siguen resueltos en los recorridos acreditados por la revisión de pruebas anterior.
-- **Seguimiento de producto.** D16, D17 y D18 constan como resueltos en el último informe D. D19 persiste en ambos consumidores y ya está asignado a Artemisa (`desarrollador`, destino `resolver` en C2).
+## Evidencia y alcance
+
+El archivo de pruebas local coincide con el del árbol `ebe54c0b8d89513fb0ce67cad9b0d903c6a10855`. El registro de ese árbol acredita seis pruebas en 4,211 s, con dos fallos de aserción y cuatro controles verdes. En el caso multilínea, la discrepancia de métricas detuvo la prueba antes de comparar la lista de llamadas efectivas. Esa comparación sí se ejecutó en ambos controles de proveedor.
+
+Se reutilizaron la ejecución focalizada del triaje y el resultado verde de Ruff selectivo (`E9,F63,F7,F82`). El proyecto carece de tipador configurado.
