@@ -3,9 +3,9 @@ id: B-ADV-0039
 title: "La cuota agotada de una reserva detiene el bucle después de que otro arnés complete el paso"
 type: bug
 weight: 20
-dificultad: media
+dificultad: dificil
 version: "v1.1.2"
-status: in_progress
+status: planned
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -65,3 +65,8 @@ El motor ordenó detener las correcciones tras dos rechazos seguidos de Hades y 
 - review-code RECHAZADO: C1 pendiente en producción (no equiparar commit parcial limpio con cierre efectivo); C2 pendiente en producción (preservar vencimiento original y descontar tiempo de reservas al resumir).
 - Última verificación de fallos_arnes: 20 pruebas, dos fallos funcionales esperados en RED de C1/C2. No se aplicaron correcciones posteriores a la orden de parada. Antes de añadir esos contrastes estaban verdes las 46 pruebas dirigidas (18+14+9+5).
 - Reanudación: corregir T2, obtener review-test aprobado, implementar C1/C2 y repetir las verificaciones del triaje y review-code. La suite completa corresponde al bucle al cerrar versión.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades asignó T2, C1 y C2 al desarrollador. Artemisa retoma la prueba de vencimiento y las correcciones de cierre efectivo y espera restante.
