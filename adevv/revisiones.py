@@ -54,7 +54,7 @@ class CitasHTML(HTMLParser):
         r'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|'
         r'header|hgroup|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|'
         r'p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s/>]|$)', re.I)
-    etiqueta = (r"""(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*(?:\s+[\w:.-]+(?:\s*=\s*"""
+    etiqueta = (r"""(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*(?:\s+[^\s"'<>/=\x00]+(?:\s*=\s*"""
                 r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*/?>)""")
     etiqueta_aislada = re.compile(r' {0,3}' + etiqueta + r'[ \t]*', re.I)
     inicio_incompleto = re.compile(r'(?!' + etiqueta + r')<(?=/?[a-z])', re.I)
