@@ -5,10 +5,11 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 created_at: 2026-11-10
-updated_at: 2026-11-10
+updated_at: 2026-11-11
 origen: "Incidencia comunicada por el usuario: el único canal de desbloqueo es Telegram (2026-11-10)"
+pendiente_de: especificador
 ---
 
 # B-ADV-0034: El desbloqueo de tareas del orquestador solo es accesible por Telegram
@@ -97,3 +98,39 @@ requisito funcional sin introducir un servidor.
   `responder_pregunta()`, pero no la publica como control de CLI o endpoint.
 - `skills/orquestar/intervencion.py` contiene la validación y persistencia que
   deben permanecer como fuente única de verdad.
+
+## Triaje · 2026-11-11
+
+- `base_calidad`: `424a3493a5dd58174df251166afb1f89d38872ed`.
+- Rama conservada: `hotfix/v1.1.2`, ya activa y coherente con la versión del bug;
+  no se crea otra rama ni se publica la versión.
+- Delta real: `--preguntas` ya está implementado en el parser y consulta el
+  dominio; falta exponer la respuesta desde CLI. No se reimplementará la consulta.
+- Impedimento de definición: CA-2 exige un endpoint local autenticado y contrato
+  versionado, mientras la alternativa permite omitirlo si no hay consumidor
+  externo. `docs/requirements/platform_plan.md:11` descarta servidores propios.
+  No existe aquí decisión que determine transporte, autenticación o consumidor.
+  No se elimina CA-2 ni se introduce una arquitectura nueva desde desarrollo.
+- Subfase A: [EXEC] definir el alcance de control independiente del canal y
+  sus escenarios; primero Hades /review-spec sobre el conflicto de requisitos.
+- Subfase B: [EXEC] diseño de adaptadores y contrato compartido, una vez resuelto
+  el impedimento de definición.
+- Subfase C1: [EXEC] regresiones dirigidas de CLI y del control que se acuerde,
+  con equivalencia Telegram, persistencia e idempotencia.
+- Subfase C2: [EXEC] adaptador de respuesta y solo las carencias del dominio
+  demostradas por esas regresiones.
+- Subfase D: [EXEC] Hades sobre el entregable completo; ahora se eleva el
+  impedimento a la revisión de especificación, sin fingir escenarios aprobados.
+- Subfase E: [EXEC] README y skills operativas afectadas por el contrato final.
+- Subfase F: [EXEC] cierre y commit; no marcar completed mientras falte definición.
+- Verificación al cierre: pruebas unitarias dirigidas de control/CLI que se
+  identifiquen tras resolver el alcance, más regresiones de intervención y
+  Telegram afectadas; registrar el comando exacto antes de implementarlas.
+  En este intento, limitado al triaje documental, únicamente
+  `adevv orquestar --verificar "git diff --check"`; no hay cambio ejecutable que
+  justifique pruebas funcionales ni suite completa.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades review-spec: NO APROBADO; H-01 ALTA para especificador. CA-2/CA-4/CA-7 exigen endpoint autenticado versionado; alternativa permite CLI suficiente y platform_plan.md:11 descarta servidores propios. Decision: ejecutar especificar para reconciliar alcance obligatorio, compatibilidad de arquitectura, transporte, autenticacion y contrato antes de escenarios/diseno/codigo. No falta recurso externo ni se necesita pregunta humana. Informe docs/review/spec_reviews/B-ADV-0034-spec-review.md; revision sobre adjuntos por fallo de acceso local del arnes.
