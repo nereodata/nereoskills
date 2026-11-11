@@ -1,36 +1,36 @@
-**Veredicto:** RECHAZADO · **8,50/10**
+**Veredicto:** APROBADO · **9,50/10**
 
 # B-ADV-0044 · Reevaluación independiente de pruebas C1
 
-D3 y D8 quedan cubiertos. D6 tiene un rojo de comportamiento, pero el último rechazo de su historial pertenece a A. En el incidente documentado, el último rechazo pertenecía a B y la aprobación histórica posterior de B debía liberar el cierre. Queda un hallazgo de pruebas.
+## Hallazgos anteriores de pruebas
 
-## Hallazgo nuevo
+**N9 · resuelto.** En `test_aprobacion_historica_de_b_tras_rechazar_b`, el historial Git comienza con una aprobación de A que contiene el veredicto y su huella, sin explicación. La prueba confirma el cambio de `producto.py`, comprueba que B tiene otra huella y confirma un rechazo con la huella de B. En el siguiente commit aprueba B con el cuerpo propio «El doble es correcto.» y sin línea de huella. Exige que el selector avance a `revisar-version` y que el preflight devuelva `pendientes_cierre(...) == []`.
 
-### N9 · 🟠 Alta · Falta la aprobación histórica de B después de un rechazo de B
+El nuevo caso falló en el selector, que devolvió `revisar-tarea`. La aserción del preflight se comprobó por lectura porque sigue a ese primer fallo. El valor predeterminado de `rechazar_b` conserva los dos recorridos anteriores con rechazo de A. La aprobación histórica de B sigue dando rojo en ese recorrido y la aprobación con huella explícita pasa las dos aserciones.
 
-En `skills/orquestar/test_progreso.py:489`, el auxiliar confirma el rechazo con `huella_a` y después introduce B. Sus dos variantes cambian únicamente la presencia de `huella_b` en la aprobación final. El caso de la línea 458 sí rechaza B, pero su aprobación final lleva huella explícita. Queda sin comprobar la combinación del informe de código D6.
+H1–H4 y N1–N8 de pruebas siguen **resueltos** en el alcance de sus rondas. El delta solo añade el caso de N9 y adapta su auxiliar.
 
-Una regla que permita la aprobación histórica cuando el último rechazo pertenece a otro producto, pero bloquee toda aprobación sin huella después de un rechazo del producto actual, podría satisfacer estos controles y seguir bloqueando la aprobación legítima de B.
+## Hallazgos nuevos de pruebas
 
-**Para** Artemisa (`desarrollador`). **Destino** `resolver` en C1. Conservar los controles aprobados. En el nuevo caso histórico, confirmar la aprobación escueta de A con su huella, introducir B con una huella distinta, confirmar el rechazo de B y luego confirmar una aprobación de B con explicación propia y sin línea de huella. Exigir que el selector avance a `revisar-version` y que `pendientes_cierre` quede vacío. El control de restauración revocada del mismo producto debe seguir exigiendo revisión.
+Ninguno.
 
-## Hallazgos de producto y controles
+## Hallazgos de producto reproducidos
 
-| Hallazgo | Evidencia de C1 | Estado, responsable y destino |
+| Hallazgo | Estado | Resultado observado y control |
 |---|---|---|
-| D3 · 🔴 Crítico | La aprobación dentro del cerco exterior Markdown dejó el preflight libre. Tras el rechazo del mismo producto, restaurar el informe en el WIP quitando solo el cerco hizo que el selector adelantara `revisar-version`. La prueba exige `revisar-tarea` para ese ID y su presencia entre los pendientes. Como control positivo, una nueva evaluación con cuerpo propio debe liberar ambos consumidores. | **Persiste en producto.** Cobertura C1 aceptada. Artemisa (`desarrollador`), `resolver` en C2. |
-| D6 · 🟠 Alta | Las huellas de A y B eran distintas y el selector mantuvo `revisar-tarea` tras la aprobación histórica de B. El rojo acredita el recorrido con rechazo de A. N9 identifica la combinación que falta para reproducir el recorrido documentado. | **Persiste en producto.** Artemisa (`desarrollador`), `resolver` en C2 tras completar N9 en C1. |
-| D8 · 🟠 Alta | La prueba abre la pregunta después del primer intento de A y entrega la respuesta por el adaptador local durante la espera simulada. El bucle salió con código 2 y la pregunta quedó incorporada con el texto esperado. Hubo dos llamadas a A en total y se exigían tres, una antes y dos después. Como control de aislamiento, la prueba comprueba en el último estado ofrecido para recarga que B conserva su intento consumido. | **Persiste en producto.** Cobertura C1 aceptada. Artemisa (`desarrollador`), `resolver` en C2. |
+| D3 · 🔴 | **persiste** | Al restaurar la aprobación revocada quitando el cerco exterior, el selector adelantó la revisión de versión. La prueba exige revisión del ID. El control de restauración con huella del mismo producto pasó, incluida la liberación posterior por una reevaluación propia. |
+| D6 · 🟠 | **persiste** | Los dos historiales con aprobación propia de B sin huella mantienen pendiente la tarea, tanto con rechazo previo de A como con rechazo previo de B. La variante con aprobación explícita de B libera selector y preflight. |
+| D8 · 🟠 | **persiste** | La respuesta quedó incorporada durante la espera. Hubo dos llamadas a A en total y se esperaban tres, una antes y dos después de responder. La comprobación posterior que conserva el intento consumido de B se verificó por lectura. |
 
-H1–H4 y N1–N8 de pruebas siguen resueltos en su alcance aprobado. D7 conserva su resolución en la revisión de código precedente.
+Los tres corresponden a Artemisa (`desarrollador`), con destino `resolver` en C2. D7 sigue **resuelto** según la revisión de código anterior.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 7/10 | Falta la secuencia de D6 que combina rechazo de B y aprobación posterior de B sin huella. |
-| Aserciones | 9/10 | Se observan el selector, el preflight, las llamadas al arnés, la respuesta incorporada y el presupuesto del otro ID en el estado de recarga. |
-| Rojo correcto | 9/10 | Los tres fallos son de aserción. D3 y D8 reproducen el incidente exacto. En D6 el fallo corresponde a una variante del historial. |
-| Estabilidad | 9/10 | Cada caso tiene un repositorio Git temporal propio. La respuesta se entrega desde la pausa simulada y el recuento de intentos es exacto. |
+| Cobertura | 10/10 | El nuevo historial reproduce la secuencia que faltaba en D6 y conserva las variantes previas y los controles de D3 y D8. |
+| Aserciones | 9/10 | Se distinguen las huellas de A y B y se exige el resultado observable de los dos consumidores del dictamen. |
+| Rojo correcto | 10/10 | Los cuatro fallos son de comportamiento. Los dos historiales de D6 alcanzan el selector, D3 detecta un cierre prematuro y D8 detecta el intento perdido. |
+| Estabilidad | 9/10 | Cada historial usa su propio repositorio Git temporal. El orden lo fijan los commits y la respuesta de D8 se entrega en una espera simulada. |
 
-**Evidencia y límites.** El delta local de `skills/orquestar/test_progreso.py` coincide con el adjunto, de `7336614` a `05920d0`. Se reutilizaron los tres fallos de aserción en 6,053 s y el verde de Ruff selectivo del árbol `566d0a3ea27e1ea6f94cbce4fb0d276fe4364aa1`. Las aserciones posteriores al primer fallo de cada prueba y los controles hermanos se evaluaron por lectura. El proyecto carece de tipado configurado.
+**Evidencia.** Árbol `75c275c26dde5c829247867f03f2f3681640bba4`, rama `hotfix/v1.1.3`. El archivo local de pruebas corresponde al blob `2b94974` del delta aportado. Se reutilizó la ejecución dirigida de seis pruebas en 11,357 s, con cuatro fallos de aserción y dos controles verdes, y el resultado verde de Ruff selectivo. El proyecto carece de tipado configurado.

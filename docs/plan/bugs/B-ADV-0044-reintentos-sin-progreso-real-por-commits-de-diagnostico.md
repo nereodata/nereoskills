@@ -149,3 +149,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: C1 RECHAZADO (8,50/10) en el árbol 566d0a3ea27e1ea6f94cbce4fb0d276fe4364aa1. Hades aceptó la cobertura de D3 y D8. N9 exige conservar los controles existentes y reproducir el rechazo de B tras la aprobación escueta de A, seguido de una aprobación propia de B sin huella. Deben avanzar el selector y el preflight. Reanudar C1, reevaluar con Hades y abordar D3, D6 y D8 en C2. Tres regresiones en rojo por aserción y Ruff selectivo en verde. El motor ordenó guardar el trabajo y terminar este paso tras el segundo rechazo consecutivo.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobada 9,50/10 sobre 75c275c26dde5c829247867f03f2f3681640bba4. N9 resuelto. Hades verificó cuatro rojos de comportamiento y dos controles verdes. Artemisa retoma C2 para corregir D3 (cerco exterior), D6 (producto de la emisión histórica confirmada) y D8 (renovación por ID durante la espera) y solicitar revisión de código.

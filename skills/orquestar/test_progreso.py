@@ -476,22 +476,29 @@ class ProgresoTests(unittest.TestCase):
     def test_aprobacion_historica_de_b_se_acredita_por_su_commit(self):
         self.comprobar_aprobacion_de_b(historica=True)
 
+    def test_aprobacion_historica_de_b_tras_rechazar_b(self):
+        self.comprobar_aprobacion_de_b(historica=True, rechazar_b=True)
+
     def test_aprobacion_escueta_de_a_no_invalida_revision_de_b(self):
         self.comprobar_aprobacion_de_b(historica=False)
 
-    def comprobar_aprobacion_de_b(self, historica):
-        """D6: una aprobación escueta revocada en A no invalida la emisión propia de B."""
+    def comprobar_aprobacion_de_b(self, historica, rechazar_b=False):
+        """D6: distinguir el producto de la nueva emisión y el del último rechazo."""
         carp = motor.backlog_dirs(self.root)
         huella_a = motor.huella_producto(self.root, 'HEAD', carp)
         self.crear_ficha(self.iid, 'completed')
         self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_a}')
         self.commit('aprobar A sin explicación')
-        self.escribir(self.informe, f'**Veredicto:** RECHAZADO\nProducto revisado: {huella_a}\nFalla el doble.')
-        self.commit('rechazar A')
+        if not rechazar_b:
+            self.escribir(self.informe, f'**Veredicto:** RECHAZADO\nProducto revisado: {huella_a}\nFalla el doble.')
+            self.commit('rechazar A')
         self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
         self.commit('corregir el doble en B')
         huella_b = motor.huella_producto(self.root, 'HEAD', carp)
         self.assertNotEqual(huella_a, huella_b)
+        if rechazar_b:
+            self.escribir(self.informe, f'**Veredicto:** RECHAZADO\nProducto revisado: {huella_b}\nFalta revisar el doble.')
+            self.commit('rechazar B')
         producto = '' if historica else f'Producto revisado: {huella_b}\n'
         self.escribir(self.informe, f'**Veredicto:** APROBADO\n{producto}El doble es correcto.')
         self.commit('aprobar la corrección de B')
