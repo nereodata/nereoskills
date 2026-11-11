@@ -5,10 +5,11 @@ type: bug
 weight: 20
 dificultad: dificil
 version: "v1.1.2"
-status: planned
+status: blocked
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Caso observado en Afinn release/v0.7, B-AFN-0185, con Adevv 1.1.1"
+pendiente_de: especificador
 ---
 
 # B-ADV-0036: El agotamiento de reintentos de la suite de cierre bloquea al humano sin diagnóstico de Hades
@@ -207,3 +208,12 @@ concreta requerida. No se reinicia el ciclo de forma ilimitada.
     {"type":"item.completed","item":{"id":"item_8","type":"command_execution","command":"\"C:\\\\Program Files\\\\WindowsApps\\\\OpenAI.CodexPrimaryRuntime.v26-1104-2876-0_26.1104.2876.0_x64__3k8sg7r9htsxt\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command 'adevv orquestar --verificar \"python -m unittest discover -s tests -p test_orquestar.py -k SuiteRecoveryTests\"'","aggregated_output":"[orquestar] verificación reutilizada: python -m unittest discover -s tests -p test_orquestar.py -k SuiteRecoveryTests ya pasó sobre este mismo árbol (991d498416).\r\n","exit_code":0,"status":"completed"}}
     {"type":"item.completed","item":{"id":"item_9","type":"agent_message","text":"Paso incompleto: Hades no pudo emitir dictamen porque la organización tiene deshabilitado Claude Code por suscripción.\n\nLa verificación focalizada reutilizó evidencia verde del mismo árbol (`991d498416`). B-ADV-0036 permanece `in_progress`, sin corrección ni commit de cierre. No se enrutó ningún hallazgo sin asignación de Hades."}}
     {"type":"turn.completed","usage":{"input_tokens":262918,"cached_input_tokens":223872,"cache_write_input_tokens":0,"output_tokens":1246,"reasoning_output_tokens":46}}
+
+## Revisión de definición con el motor 1.1.2
+
+El mandato de Hades incluyó el contrato de B-ADV-0006, los ocho criterios de B-ADV-0036 y la evidencia de las 16 pruebas de `SuiteRecoveryTests` (20,889 s, OK). La llamada a `--agente hades --prompt-file` terminó con código 1 por acceso de suscripción a Claude Code deshabilitado, antes de emitir dictamen. Queda pendiente `/review-spec` sobre el conflicto. Las pruebas verifican el comportamiento vigente.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Dictamen consolidado RECHAZADO en docs/review/spec_reviews/B-ADV-0036-spec-review.md. F-01: reconciliar el bloqueo automático de B-ADV-0006 en dificil/2 con el diagnóstico previo y los tres destinos; preservar bloqueos, cancelaciones y la independencia por versión y comando. F-02: definir con ejemplos la identidad causal, el presupuesto por grupo y la condición terminal tras una estrategia revisada. CA8 completo; el delta BDD espera estas decisiones. Ejecutar especificar. Evidencia de la base: 16 SuiteRecoveryTests en verde.
