@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Cierre local de v1.1.1: B-ADV-0032 y B-ADV-0033 quedaron sin informe formal de Hades"
@@ -72,11 +72,11 @@ parche.
   aislamiento `v1.1.1`/`v1.1.2`.
 - Subfase C2: Corrección — `[EXEC]`; impedir el cierre incompleto y corregir
   el selector.
-- Subfase D: QA — `[PENDIENTE]`; Hades revisa el delta y sanea los informes
+- Subfase D: QA — `[EXEC]`; Hades revisa el delta y sanea los informes
   pendientes de B-ADV-0032 y B-ADV-0033.
 - Subfase E: Documentación — `[EXEC]`; documentar el estado pendiente y la
   recuperación.
-- Subfase F: Cierre — `[PENDIENTE]`; solo tras preflight con todas las
+- Subfase F: Cierre — `[EXEC]`; solo tras preflight con todas las
   revisiones acreditadas.
 
 ## Triaje operativo
@@ -84,7 +84,7 @@ parche.
 - base_calidad: c29d8c67bdbdc8d587e78faf2dd2025007113ea8
 - Se conserva hotfix/v1.1.2, rama autorizada ya abierta. No se publica ni etiqueta.
 - A, B, C1, C2, D, E y F: [EXEC], con el alcance descrito arriba.
-- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas tests.test_orquestar.HallazgosHadesRoutingTests skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun tests.test_publicacion_compartida tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_03_version_mismatch_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_04_already_published_tag_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_05_publicacion_correcta_y_etiqueta_anotada`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
+- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests tests.test_orquestar.AvisosTelegramTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas tests.test_orquestar.HallazgosHadesRoutingTests skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun tests.test_publicacion_compartida tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_03_version_mismatch_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_04_already_published_tag_fails_with_exact_message tests.test_install_and_release.TestInstallAndRelease.test_ca_f05_05_publicacion_correcta_y_etiqueta_anotada`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
 - Calidad: `git diff --check` y `adevv orquestar --calidad --base c29d8c67bdbdc8d587e78faf2dd2025007113ea8`; no hay lint, tipado ni escáner configurados. No cambian dependencias.
 - Delta-first CA3: ya existen informes formales RECHAZADO para B-ADV-0032 y B-ADV-0033, con hallazgos enrutados a artemisa en sus fichas. No se simula aprobación ni se duplica su desarrollo dentro de este bug.
 - DEC: separar identidad operativa completa de versión de la agrupación estadística mayor/menor. vX.Y equivale a vX.Y.0; parches positivos se aíslan.
@@ -249,3 +249,24 @@ parche.
 - La CLI instalada aún agrupó la huella del enrutado en v1.1-revision.md.
   Se trasladó únicamente esa nueva entrada a v1.1.2-revision.md y se conservó
   intacto el histórico de v1.1; el comando obligatorio sí dejó status planned.
+
+## Reanudación RC-01/RC-02
+
+- Se conserva base_calidad y el alcance aprobado. Se amplía la verificación del triaje con `tests.test_orquestar.AvisosTelegramTests`, para el resumen de versiones con y sin parche. SuiteRecoveryTests ya cubre el cierre; se añaden casos reales de selector PARAR con arquitectura existente y solo hotfix, y con una release homónima.
+- C1: regresiones dirigidas antes de corregir producción; nueva reevaluación review-test y review-code sobre el delta desde 4a3c3dc.
+
+- Reevaluación review-test: APROBADO (9,25/10) para RC-01/RC-02, aprobación anterior conservada. Informe literal recibido por stdout por fallo de acceso local de Hades. Regresiones dirigidas verdes tras la corrección; la fase roja acredita ambos fallos previos.
+
+## Resultado final de la reanudación RC-01/RC-02
+
+- Hades review-test APROBADO (9,25/10) y review-code APROBADO (8,83/10).
+  RC-01/RC-02 resueltos; sin nuevos hallazgos ni deuda que registrar.
+- Verificación acotada ampliada: 80 tests OK en 121,010 s. Compilación dirigida
+  y diff-check verdes. Se repite la acreditación del árbol de cierre después
+  de incorporar informes y estado final; resultados en orquestar_evidencias.jsonl.
+- Informes literales desde stdout por fallo de acceso local del arnés de Hades,
+  sin presentar su revisión como ejecución independiente de comprobaciones.
+- Documentación pública previa vigente; diseño y revisión de versión actualizados.
+  Se conserva hotfix/v1.1.2 y base_calidad. Sin publicación ni etiqueta.
+- dist/ preexistente conserva sus paquetes v1.1.1; se excluye solo localmente
+  mediante .git/info/exclude para mantener limpio el árbol sin borrar artefactos.

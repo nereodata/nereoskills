@@ -317,6 +317,19 @@ class AvisosTelegramTests(unittest.TestCase):
         self.assertEqual(codigo, 0)
         self.assertIn('Producto terminado', enviados[0][2])
 
+    def test_version_summary_preserves_optional_patch(self):
+        for version in ('v0.1', 'v1.1.2'):
+            with self.subTest(version=version):
+                closure = MagicMock()
+                closure.resumen.return_value = 'Resumen de tareas y validaciones'
+                with patch.object(motor, 'cargar_cierre_version', return_value=closure):
+                    codigo, enviados = self.avisos(('PARAR', f'Versión {version} terminada. Revisa'))
+                self.assertEqual(codigo, 2)
+                closure.resumen.assert_called_once_with(self.root, version)
+                self.assertTrue(enviados)
+                for _, _, mensaje in enviados:
+                    self.assertIn('Resumen de tareas y validaciones', mensaje)
+
     def test_human_answer_needed_notifies(self):
         _, enviados = self.avisos(('PARAR', 'Requisitos con preguntas sin valor por defecto seguro.'))
         self.assertIn('preguntas', enviados[0][2])
@@ -1594,6 +1607,40 @@ class SuiteRecoveryTests(unittest.TestCase):
 
     def test_checkout_precedes_suite_for_final_stop(self):
         self.check_checkout_before_suite(('PARAR', 'Versión v0.1 terminada. Revisa'))
+
+    def test_hotfix_final_stop_checks_selected_branch(self):
+        self.git('branch', '-m', 'hotfix/v1.1.2')
+        task = self.root / 'backlog/tasks/T-DEM-0001.md'
+        task.write_text(task.read_text(encoding='utf-8').replace('v0.1.0', 'v1.1.2'), encoding='utf-8')
+        architecture = self.root / 'docs/review/versions/v1.1.2-arquitectura.md'
+        architecture.parent.mkdir(parents=True, exist_ok=True)
+        architecture.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'hotfix ready for final stop')
+        self.git('checkout', '-qb', 'another')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        for same_version_release in (False, True):
+            with self.subTest(same_version_release=same_version_release):
+                if same_version_release:
+                    self.git('branch', 'release/v1.1.2')
+                self.git('checkout', '-q', 'another')
+                selected = motor.estado(self.root, 'docs')
+                self.assertEqual(selected[0], 'PARAR')
+                self.assertIn('Versión v1.1.2 terminada.', selected[1])
+                observed = []
+                def verify(root, command):
+                    observed.append(self.git('branch', '--show-current'))
+                    return 0
+                with (patch.object(motor, 'verificar', side_effect=verify),
+                      patch.object(motor, 'avisar') as notify,
+                      patch.object(motor, 'ejecutar') as execute):
+                    self.assertEqual(motor.bucle(args, self.root), 2)
+                self.assertEqual(observed, ['hotfix/v1.1.2'])
+                self.assertEqual(self.git('branch', '--show-current'), 'hotfix/v1.1.2')
+                execute.assert_not_called()
+                self.assertEqual(notify.call_args.args[1], 'version')
+                self.assertIn('Versión v1.1.2 terminada.', notify.call_args.args[2])
 
     def test_dirty_tree_is_stashed_before_checkout_and_suite(self):
         self.git('checkout', '-qb', 'another')

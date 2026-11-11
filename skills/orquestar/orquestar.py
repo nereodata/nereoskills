@@ -1237,6 +1237,12 @@ def decision_producto(informe):
     return m[1].upper() if m else ''
 
 
+def ramas_abiertas():
+    """Devuelve las ramas de versión en el orden operativo del selector."""
+    ramas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
+    return sorted(ramas, key=lambda b: vkey(b.split('/')[1]) or (0, 0, 0))
+
+
 def estado(root, docs):
     """Devuelve ('PASO', paso, arg, rama) | ('PARAR', motivo) | ('FIN', motivo)."""
     d = root / docs
@@ -1275,8 +1281,7 @@ def estado(root, docs):
     por_id = {i['id']: i for i in items}
     alcance = desbloquea(items)
     pendientes = [i for i in items if i['status'] not in FUERA and vkey(i['version'])]
-    abiertas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
-    for rama in sorted(abiertas, key=lambda b: vkey(b.split('/')[1]) or (0, 0, 0)):
+    for rama in ramas_abiertas():
         v = rama.split('/')[1]
         suyas = [i for i in items if vkey(i['version']) == vkey(v)]
         recien_abierta = all(i['status'] in ('backlog', 'planned') for i in suyas)
@@ -2428,7 +2433,7 @@ def avisar(root, evento, texto):
     if not cfg or (evento and evento not in cfg[2]):
         return False
     token, usuarios, _ = cfg
-    version_final = re.search(r'Versión (v\d+\.\d+) terminada\.', texto)
+    version_final = re.search(r'Versión (v\d+\.\d+(?:\.\d+)?) terminada\.', texto)
     if evento == 'version' and version_final:
         texto += '\n' + cargar_cierre_version().resumen(root, version_final[1])
     texto_firmado = firmar(f'[{root.name}] {texto}')
@@ -3215,7 +3220,10 @@ def bucle(a, root):
         espera_humana = e[0] == 'PARAR' and 'Bloqueo de tarea;' in e[1]
         if not a.estado and cmd_suite and cierre_de_version(e) and not espera_humana:
             version = e[2] if e[0] == 'PASO' else re.search(r'\bv\d+\.\d+(?:\.\d+)?', e[1])[0]
-            rama_cierre = e[3] if e[0] == 'PASO' else f'release/{version}'
+            rama_cierre = e[3] if e[0] == 'PASO' else next(
+                (rama for rama in ramas_abiertas() if vkey(rama.split('/')[1]) == vkey(version)), None)
+            if not rama_cierre:
+                return parar(root, 'error', f'no encuentro la rama de cierre de {version}.')
             if rama_cierre and git('branch', '--show-current') != rama_cierre:
                 if not cambiar_de_rama(root, rama_cierre):
                     return parar(root, 'error', f'no puedo cambiar a {rama_cierre}.')

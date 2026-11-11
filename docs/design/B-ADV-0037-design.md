@@ -83,3 +83,8 @@ formales históricos Markdown se admiten, conservando el primer veredicto formal
 Gateway admite ramas release/ y hotfix/ de la identidad solicitada. Se añaden al
 triaje los consumidores directos de publicación compartida y tres casos CA-F05 de
 TestInstallAndRelease; las pruebas de instalación quedan fuera.
+
+RC-01/RC-02: ramas_abiertas() comparte el orden operativo entre estado() y el
+cierre PARAR. Este resuelve la rama existente por identidad completa sin inferir
+el prefijo release; si no existe, detiene el cierre antes de verificar otro árbol.
+avisar() conserva el parche opcional al pedir el resumen de cierre.

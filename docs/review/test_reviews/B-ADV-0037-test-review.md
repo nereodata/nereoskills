@@ -1,53 +1,61 @@
-# Revisión de pruebas — B-ADV-0037
+# Reevaluación de pruebas — B-ADV-0037
 
 **Veredicto: APROBADO**
 
-Hades `/review-test`, modo orquestado, siguiendo el perfil y la skill adjuntos. Reevaluación estática del delta desde la aprobación anterior. Alcance exclusivo: pruebas, fixtures y spec. Sin inspeccionar producción ni diseño.
+**Destino canónico:** `docs/review/test_reviews/B-ADV-0037-test-review.md`
 
-No se pudo guardar `docs/review/test_reviews/B-ADV-0037-test-review.md`: falló la escritura local. Se emite el informe completo por esta salida.
+Revisión Hades `/review-test` limitada al delta de pruebas aportado desde `4a3c3dc`, relativo a RC-01 y RC-02. Se conserva la aprobación previa del resto de las pruebas. Esta aprobación no resuelve los hallazgos de producción.
 
-## Evidencia aceptada
+## Evidencia y alcance
 
-- Rojo previo: 15 tests, 26 fallos de aserción, sin errores de fixtures/importación/sintaxis.
-- Primer verde de esos 15 tests acreditado.
-- `test_reject_each_precondition` verde sobre `30cafa3c53`.
-- Compilación y diff-check acreditados mediante `--verificar`.
-- Sin lint ni tipado configurados.
+Se revisaron los dos tests añadidos en `tests/test_orquestar.py`, incluidos sus estados, dobles y aserciones visibles en el diff.
 
-No se repitieron verificaciones ni se ejecutó la suite completa. La verificación final del triaje queda pendiente de aportación antes de revisión de código; este informe no la acredita.
+Se acepta la evidencia aportada de `adevv orquestar --verificar`: dos tests, dos fallos y un error esperado:
+
+- Checkout de `release/v1.1.2` inexistente: reproduce la causa exacta de RC-01.
+- Selección de la rama release cuando existen ambas ramas: reproduce la segunda manifestación de RC-01.
+- Ausencia de llamada al resumen para `v1.1.2`: reproduce RC-02.
+
+Según la evidencia aportada, no existen errores de fixtures, imports ni sintaxis. No hay lint ni tipado configurados. No se ejecutó la suite completa ni se repitió la verificación.
+
+El acceso local falló antes de poder contrastar el árbol, leer los archivos instalados o guardar este informe. La evaluación se basa en el perfil, la skill, el informe de código, el diff y la evidencia incluidos en la solicitud.
 
 ## Puntuaciones
 
-| Criterio | Nota | Fundamentación |
+| Dimensión | Nota | Motivo |
 |---|---:|---|
-| Cobertura | 9/10 | Conserva los escenarios aprobados y añade formatos Markdown históricos en los positivos. Separa identidad de parche y agrupación histórica de métricas. |
-| Aserciones | 9/10 | Mantiene resultados observables y snapshots. Los positivos requieren aceptación real del preflight; las versiones se comprueban mediante valores concretos. |
-| Rojo correcto | 9/10 | Rojo previo acreditado por aserciones. Los ajustes suministran fixtures válidas sin sustituir las comprobaciones de comportamiento. |
-| Estabilidad | 9/10 | Las adiciones son deterministas y mantienen el aislamiento de las pruebas aprobadas. |
+| Cobertura | 9/10 | Cubre las dos manifestaciones de RC-01 y la versión con parche de RC-02, conservando el caso histórico sin parche. |
+| Aserciones | 10/10 | Comprueba la rama realmente observada durante la verificación, el estado final, la parada y el contenido enviado. |
+| Rojo correcto | 9/10 | La evidencia aportada corresponde a los defectos concretos; el error de checkout forma parte de la regresión buscada. |
+| Estabilidad | 9/10 | Usa estados Git locales explícitos y dobles para verificación y avisos, sin depender de red ni tiempo real. |
 
-**Media: 9/10. Sin hallazgos críticos ni de severidad alta.**
+**Media: 9,25/10. Sin hallazgos 🔴 ni 🟠.**
 
-## Reevaluación de hallazgos anteriores
+## Reevaluación de la cobertura solicitada
 
-| ID | Severidad original | Estado | Evidencia | Para | Destino |
-|---|---|---|---|---|---|
-| RT-01 | Mayor | **resuelto** | Esta ronda no altera los snapshots aprobados ni la comparación inmediatamente posterior a emitir el informe y anterior a revalidar. | desarrollador/artemisa | resolver: completado |
-| RT-02 | Media | **resuelto** | Conserva `N/A sin justificación` y el positivo con motivo explícito. | desarrollador/artemisa | resolver: completado |
+### RC-01 — Resuelto en las pruebas
 
-## Revisión del delta
+`test_hotfix_final_stop_checks_selected_branch` prepara una hotfix con parche y revisión de arquitectura presente, y comprueba que el selector alcanza el cierre `PARAR`.
 
-En `test_deuda_menor.py`, las expectativas separan la identidad operativa `(1, 20, 4)` de la agrupación histórica de métricas `(1, 20)`, conforme al feature. Se retira la exigencia de identidad entre funciones y se comprueban sus resultados concretos. La comprobación JSONL permanece.
+Sus dos subcasos discriminan entre:
 
-En `test_orquestar.py`, la preparación y lectura de trazas utilizan ambas `v1.1.1-revision.md`. El informe `APROBADO` satisface la condición previa de revisión formal en la fixture de producto. La expectativa `(0, 1, 0)` expresa la equivalencia del parche cero. Estos ajustes no debilitan las aserciones mostradas.
+- Ausencia de `release/v1.1.2`, que descubre la reconstrucción incorrecta mediante el error de checkout.
+- Existencia simultánea de release y hotfix, que exige verificar específicamente `hotfix/v1.1.2`.
 
-En `test_revision_release.py`, cada formato Markdown histórico reemplaza el informe en su ruta canónica y debe permitir el preflight sin efectos laterales. El resultado del preflight no está simulado. Permanecen el caso inicial sin informe, los negativos aprobados y el N/A motivado.
+La rama se observa dentro del doble de `verificar`, por lo que la aserción comprueba dónde se realiza la validación. También se exige conservar esa rama al terminar, no ejecutar pasos adicionales y emitir el aviso de cierre correspondiente.
+
+### RC-02 — Resuelto en las pruebas
+
+`test_version_summary_preserves_optional_patch` exige que `resumen` reciba la versión completa y que su resultado aparezca en los mensajes enviados.
+
+El caso `v1.1.2` detecta la pérdida del parche. El caso `v0.1` conserva el comportamiento histórico. El doble se crea de nuevo para cada subcaso, evitando acumulación de llamadas.
 
 ## Hallazgos nuevos
 
-Ninguno. No hay hallazgos menores que requieran destino `resolver`, `registrar` o `descartar`.
+Ninguno.
 
 ## Resolución
 
-Se mantiene **APROBADO** para el delta de pruebas. RT-01 y RT-02 permanecen resueltos. Esta aprobación no sustituye la revisión de código ni la verificación final del triaje.
+**APROBADO el delta de pruebas relativo a RC-01 y RC-02.** Se mantiene la aprobación previa del resto.
 
-No se han cambiado estados ni realizado commits.
+No se modificaron producción, pruebas ni backlog. El informe queda entregado íntegramente en esta salida por el fallo de acceso local.
