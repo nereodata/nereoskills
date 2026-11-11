@@ -5,12 +5,13 @@ type: bug
 weight: 1
 dificultad: dificil
 version: "v1.1.3"
-status: planned
+status: blocked
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Incidente de release/v1.2, B-ADV-0031: al menos 28 ejecuciones repitiendo fallo de acceso de Hades"
+pendiente_de: humano
 ---
 
 # B-ADV-0044 · Repetición indefinida de un impedimento técnico
@@ -84,3 +85,9 @@ En esta misma revisión se reprodujo H3: la primera línea del dictamen literal 
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: C1 RECHAZADO por Hades (8,50/10, árbol d541cedb12000f740bd29d3f9ff9bd405c579e06). N5: comprobar que dos contenidos diferentes del mismo mandato rastreado producen huellas diferentes en el mandato del proveedor y mantener el control temporal. N6: ejecutar el paso de un segundo ID identificable y verificar que conserva la aprobación del primero en selector y preflight. Reanudar desarrollo por estos dos controles y reevaluar C1 antes de corregir H1–H3 y D1–D3. Seis regresiones en rojo por aserción (8,820 s) y Ruff selectivo en verde. Tras el segundo rechazo consecutivo el motor ordenó guardar el trabajo y terminar este paso. Informe literal en docs/review/test_reviews/B-ADV-0044-test-review.md.
+
+## Bloqueo sin progreso
+- B-ADV-0044 bloqueada para el humano: 2 rechazos seguidos de Hades con el perfil fijado estricto, que impide subir de dificultad o escalar a otro modelo; fecha: 2026-11-11T20:04:22
+- Cola de la última salida:
+
+    (el arnés no produjo salida)
