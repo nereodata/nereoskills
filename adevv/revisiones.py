@@ -60,9 +60,12 @@ class CitasHTML(HTMLParser):
 
     def contiene_cita(self, linea):
         """Consume una línea si abre, continúa o cierra una cita."""
-        inicio = linea.lstrip().startswith('<') and re.search(r'<blockquote(?=[\s/>]|$)', linea, re.I)
-        if not (self.profundidad or self.rawdata or inicio):
-            return False
+        if not (self.profundidad or self.rawdata):
+            if linea.startswith(('    ', '\t')) or linea.lstrip().startswith('>'):
+                return False
+            linea = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', '', linea)
+            if not re.search(r'<blockquote(?=[\s/>]|$)', linea, re.I):
+                return False
         self.feed(linea + '\n')
         return True
 
@@ -159,13 +162,18 @@ def commit_del_intento(root, iid):
 
 
 def palabras_informe(texto):
-    """Conserva el texto propio del informe con independencia del marcado y el espaciado."""
-    propias = ' '.join(linea for linea in lineas_del_informe(texto)
-                       if linea and not re.match(r'(?:Producto revisado|Rechazo reevaluado):', linea, re.I))
-    return re.findall(r'\w+', propias.casefold())
+    """Identifica el cuerpo histórico aunque al restaurarlo se sangre, cite o intercale una nota."""
+    cuerpo = []
+    for linea in texto.splitlines():
+        contenido = linea.strip().lstrip('>#-* \t').replace('**', '')
+        if re.match(r'(?:Producto revisado|Rechazo reevaluado|Veredicto(?: final)?):', contenido, re.I):
+            continue
+        if not re.fullmatch(r'APROBADO\.?|RECHAZADO\.?|N/A\.?', contenido, re.I):
+            cuerpo.extend(re.findall(r'\w+', contenido.casefold()))
+    return cuerpo
 
 
-def acreditacion_anterior(root, ruta, historial, texto):
+def acreditacion_anterior(root, ruta, historial, texto, carpetas):
     """Recupera la emisión y su huella a través de ediciones de seguimiento."""
     veredicto, huella, rechazo_reevaluado = cabecera_informe(texto)
     emision = None
@@ -179,12 +187,16 @@ def acreditacion_anterior(root, ruta, historial, texto):
             misma_emision = False
             continue
         historico = blob.stdout.decode('utf-8')
-        previo, anterior = declaracion(historico)
+        previo, anterior, referencia = cabecera_informe(historico)
         if tras_rechazo:
             if previo == veredicto:
+                if huella is not None:
+                    producto_anterior = anterior if anterior is not None else huella_producto(root, commit, carpetas)
+                    if huella != producto_anterior:
+                        continue
                 originales = palabras_informe(historico)
                 actuales = iter(palabras)
-                if originales and all(p in actuales for p in originales):
+                if all(p in actuales for p in originales):
                     return emision, huella, True
             continue
         if previo == 'RECHAZADO':
@@ -196,6 +208,7 @@ def acreditacion_anterior(root, ruta, historial, texto):
         if misma_emision:
             emision = commit
             huella = anterior
+            rechazo_reevaluado = rechazo_reevaluado or referencia
     return emision, huella, False
 
 
@@ -215,7 +228,7 @@ def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
     confirmar = objetivo is not None
     try:
         historial = subprocess.check_output(['git', 'log', '--format=%H', '--', ruta], cwd=root).splitlines()
-        emision, huella, restaurado = acreditacion_anterior(root, ruta, historial, actual)
+        emision, huella, restaurado = acreditacion_anterior(root, ruta, historial, actual, carpetas)
         if restaurado:
             return 'aprobación restaurada anterior al rechazo'
         if objetivo is None:

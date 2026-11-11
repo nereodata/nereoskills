@@ -2,35 +2,24 @@
 
 # B-ADV-0044 · Reevaluación independiente de pruebas C1
 
-**N8 resuelto.** La prueba distingue una aprobación revocada, un rechazo anterior (R1) y el último rechazo del mismo producto (R2). Solo la reevaluación que cita R2 permite pasar a la revisión de versión. No quedan hallazgos de pruebas pendientes.
+Las cuatro pruebas reproducen los defectos de D3, H3, D5 y D6 por sus efectos observables en el selector de tareas o en la invocación de la reserva. Los hallazgos anteriores de C1, H1–H4 y N1–N8, siguen resueltos. **Hallazgos nuevos de pruebas: ninguno.**
 
-Revisé el delta de `skills/orquestar/test_progreso.py` entre `e120182fc99dd933c1c8ea8a171d07a26c49934e` y `8841db1c8976d9e180dbae79e7a0c04bf2e02d08` en `hotfix/v1.1.3`. El archivo local coincide con el blob revisado `7bed01e`.
-
-## Reevaluación de N8
-
-La prueba confirma en Git la aprobación, R1 y R2 para el mismo ID y la misma huella. Los dos rechazos tienen textos distintos. Después confirma una nota en el resumen de versión, de modo que `HEAD` queda un commit por delante de R2. En los tres subcasos conserva el cuerpo de la aprobación en el informe de trabajo y cambia únicamente el SHA del campo `Rechazo reevaluado`.
-
-| SHA citado | Paso observado en el árbol actual | Comprobación previa al cierre |
+| Caso | Qué distingue la prueba | Rojo observado |
 |---|---|---|
-| Aprobación original | `revisar-tarea` para `B-DEMO-0001` | El ID figura entre los pendientes. |
-| R1, rechazo anterior | `revisar-tarea` para `B-DEMO-0001` | El ID figura entre los pendientes. |
-| R2, último rechazo | `revisar-version` | La lista de pendientes está vacía. |
-
-El caso de R1 detecta una regla que acepte cualquier rechazo histórico. El de R2 detecta una regla que exija citar el `HEAD` administrativo. **N7 sigue resuelto**: el caso D4 verifica tanto la única llamada efectiva al proveedor principal como el rechazo registrado en métricas. Los hallazgos de pruebas H1–H4 y N1–N6 conservan su estado de resueltos de la ronda anterior.
-
-## Evidencia y alcance
-
-El verificador cargó en memoria `6a4dd52:adevv/revisiones.py` y ejecutó la prueba actual. Registró **dos fallos de subcaso en una prueba, en 5,045 s**. Tanto al citar la aprobación como al citar R1, el selector adelantó `revisar-version`. En ambos subcasos el fallo ocurrió antes de la aserción de pendientes. El control positivo de R2 pasó.
-
-Con el árbol actual, **las ocho pruebas dirigidas pasaron en 18,925 s**, incluidas las comprobaciones del selector y del cierre para las tres referencias. Los cuatro rojos de C1 anteriores reprodujeron defectos de producto en D3 (dos restauraciones de una aprobación revocada), H3 (apertura HTML multilínea) y D4 (rechazo propio tras un encabezado citado). Sus reproducciones están en verde en esta ejecución. El dictamen de esta ronda corresponde a las pruebas C1.
+| D3 | Tras aprobar y rechazar el mismo producto, restaura en el WIP la aprobación con las mismas palabras, una línea vacía y cuatro espacios delante del párrafo. Exige que el ID siga pendiente. Conserva el control positivo de una reevaluación con texto propio. | El selector adelantó `revisar-version` cuando correspondía `revisar-tarea` para `B-DEMO-0001`. |
+| H3 | El principal devuelve código 0 con una aprobación citada en un `blockquote` que empieza después de texto y cuya etiqueta continúa en la línea siguiente. La prueba exige llamadas efectivas al principal y a la reserva, ausencia de veredicto del primero y rechazo de la segunda en la misma invocación. | Las métricas solo registraron a `claude`. La prueba esperaba la secuencia `claude`, `codex`. |
+| D5 | Confirma en Git una reevaluación que cita el SHA del primer rechazo y comprueba que el cierre está libre. Inserta únicamente una nota entre la huella y la referencia. Exige que la aprobación conserve su vigencia y que, tras un segundo rechazo, restaurar ese informe en el WIP deje el ID pendiente. | El control previo a la nota pasó. Después de confirmarla, el selector volvió a `revisar-tarea`. |
+| D6 | Para el mismo ID, confirma una aprobación escueta y un rechazo de A. Corrige después `producto.py`, comprueba que B tiene otra huella y confirma una aprobación de B con explicación propia. Exige `revisar-version` y una lista de pendientes vacía. | El selector mantuvo `revisar-tarea` después de aprobar B. |
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 10/10 | El control cubre las tres referencias y separa el último rechazo del último commit. |
-| Aserciones | 9/10 | Cada referencia exige un paso concreto y comprueba por separado los pendientes de cierre. |
-| Rojo correcto | 10/10 | Las dos referencias obsoletas fallan en la decisión del selector histórico y el control válido pasa con la misma preparación. |
-| Estabilidad | 9/10 | El repositorio temporal fija el orden de los commits. La prueba obtiene los SHA de Git y prescinde de fechas y valores de hash predefinidos. |
+| Cobertura | 10/10 | Las cuatro entradas reproducen las condiciones identificadas en D. D5 cubre también la precedencia de un rechazo posterior. |
+| Aserciones | 9/10 | D3, D5 y D6 consultan el selector y el preflight de cierre. H3 contrasta las llamadas al proveedor con la atribución del dictamen en métricas. |
+| Rojo correcto | 10/10 | Las cuatro pruebas llegaron a una aserción de comportamiento y fallaron en la decisión prevista para su defecto. |
+| Estabilidad | 9/10 | Cada caso usa un repositorio Git temporal aislado. Las referencias se obtienen de sus commits y las respuestas de los proveedores están simuladas. |
 
-**Hallazgos nuevos de pruebas:** ninguno. Se reutilizó la evidencia aportada de ejecución, Ruff, escaneo de secretos y comprobaciones de diferencias Git.
+**Evidencia.** El archivo local `skills/orquestar/test_progreso.py` coincide con el blob del delta `6fcc7ff5c322c2a182cfe44e6f147e38bf2b5682`. La ejecución dirigida aportada para el árbol `41e0939b3365d0f3cadf5a2117dda0ad64ba640a` registró cuatro fallos de aserción en 6,413 s. Cada caso se detuvo en el primer fallo descrito en la tabla. Las aserciones posteriores se evaluaron por lectura. Ruff selectivo pasó en ese árbol y el proyecto carece de tipado configurado.
+
+**Responsable.** Artemisa (`desarrollador`) conserva D3, H3, D5 y D6 con destino `resolver` en C2. El dictamen aprueba las regresiones de C1. Los cuatro defectos de producto siguen abiertos.

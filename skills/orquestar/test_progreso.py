@@ -397,6 +397,51 @@ class ProgresoTests(unittest.TestCase):
     def test_restaurar_aprobacion_con_nota_de_seguimiento(self):
         self.comprobar_restauracion('\n\n11 de noviembre: se archiva el expediente.', confirmar=True)
 
+    def test_restaurar_aprobacion_con_cuerpo_sangrado(self):
+        self.comprobar_restauracion('', sangria='\n    ')
+
+    def test_aprobacion_escueta_de_a_no_invalida_revision_de_b(self):
+        carp = motor.backlog_dirs(self.root)
+        huella_a = motor.huella_producto(self.root, 'HEAD', carp)
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_a}')
+        self.commit('aprobar A sin explicación')
+        self.escribir(self.informe, f'**Veredicto:** RECHAZADO\nProducto revisado: {huella_a}\nFalla el doble.')
+        self.commit('rechazar A')
+        self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
+        self.commit('corregir el doble en B')
+        huella_b = motor.huella_producto(self.root, 'HEAD', carp)
+        self.assertNotEqual(huella_a, huella_b)
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_b}\nEl doble es correcto.')
+        self.commit('aprobar la corrección de B')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def test_nota_conserva_referencia_confirmada_hasta_el_siguiente_rechazo(self):
+        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+        cabecera = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\n'
+        cuerpo = 'Primera evaluación de A.'
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, cabecera + cuerpo)
+        self.commit('aprobar A')
+        rechazo = cabecera.replace('APROBADO', 'RECHAZADO')
+        self.escribir(self.informe, rechazo + 'Primer rechazo.')
+        self.commit('revocar A')
+        referencia = f"Rechazo reevaluado: {self.git('rev-parse', 'HEAD')}\n"
+        self.escribir(self.informe, cabecera + referencia + cuerpo)
+        self.commit('reevaluar A con la referencia vigente')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+        editado = cabecera + 'Nota de seguimiento.\n' + referencia + cuerpo
+        self.escribir(self.informe, editado)
+        self.commit('archivar nota tras la reevaluación')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+        self.escribir(self.informe, rechazo + 'Segundo rechazo.')
+        self.commit('revocar la reevaluación')
+        self.escribir(self.informe, editado)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+
     def test_reevaluacion_que_conserva_el_texto_identifica_el_ultimo_rechazo(self):
         """La referencia de cabecera distingue la reevaluación de una copia con notas."""
         huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
@@ -425,7 +470,7 @@ class ProgresoTests(unittest.TestCase):
                     self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
                     self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
 
-    def comprobar_restauracion(self, seguimiento, confirmar=False):
+    def comprobar_restauracion(self, seguimiento, confirmar=False, sangria=''):
         """D3: solo una nueva revisión puede levantar el rechazo del mismo producto."""
         huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
         anterior = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\nPrimera revisión.'
@@ -434,7 +479,7 @@ class ProgresoTests(unittest.TestCase):
         self.commit('primera aprobación')
         self.escribir(self.informe, anterior.replace('APROBADO', 'RECHAZADO'))
         self.commit('revisión que detecta un defecto')
-        self.escribir(self.informe, anterior + seguimiento)
+        self.escribir(self.informe, anterior.replace('Primera revisión.', sangria + 'Primera revisión.') + seguimiento)
         if confirmar:
             self.commit('restaurar con nota administrativa')
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
@@ -561,6 +606,11 @@ class ProgresoTests(unittest.TestCase):
 
     def test_apertura_html_multilinea_no_emite_dictamen(self):
         self.comprobar_reserva_tras_cita('<blockquote\n cite="informe-anterior">\n**Veredicto:** APROBADO\n</blockquote>')
+
+    def test_apertura_html_multilinea_tras_texto_activa_reserva(self):
+        self.comprobar_reserva_tras_cita('El informe anterior dice: <blockquote\n cite="archivo">\n'
+                                         '**Veredicto:** APROBADO\n</blockquote>')
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
 
     def test_rechazo_propio_despues_de_encabezado_citado(self):
         """D4: el rechazo del principal termina la invocación antes de la reserva."""
