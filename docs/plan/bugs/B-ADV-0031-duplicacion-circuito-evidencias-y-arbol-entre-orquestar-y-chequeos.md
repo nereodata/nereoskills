@@ -116,3 +116,10 @@ updated_at: 2026-11-11
 - Hades declara que ejecución y Node fallan al iniciarse con `registered Core launch requires an installed app`. Se confirma la ausencia del informe canónico; el retorno cero sin dictamen no acredita aprobación.
 - Se conserva la revisión independiente pendiente y `in_progress`. No hay hallazgos asignados que enrutar ni decisión humana requerida; no se modifican perfiles ni reservas y no se avanza a diseño, pruebas o implementación.
 - Verificación limitada a higiene documental mediante `--verificar` y calidad desde la base original. La validación funcional del triaje sigue pendiente; no se ejecuta la suite completa.
+
+## Reintento · 2026-11-11 16:52 (Europe/Madrid)
+
+- `/review-spec` del alcance completo lanzada mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`; invocación `2644b68fcf174629a891b4fd4c243ef0`, perfil Codex seleccionado por el lanzador.
+- Hades no pudo leer los archivos ni escribir el informe: terminal y acceso alternativo fallan con `registered Core launch requires an installed app`. Se confirma que el informe canónico no existe; código cero sin dictamen no acredita aprobación.
+- Se conserva la revisión independiente pendiente y `in_progress`. Sin hallazgos asignados que enrutar ni decisión humana requerida; no se cambian perfiles o reservas ni se avanza a diseño, pruebas o implementación.
+- El delta documental se comprueba mediante `--verificar "git diff --check"` y calidad desde la base original. La validación funcional del triaje sigue pendiente; no se ejecuta la suite completa.
