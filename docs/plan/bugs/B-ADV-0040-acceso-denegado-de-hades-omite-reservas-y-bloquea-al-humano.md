@@ -5,11 +5,12 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
+pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -35,3 +36,29 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 
 - En `orquestar_metricas.jsonl` del 11 de noviembre se registran la promoción y el fallo de Claude para B-ADV-0032 a las 09:20:49 y 09:22:17, y para B-ADV-0033 la promoción a las 09:28:25 y los fallos a las 09:29:29 y 09:30:24. Las dos preguntas constan en `orquestar_preguntas.json`.
 - B-ADV-0039 cubre la cuota que se propaga al bucle **después** de que una reserva complete el trabajo. Aquí se interrumpe la revisión **antes** de intentar una reserva operativa. B-ADV-0033 cubre la interpretación del destino cuando Hades sí ha emitido un hallazgo.
+
+## Triaje
+
+- `base_calidad: f751e6bdc7214b14509b64afcc53d8b3b1724ddd`.
+- Causa: `agente()` retorna tras errores distintos de cuota, incluso con reservas elegibles. El acceso por suscripción deshabilitado es un caso identificable y recuperable mediante el perfil ya autorizado.
+- Subfase A: [EXEC] escenarios de acceso denegado y recuperación en `skills/orquestar/features/orquestacion.feature`.
+- Subfase B: [EXEC] clasificación acotada del fallo, métricas y preservación de revisión pendiente.
+- Subfase C1: [EXEC] regresiones con lanzadores simulados, cuotas, perfil estricto y recuperación Git de dos preguntas respondidas con WIP y cambios ajenos.
+- Subfase C2: [EXEC] conmutación en `agente()` y mandato del paso ante indisponibilidad técnica.
+- Subfase D: [EXEC] Hades sobre todo el delta de este bug.
+- Subfase E: [EXEC] contrato operativo de orquestar y changelog.
+- Subfase F: [EXEC] cierre y commit.
+- Verificación al cierre: `python -m unittest discover -s skills/orquestar -p test_acceso_agente.py` y regresiones `test_arnes_ausente.py`, `test_cuota_vigente.py`, `test_perfil_fijado.py` del mismo directorio; ejercitan clasificación, reservas y recuperación sin cuentas ni modelos. Estático: `git diff --check`, compilación de los Python del delta y calidad del delta con el coordinador. No hay linter/tipador configurado ni cambios de dependencias.
+- DEC: conservar la rama hotfix activa y la versión 1.1.2; no cambiar perfiles, preguntas reales ni tareas B-ADV-0032/0033 durante la reproducción aislada.
+
+## Intento interrumpido por enrutado de Hades
+
+- `/review-spec`: RECHAZADO, RS-0040-01/02/03/04 para especificador, destino resolver; informe en `docs/review/spec_reviews/B-ADV-0040-spec-review.md`.
+- Diseño y pruebas son borradores, sin aprobación de `/review-test` ni corrección de producción aplicada. Se conservaron mientras Hades revisaba la especificación.
+- Rojo capturado mediante `adevv orquestar --verificar 'python -m unittest discover -s skills/orquestar -p test_acceso_agente.py'`: 7 pruebas, 4 fallos y 2 errores. Los fallos de reservas y reintento reproducen el bug. El error de espera refleja ausencia de la recuperación; la fixture Git de restauración también requiere corregirse antes de revisar pruebas (no se acredita como rojo válido del producto). No se ejecutó suite completa.
+- Próximo paso: especificar los cuatro hallazgos y volver al ciclo; revisar desde cero conforme al modo orquestado.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades /review-spec RECHAZADO (media 7,5): RS-0040-01 exige escenario propio con perfil estricto y reserva disponible; RS-0040-02 concretar rechazo real y tratamiento de su destino; RS-0040-03 registrar arnés revisor final; RS-0040-04 declarar Codex autorizado/elegible y omisión de agy agotado. Todos para especificador, destino resolver. Decisión: ejecutar especificar; conservar escenarios, diseño y pruebas en borrador, sin implementación ni cierre, y repetir revisiones desde cero. Informe docs/review/spec_reviews/B-ADV-0040-spec-review.md.
