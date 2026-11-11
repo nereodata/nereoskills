@@ -5,13 +5,12 @@ type: bug
 weight: 0
 dificultad: dificil
 version: "v1.1.3"
-status: blocked
+status: planned
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Incidente Aprexx, bug-fix B-APX-0262, Adevv 1.1.2; petición expresa del usuario"
-pendiente_de: especificador
 ---
 
 # B-ADV-0046 · Robustez y recuperación del registro de métricas
@@ -61,3 +60,12 @@ Ocho procesos Python 3.12 escribieron 400 filas cada uno en un archivo temporal 
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades rechazó /review-spec (8,0/10). H-01 alta: distinguir la recogida antes de recuperar (diagnóstico con archivo y línea, cierre conservado) del relanzamiento; una ejecución total del paso. H-02 alta: con V1 ya observada, recuperar acortando el registro, añadir V2 y observar exactamente V2 una vez. H-03 alta: solapar recuperación y escritura confirmada; preservar todos los eventos válidos una sola vez y la evidencia binaria del fragmento. H-04 media, resolver: cuantificar y conservar un coste distinto de cero tras dos recuperaciones. Ejecutar especificar sobre los escenarios y triaje conservados en wip/B-ADV-0046, commit 58b5774, con el dictamen literal en docs/review/spec_reviews/B-ADV-0046-spec-review.md. Mantener base_calidad aaf7a5e7c1402141e3df6bcf8dbdf3e6a9a6517d.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Reevaluación de Hades de la fase A, APROBADO (9,5/10). H-01 a H-04 resueltos. H-05 media, resolver por el especificador en este paso: tras la segunda recuperación, exigir que la primera copia de evidencia siga disponible e idéntica byte a byte al original.
+
+## Reanudación de desarrollo
+
+Fase A aprobada. Hades cerró H-01 a H-05 en los seis escenarios `@metricas`. Retomar el triaje en B (diseño); las regresiones ejecutables corresponden a C1. [Revisión de especificación](../../review/spec_reviews/B-ADV-0046-spec-review.md)

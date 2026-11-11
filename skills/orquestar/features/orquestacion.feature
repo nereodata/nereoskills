@@ -674,3 +674,64 @@ Característica: Continuidad con arneses ausentes
       | resultado       | accion                                     |
       | dictamen válido | continúa con ese dictamen                  |
       | cuota agotada   | mantiene la espera de cuota de la revisión |
+
+  @metricas
+  Escenario: Una cola parcial no oculta las sesiones ni consume el siguiente evento
+    Dado un registro de agente con sesión S seguido de una última fila JSON incompleta sin salto final
+    Cuando el motor busca la sesión del agente y comienza a observar eventos nuevos
+    Entonces recupera S y la cola pendiente no cuenta como evento
+    Cuando termina de escribirse esa fila con una verificación V
+    Entonces el motor observa V una sola vez entre los eventos nuevos
+
+  @metricas
+  Esquema del escenario: Recuperación explícita de un fragmento entre dos objetos válidos
+    Dado un registro con un consumo de 7 tokens y coste de 0,25 USD en línea 1, <fragmento> en línea 2 y una verificación V en línea 3
+    Cuando el motor consulta su estado
+    Entonces conserva el consumo y V y diagnostica orquestar_metricas.jsonl y la línea 2
+    Y el archivo sigue íntegro y la exportación estricta rechaza emitir totales parciales
+    Cuando se solicita la recuperación de las métricas
+    Entonces queda una copia idéntica byte a byte al original y el registro activo conserva ambas filas válidas en orden
+    Y la exportación contabiliza exactamente 7 tokens, 0,25 USD y una verificación V
+    Cuando se solicita la recuperación por segunda vez
+    Entonces se conservan los mismos dos registros y la exportación sigue contabilizando 7 tokens, 0,25 USD y una verificación V
+    Y la copia de evidencia de la primera recuperación sigue disponible e idéntica byte a byte al original
+
+    Ejemplos:
+      | fragmento                                |
+      | el fragmento JSON inválido `_s": 0}`     |
+      | una fila con la secuencia UTF-8 inválida FF |
+
+  @metricas
+  Escenario: Procesos concurrentes registran eventos tras una escritura interrumpida
+    Dado un registro con una fila válida y un fragmento final de un proceso interrumpido
+    Cuando el motor, un agente, una verificación y el gateway registran simultáneamente 100 eventos cada uno con identificadores únicos y contenido Unicode
+    Entonces se leen los 400 identificadores con su contenido original una sola vez cada uno, además de la fila original
+    Y el fragmento queda identificable con su diagnóstico y disponible para recuperación
+
+  @metricas
+  Escenario: El bucle conserva un paso ya completado antes de observar la corrupción
+    Dado que el registro está vacío al iniciar el paso A y hay un paso B pendiente que depende de A
+    Y A deja su ficha completada en un commit con revisión aprobada
+    Y el registro contiene el consumo de A en la línea 1, un fragmento inválido en la línea 2 y la aprobación en la línea 3
+    Cuando el bucle recoge el resultado de A antes de recuperar las métricas
+    Entonces informa de la corrupción en orquestar_metricas.jsonl, línea 2, sin excepción sin capturar
+    Y en esa ejecución se conservan el commit, la ficha completada, el consumo y la aprobación de A
+    Cuando se recupera el registro y se relanza el bucle antes de ejecutar B
+    Entonces el selector elige B y el número total de ejecuciones de A entre ambos arranques es 1
+
+  @metricas
+  Escenario: El observador recibe la siguiente verificación después de acortarse el registro
+    Dado un registro con un consumo en la línea 1, un fragmento inválido en la línea 2 y la verificación V1 en la línea 3
+    Y un observador de verificaciones nuevas que ya ha recibido V1
+    Cuando se recupera el registro y quedan solo las dos filas válidas
+    Y se registra la verificación V2 al final
+    Entonces la siguiente consulta del mismo observador entrega exactamente V2 una vez
+    Y otra consulta sin más escrituras no entrega verificaciones
+
+  @metricas
+  Escenario: Una escritura que coincide con la recuperación conserva su evento confirmado
+    Dado un registro con los eventos confirmados E1 y E2 separados por una línea cuyos bytes son FF 0A en hexadecimal
+    Cuando se solicita la recuperación y, mientras está en curso, otro proceso solicita registrar E3
+    Y se completan la recuperación y la confirmación de escritura de E3
+    Entonces el registro activo contiene exactamente E1, E2 y E3, una vez cada uno y con su contenido original
+    Y la copia de evidencia conserva los bytes FF 0A entre E1 y E2
