@@ -5,7 +5,7 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: completed
+status: planned
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -15,6 +15,8 @@ origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
 
 ## Fallo observado
+
+**Reapertura durante la v1.1.2.** En B-ADV-0036, el registro de Hades del 11/11/2026 a las 13:06:04 conserva el código 1, `api_error_status: 403`, `api_error_code: oauth_not_allowed_for_organization` y el mensaje real `Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access`. El detector de `09e1dd6` exige un punto tras `Code` y termina sin probar la reserva. Reproducir esta variante con un doble del arnés y verificar que alcanza la reserva elegible, respeta el perfil estricto y sigue distinguiendo otros fallos de autenticación. La restauración de WIP ya se comprobó en B-ADV-0032 y B-ADV-0033. El ajuste provisional del motor de esta ejecución solo cubre esta variante hasta que la corrección quede revisada en el repositorio.
 
 Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar con Codex a usar Claude como principal, con agy y Codex de reserva. Claude terminó con código 1 y el mensaje `Your organization has disabled Claude subscription access for Claude Code.` La función `agente()` de la versión instalada 1.1.1 devolvió el error sin llegar a las reservas. Hades no emitió dictamen en esos intentos. El paso de desarrollo pidió al usuario elegir un perfil ya configurado o restaurar la suscripción y dejó ambas tareas bloqueadas. Codex emitió después dictámenes para B-ADV-0034.
 
