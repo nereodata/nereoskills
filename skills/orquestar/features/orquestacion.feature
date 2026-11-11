@@ -610,3 +610,67 @@ Característica: Continuidad con arneses ausentes
       | respuesta INSUFICIENTE: falta puerto | pregunta pendiente y diagnóstico falta puerto |
       | otra pregunta pendiente de la misma tarea | respuesta incorporada y tarea bloqueada por esa pregunta |
       | dependencia no completada | respuesta incorporada y tarea en espera de su dependencia sin anunciar elegibilidad ni relanzar por esa tarea |
+
+  @B-ADV-0044
+  Esquema del escenario: Acotar la revisión técnica pendiente en desarrollo y análisis
+    Dado un paso <paso> con dos intentos permitidos y un trabajo en curso
+    Cuando en cada intento Hades termina sin dictamen por falta de acceso tras probar los perfiles autorizados
+    Y el arnés registra el impedimento con otra redacción y fecha en la ficha y la revisión de versión
+    Y cada invocación confirma únicamente esas dos notas en un commit y termina con código 0 y el árbol limpio
+    Entonces el bucle para tras el segundo commit e identifica el paso, el ID y la revisión técnica pendiente
+    Y el arnés ha recibido exactamente dos invocaciones y no se inicia una tercera
+    Y conserva el trabajo, las métricas de cada ejecución y el perfil estricto sin completar ni abrir una pregunta
+    Ejemplos:
+      | paso          |
+      | bug-fix       |
+      | task-dev      |
+      | revisar-tarea |
+
+  @B-ADV-0044
+  Escenario: Los cambios administrativos no renuevan el presupuesto de análisis
+    Dado que work-plan tiene un único perfil con dos intentos y el plan sigue pendiente
+    Cuando el primer intento crea un commit vacío y el segundo solo actualiza notas del seguimiento
+    Entonces el bucle agota los dos intentos de ese perfil y para informando de work-plan
+
+  @B-ADV-0044
+  Esquema del escenario: Reconocer trabajo parcial en una ficha antigua
+    Dado un bug sin campos de progreso, en curso con un intento sin avance
+    Cuando el siguiente intento aporta <entregable>
+    Entonces se registra avance y el bug dispone de nuevo de todos sus intentos de desarrollo
+    Y el avance parcial conserva pendiente el cierre revisado
+    Ejemplos:
+      | entregable                                                              |
+      | código WIP sin commit que corrige el comportamiento afectado por el bug |
+      | prueba confirmada que reproduce ese comportamiento del bug              |
+      | escenario en la especificación de la función                            |
+      | primer dictamen formal de la revisión en curso                          |
+      | resolución incorporada de una pregunta del ID                           |
+
+  @B-ADV-0044
+  Escenario: Aislar intentos técnicos entre IDs y conservarlos al recargar
+    Dado que A ha consumido un intento técnico de dos y después B avanza
+    Cuando el motor se recarga y otro proveedor autorizado de Hades tampoco emite dictamen para A
+    Entonces el segundo intento de A agota su presupuesto y el avance de B queda registrado
+    Y un arranque manual posterior conserva el WIP y las métricas y permite una nueva tanda de dos intentos
+
+  @B-ADV-0044
+  Esquema del escenario: Distinguir el cierre del trabajo parcial ante un retorno erróneo
+    Dado un bug con el mismo cambio parcial de código en un commit nuevo y el árbol limpio
+    Cuando el arnés termina con código 1 y el estado en disco es <estado>
+    Entonces el bucle <resultado>
+    Ejemplos:
+      | estado                                                                            | resultado                                                                 |
+      | en curso, sin dictamen                                                            | aplica la recuperación acotada del arnés                                  |
+      | completed, aprobación canónica anterior al cambio y revisión del cambio pendiente | mantiene pendiente la revisión y aplica la recuperación acotada del arnés |
+      | completed, aprobación canónica que cubre el cambio actual                         | continúa sin repetir el paso                                              |
+
+  @B-ADV-0044
+  Esquema del escenario: Distinguir la reserva recuperada de una invocación sin cuota
+    Dado un intento técnico sin dictamen y una reserva autorizada de la misma invocación
+    Cuando la reserva termina con <resultado> y solo hay un commit parcial
+    Entonces el bucle <accion>
+    Y cada intento conserva su consumo real
+    Ejemplos:
+      | resultado       | accion                                     |
+      | dictamen válido | continúa con ese dictamen                  |
+      | cuota agotada   | mantiene la espera de cuota de la revisión |
