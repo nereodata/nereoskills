@@ -1,0 +1,37 @@
+---
+id: B-ADV-0040
+title: "El acceso denegado de Claude interrumpe la revisión de Hades antes de probar sus reservas"
+type: bug
+weight: 15
+dificultad: media
+version: "v1.1.2"
+status: planned
+depende_de: []
+created_at: 2026-11-11
+updated_at: 2026-11-11
+origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
+---
+
+# B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
+
+## Fallo observado
+
+Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar con Codex a usar Claude como principal, con agy y Codex de reserva. Claude terminó con código 1 y el mensaje `Your organization has disabled Claude subscription access for Claude Code.` La función `agente()` de la versión instalada 1.1.1 devolvió el error sin llegar a las reservas. Hades no emitió dictamen en esos intentos. El paso de desarrollo pidió al usuario elegir un perfil ya configurado o restaurar la suscripción y dejó ambas tareas bloqueadas. Codex emitió después dictámenes para B-ADV-0034.
+
+## Reproducción sin cuentas ni llamadas a modelos
+
+1. Invocar la ruta de `--agente hades` con el perfil difícil, reservas en orden agy y Codex, y ejecutables simulados disponibles. Preparar el error literal anterior para Claude y un dictamen válido para la primera reserva elegible.
+2. Observar los lanzamientos y el resultado devuelto al paso. En 1.1.1 solo se invoca Claude y se devuelve 1. Repetir con agy en cuota y Codex disponible para cubrir la selección de la segunda reserva.
+3. Alimentar el paso de desarrollo con ese resultado y comprobar el dictamen de la revisión, el estado de la tarea y las preguntas registradas.
+
+## Criterios de aceptación
+
+- Un error de suscripción deshabilitada permite continuar la misma revisión con la siguiente reserva autorizada y elegible. Se respetan el orden, las cuotas vigentes y los perfiles explícitamente estrictos. El registro identifica el fallo de acceso y el arnés que finalmente revisa.
+- Con una reserva operativa, el dictamen real llega a la tarea con su destino. No se abre una pregunta para elegir esa reserva, habilitar Claude o cambiar la configuración. Un rechazo auténtico de Hades conserva su tratamiento habitual.
+- Si todos los perfiles permitidos están indisponibles, se conserva la revisión pendiente y el trabajo realizado. El diagnóstico identifica el impedimento técnico y permite reintentar al recuperar un perfil. Repetir el mismo fallo no duplica preguntas ni acredita progreso de revisión.
+- Verificar la recuperación con una copia del estado de Q-ADV-0001 y Q-ADV-0002: al disponer de una reserva, ambas tareas pueden retomar su revisión pendiente conservando su WIP, el historial y la respuesta ya recibida. La recuperación respeta el trabajo local ajeno y no exige contestar otra vez. Las regresiones usan lanzadores simulados.
+
+## Evidencia y relación con otros bugs
+
+- En `orquestar_metricas.jsonl` del 11 de noviembre se registran la promoción y el fallo de Claude para B-ADV-0032 a las 09:20:49 y 09:22:17, y para B-ADV-0033 la promoción a las 09:28:25 y los fallos a las 09:29:29 y 09:30:24. Las dos preguntas constan en `orquestar_preguntas.json`.
+- B-ADV-0039 cubre la cuota que se propaga al bucle **después** de que una reserva complete el trabajo. Aquí se interrumpe la revisión **antes** de intentar una reserva operativa. B-ADV-0033 cubre la interpretación del destino cuando Hades sí ha emitido un hallazgo.
