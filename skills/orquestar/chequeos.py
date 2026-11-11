@@ -13,6 +13,8 @@ import tempfile
 import threading
 import time
 
+from adevv import registro_metricas
+
 try:
     import yaml
 except ImportError:
@@ -45,9 +47,10 @@ RESULTADOS = ('sin_acreditar', 'pendiente', 'ejecutando', 'aprobado', 'fallido',
 CANALES = ('cli', 'gateway', 'agente', 'release')
 ACCIONES_RELEASE = ('validar', 'cerrar_local', 'etiquetar', 'publicar')
 EVIDENCIAS = 'orquestar_evidencias.jsonl'
-METRICAS = 'orquestar_metricas.jsonl'
+METRICAS = registro_metricas.ARCHIVO
 ESTADO_EN_CURSO = 'estado_en_curso.json'
 IGNORADOS_PROPIOS = {
+    '/' + registro_metricas.AUXILIAR + '/',
     EVIDENCIAS,
     METRICAS,
     'orquestar.log',
@@ -200,6 +203,8 @@ def _listar_ficheros_repositorio(root):
     base = Path(root).resolve()
     resultado = []
     for dirpath, dirnames, filenames in os.walk(base):
+        if Path(dirpath) == base and registro_metricas.AUXILIAR in dirnames:
+            dirnames.remove(registro_metricas.AUXILIAR)
         dirnames[:] = [
             d for d in sorted(dirnames)
             if d not in ('.git', '__pycache__') and not d.startswith('adevv-intervencion-')

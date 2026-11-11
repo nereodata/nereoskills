@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from skills.orquestar.test_fallos_arnes import motor
+from skills.telegram_gateway import gateway
 
 
 SCRIPT = Path(motor.__file__).resolve()
@@ -40,21 +41,13 @@ def producir(root, tipo, barrera):
 def escribir_durante_recuperacion(root, publicando, solicitado):
     if not publicando.wait(30):
         raise RuntimeError('La recuperación no llegó a publicar')
-    if os.name == 'nt':
-        import msvcrt as sistema
-        operacion = 'locking'
-    else:
-        import fcntl as sistema
-        operacion = 'flock'
-    bloquear = getattr(sistema, operacion)
-
-    def anunciar(*args):
+    registrar = motor.registrar
+    def anunciar(raiz, fila):
         solicitado.set()
-        return bloquear(*args)
+        return registrar(raiz, fila)
 
-    with chdir(root), patch.object(sistema, operacion, anunciar):
+    with chdir(root), patch.object(motor, 'registrar', anunciar):
         motor.registrar(root, V2)
-    solicitado.set()
 
 
 class RegistroMetricasTests(unittest.TestCase):
@@ -104,6 +97,10 @@ class RegistroMetricasTests(unittest.TestCase):
                           float(fila['coste_estimado_usd']), int(fila['verificaciones_totales'])),
                          (ID, 7, 0.25, 1))
 
+    def filas_activas(self):
+        with self.ruta.open('rb') as entrada:
+            return [json.loads(linea.decode('utf-8')) for linea in entrada]
+
     def test_estado_exportacion_y_recuperacion_idempotente(self):
         for fragmento in (b'_s": 0}\n', b'\xff\n'):
             with self.subTest(fragmento=fragmento):
@@ -121,15 +118,14 @@ class RegistroMetricasTests(unittest.TestCase):
                 self.assertEqual(self.ruta.read_bytes(), original)
                 resultado = self.cli('--recuperar-metricas')
                 self.assertEqual(resultado.returncode, 0, resultado.stderr)
-                copias = [p for p in self.root.rglob('*.jsonl') if p != self.ruta and p.read_bytes() == original]
-                copia, = copias
-                self.assertIn(copia.name, resultado.stdout)
-                self.assertEqual(self.ruta.read_bytes(), linea(CONSUMO) + linea(V1))
+                copia = next(p for p in self.root.rglob('*')
+                             if p != self.ruta and p.is_file() and p.read_bytes() == original)
+                self.assertEqual(self.filas_activas(), [CONSUMO, V1])
                 self.comprobar_totales()
                 resultado = self.cli('--recuperar-metricas')
                 self.assertEqual(resultado.returncode, 0, resultado.stderr)
                 self.assertEqual(copia.read_bytes(), original)
-                self.assertEqual(self.ruta.read_bytes(), linea(CONSUMO) + linea(V1))
+                self.assertEqual(self.filas_activas(), [CONSUMO, V1])
                 self.comprobar_totales()
 
     def test_cursor_tras_recuperacion(self):
@@ -138,6 +134,7 @@ class RegistroMetricasTests(unittest.TestCase):
         self.assertEqual(filas, [CONSUMO, V1])
         resultado = self.cli('--recuperar-metricas')
         self.assertEqual(resultado.returncode, 0, resultado.stderr)
+        self.assertEqual(self.filas_activas(), [CONSUMO, V1])
         with chdir(self.root):
             motor.registrar(self.root, V2)
         filas, cursor = motor.nuevas_metricas(self.root, cursor)
@@ -156,24 +153,46 @@ class RegistroMetricasTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()) as error:
             filas = motor.leer_metricas(self.root)
         self.assertRegex(error.getvalue(), r'orquestar_metricas\.jsonl[^\n]*línea 2')
-        self.assertTrue(self.ruta.read_bytes().startswith(linea(CONSUMO) + fragmento + b'\n'))
+        with self.ruta.open('rb') as entrada:
+            self.assertEqual(json.loads(entrada.readline()), CONSUMO)
+            self.assertIn(entrada.readline(), (fragmento + b'\n', fragmento + b'\r\n'))
         self.assertEqual(filas[0], CONSUMO)
         self.assertCountEqual(filas[1:], [evento(t, n) for t in tipos for n in range(100)])
+
+    def test_agente_verificacion_y_gateway_delegan_en_registrar(self):
+        subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
+        with (chdir(self.root), patch.dict(os.environ, ORQUESTAR_ID='', ORQUESTAR_PASO=''),
+              patch.object(motor, 'buscar_ejecutable', return_value='arnes'),
+              patch.object(motor, 'lanzar', return_value=(0, {'sesion': 'S'}, 'ok')),
+              patch.object(motor, 'registrar', wraps=motor.registrar) as registro):
+            self.assertEqual(motor.agente(self.root, 'clio', 'consulta'), 0)
+            self.assertEqual(motor.verificar(self.root, 'echo prueba'), 0)
+            agente, verificacion = [c.args[1] for c in registro.call_args_list]
+            self.assertEqual((agente['tipo'], agente['rol'], agente['sesion']), ('agente', 'clio', 'S'))
+            self.assertEqual((verificacion['tipo'], verificacion['comando']), ('verificacion', 'echo prueba'))
+        with (chdir(self.root), patch.object(gateway.motor, 'buscar_ejecutable', return_value='arnes'),
+              patch.object(gateway.motor, 'lanzar', return_value=(1, {}, 'usage limit reached resets in 1680s')),
+              patch.object(gateway.motor, 'registrar', wraps=gateway.motor.registrar) as registro):
+            with self.assertRaises(gateway.ModeloIndisponible):
+                gateway.invocar(self.root, 'hola', {'harness': 'codex', 'model': 'm'})
+            fila = registro.call_args.args[1]
+            self.assertEqual((fila['tipo'], fila['modelo_cuota']), ('gateway', 'm'))
+        self.assertEqual(self.filas_activas(), [agente, verificacion, fila])
 
     def test_escritura_coincide_con_publicacion_de_recuperacion(self):
         original = linea(CONSUMO) + b'\xff\n' + linea(V1)
         self.ruta.write_bytes(original)
         publicando, solicitado = self.mp.Event(), self.mp.Event()
+        registro_metricas = motor.registro_metricas
+        guardar = registro_metricas.guardar_evidencia
         proceso = self.proceso(escribir_durante_recuperacion, publicando, solicitado)
-        reemplazar = os.replace
+        def con_instantanea(*args):
+            copia = guardar(*args)
+            publicando.set()
+            self.assertTrue(solicitado.wait(30), 'El escritor no solicitó el registro de E3')
+            return copia
 
-        def publicar(origen, destino):
-            if Path(destino) == self.ruta:
-                publicando.set()
-                self.assertTrue(solicitado.wait(30), 'El escritor no solicitó el registro de E3')
-            return reemplazar(origen, destino)
-
-        with patch.object(os, 'replace', publicar):
+        with patch.object(registro_metricas, 'guardar_evidencia', con_instantanea):
             copia = motor.metricas.recuperar(self.root)
         proceso.join(30)
         self.assertEqual(proceso.exitcode, 0)

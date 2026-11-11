@@ -162,8 +162,10 @@ class ProgresoTests(unittest.TestCase):
                 self.hades(n, veredicto='APROBADO')
             return 0, ''
         self.accion = intento
-        with redirect_stderr(StringIO()) as error:
+        with redirect_stderr(StringIO()) as error, patch.object(motor, 'registrar', wraps=motor.registrar) as registro:
             motor.bucle(self.args, self.root)
+        pasos = [c.args[1] for c in registro.call_args_list if c.args[1].get('tipo', 'paso') == 'paso']
+        self.assertEqual([(f['paso'], f['id']) for f in pasos], [('bug-fix', self.iid)])
         self.assertRegex(error.getvalue(), r'orquestar_metricas\.jsonl[^\n]*línea 2')
         self.assertEqual(self.git('log', '-1', '--pretty=%s'), 'cierre de A')
         self.assertEqual(motor.frontmatter(self.ficha)['status'], 'completed')

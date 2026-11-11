@@ -1,11 +1,11 @@
 """Identidad operativa de versiones y acreditación de revisiones de cierre."""
 
 import hashlib
-import json
 import re
 import subprocess
 from pathlib import Path
 
+from adevv.registro_metricas import leer_registros
 from adevv.yaml_lite import load_yaml
 
 
@@ -140,15 +140,9 @@ def diagnostico_revision(root, iid, ficha=None, carpetas=None):
     if not motivo:
         return ''
     ultimo = None
-    path = Path(root) / 'orquestar_metricas.jsonl'
-    if path.exists():
-        for line in path.read_text(encoding='utf-8').splitlines():
-            try:
-                dato = json.loads(line)
-            except ValueError:
-                continue
-            if dato.get('tipo') == 'agente' and dato.get('rol') == 'hades' and dato.get('id') == iid:
-                ultimo = dato
+    for dato in leer_registros(root, tolerar_ultima=True):
+        if dato.get('tipo') == 'agente' and dato.get('rol') == 'hades' and dato.get('id') == iid:
+            ultimo = dato
     if ultimo and (ultimo.get('sin_cuota') or ultimo.get('cuota_espera_s')):
         motivo += '; Hades sin cuota: recuperar disponibilidad de Hades'
     return f'{iid}: {motivo}; obtener revisión con revisar-tarea y volver a validar el cierre.'

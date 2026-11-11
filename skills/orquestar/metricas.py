@@ -1,9 +1,9 @@
 """Consulta de solo lectura del consumo registrado por el orquestador."""
 import csv
-import json
 import re
 from collections import defaultdict
-from pathlib import Path
+
+from adevv.registro_metricas import leer_registros, recuperar
 
 
 CAMPOS = ('id version tipo dificultad tiempo_estimado_min tiempo_real_min modelos_dev '
@@ -38,30 +38,6 @@ def clave_version_numerica(valor):
 def clave_version(valor):
     """Orden numérico de bloques estadísticos; sin-version queda al principio."""
     return clave_version_numerica(valor) if valor != 'sin-version' else (-1, -1)
-
-
-def leer_registros(root, tolerar_ultima=False):
-    """Lee el JSONL común y permite tolerar escrituras incompletas del bucle."""
-    ruta = Path(root) / 'orquestar_metricas.jsonl'
-    if not ruta.exists():
-        return []
-    filas = []
-    with ruta.open(encoding='utf-8') as entrada:
-        for numero, linea in enumerate(entrada, 1):
-            if not linea.strip():
-                continue
-            try:
-                fila = json.loads(linea)
-            except json.JSONDecodeError as error:
-                if tolerar_ultima:
-                    continue
-                raise ValueError(f'{ruta.name}: JSON inválido en línea {numero}') from error
-            if not isinstance(fila, dict):
-                if tolerar_ultima:
-                    continue
-                raise ValueError(f'{ruta.name}: se esperaba un objeto en línea {numero}')
-            filas.append(fila)
-    return filas
 
 
 def seleccionar(filtro, disponibles):

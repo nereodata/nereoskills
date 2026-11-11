@@ -45,6 +45,10 @@ Los intentos de un rol comparten `invocacion` por llamada y cada intento conserv
 
 ### Consulta y exportación de métricas
 
+El bucle espera a que termine de escribirse una última fila incompleta. Si encuentra una fila cerrada dañada, indica el archivo y la línea en stderr y continúa con los eventos válidos. La consulta y la exportación estrictas requieren que todas las filas sean legibles.
+
+Desde la raíz del proyecto, ejecuta `adevv orquestar --recuperar-metricas` para guardar una copia exacta del original en `.adevv-metricas/` y retirar las filas inválidas del registro activo. El comando muestra qué líneas retiró y la ruta de la copia. Después puedes repetir la exportación. Repetir la recuperación sobre el archivo sano conserva la primera copia.
+
 `adevv orquestar --metricas [FILTRO]` (alias `--metrics`) consulta el registro y el backlog sin arrancar ni detener el bucle. Sin filtro muestra todas las versiones; acepta `todas` / `all`, `ultima` / `last`, `ultimas:N` / `last:N` (N positivo), o una lista como `v0.2,v0.3.0`. `--version-filtro FILTRO` sustituye al filtro posicional. El orden es numérico; `v0.3` y `v0.3.0` representan el mismo bloque.
 
 - Tabla con desglose y totales: `adevv orquestar --metricas ultima`.

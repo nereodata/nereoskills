@@ -74,3 +74,14 @@ Fase A aprobada. Hades cerró H-01 a H-05 en los seis escenarios `@metricas`. Re
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades rechazó /review-test de C1 (7,75/10) y asignó cuatro hallazgos al desarrollador. H1 alta: acreditar la delegación real de motor, agente, verificador y gateway en el escritor compartido y mantener los cuatro procesos. H2 alta: coordinar lectura y publicación con una frontera controlable y anunciar E3 al solicitar el registro, sin depender del bloqueo de plataforma. H3 media: antes de V2 exigir dos filas físicas válidas, consumo y V1, tras el acortamiento. H4 media: comprobar los objetos activos y localizar la copia por contenido binario, sin imponer extensión, salida ni CRLF. Artemisa reanuda C1 y solicita reevaluación antes de C2. Diseño y regresiones en hotfix/v1.1.3. Informe de Hades en docs/review/test_reviews/B-ADV-0046-test-review.md. El rojo dirigido reproduce la caída real en la recogida de A (17 pruebas, dos fallos y cinco errores).
+
+## Corrección y verificación
+
+La reevaluación de C1 aprobó las pruebas con 8,75/10. Antes de C2, la verificación dirigida ejecutó 18 pruebas con dos fallos y cinco errores. El bucle lanzó JSONDecodeError al recoger A y la lectura de la línea con FF lanzó UnicodeDecodeError. El resto de la salida queda en la evidencia del verificador. [Dictamen de pruebas](../../review/test_reviews/B-ADV-0046-test-review.md)
+
+El motor, los agentes, el verificador y el gateway comparten un bloqueo de archivo para registrar eventos. La recuperación usa el mismo bloqueo desde la lectura del original hasta la publicación del registro saneado. El cursor cuenta objetos válidos. La prueba focalizada confirmó la escritura concurrente de E3 y la integridad de la copia. Se ajustó la comprobación del fragmento a los dos terminadores admitidos. Las 18 pruebas del triaje pasaron en Windows.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades rechazó la fase D (8,50/10) sobre el producto 583b836296a5b87a66dab3268dde8e2f7e3771318cde5d9e0520d918e82b2f04. D1 alta: en Windows, msvcrt.LK_LOCK falla tras 9,1 segundos de contención y E3 queda sin registrar. Reintentar la contención hasta adquirir el bloqueo, propagando otros errores. D2 media: un fallo por espacio insuficiente puede dejar una copia parcial con nombre de original íntegro. Publicar la evidencia solo después de escribirla y sincronizarla completamente. Artemisa reanuda C2, amplía el triaje para estas regresiones y solicita reevaluación de D. Quedan cerradas las dos observaciones de C1. Informe y reproducción en docs/review/code_reviews/B-ADV-0046-code-review.md.

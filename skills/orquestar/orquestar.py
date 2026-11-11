@@ -34,7 +34,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from adevv import diagnostico_suite
+from adevv import diagnostico_suite, registro_metricas
 from adevv.revisiones import (carpetas_maestras, clave_version as vkey, declaracion, diagnostico_revision,
                               huella_producto, motivo_informe, motivo_revision, nombre_version)
 from adevv.store import write_json_atomic
@@ -63,7 +63,7 @@ SKILL = Path(__file__).resolve().parent / 'SKILL.md'
 AGENTES = Path(__file__).resolve().parents[2] / 'agents'
 CONFIG = 'orchestration.json'  # roles: atenea, artemisa, hades, clio, cronos → harness, model, effort
 DESARROLLO = {'task-dev', 'bug-fix', 'revisar-tarea'}  # pasos de Artemisa; el resto (análisis y decisión), de Atenea
-METRICAS = 'orquestar_metricas.jsonl'
+METRICAS = registro_metricas.ARCHIVO
 EVIDENCIAS = 'orquestar_evidencias.jsonl'
 LOG = 'orquestar.log'
 PID = 'orquestar.pid'
@@ -72,7 +72,7 @@ ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
 TELEGRAM_SESIONES = 'orquestar_telegram.json'  # sesiones de conversación de usuarios en Telegram
 PROMPT_FILE_DEFAULT = 'orquestar_prompt.txt'
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
+PROPIOS = ('/' + registro_metricas.AUXILIAR + '/', METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
            PROMPT_FILE_DEFAULT, 'telegram.pid', 'telegram.log', 'telegram.parar',
            'orquestar_preguntas.json', 'orquestar_respuestas.jsonl', 'adevv-intervencion-*')
 CERRADO = {'completed', 'cancelled'}
@@ -2184,16 +2184,8 @@ def buscar_sesion_agente(root, rol, iid, arnes):
     """Busca la sesión previa de un rol dentro del intento en curso de la tarea."""
     if not iid:
         return None
-    f = root / METRICAS
-    if not f.exists():
-        return None
-    try:
-        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
-    except Exception:
-        return None
-
     es_escalada = bool(os.environ.get('ORQUESTAR_ESCALADA'))
-    for e in reversed(lineas):
+    for e in reversed(leer_metricas(root)):
         if e.get('id') and e.get('id') != iid:
             break
         if e.get('tipo') == 'paso' and e.get('paso') == 'especificar':
@@ -2212,14 +2204,7 @@ def buscar_sesion_agente(root, rol, iid, arnes):
 
 def buscar_sesion_paso(root, paso, iid, arnes):
     """Busca la sesión para reanudar un paso interrumpido inmediatamente antes por cuota."""
-    f = root / METRICAS
-    if not f.exists():
-        return None
-    try:
-        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
-    except Exception:
-        return None
-    for e in reversed(lineas):
+    for e in reversed(leer_metricas(root)):
         if e.get('tipo') in ('espera', 'verificacion'):
             continue
         if e.get('tipo') == 'paso':
@@ -3139,14 +3124,18 @@ def registrar(root, fila):
     """Añade una línea al registro común de métricas (pasos, agentes, esperas y verificaciones)."""
     excluir(root)
     fila.setdefault('tipo', 'paso')
-    with (root / METRICAS).open('a', encoding='utf-8') as f:
-        f.write(json.dumps(fila, ensure_ascii=False) + '\n')
-
+    registro_metricas.registrar(root, fila)
 
 
 def leer_metricas(root):
     """Lee registros completos; tolera una última línea aún en escritura."""
     return metricas.leer_registros(root, tolerar_ultima=True)
+
+
+def nuevas_metricas(root, desde):
+    """Devuelve los eventos nuevos y el cursor lógico, estable al retirar fragmentos."""
+    filas = leer_metricas(root)
+    return filas[desde:], len(filas)
 
 
 def fecha_estado(valor):
@@ -3495,6 +3484,8 @@ def main():
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
     ap.add_argument('--cuota-reset', nargs='?', const='', metavar='ARNES[/MODELO]',
                     help='recupera marcas de cuota del selector, o todas si se omite')
+    ap.add_argument('--recuperar-metricas', action='store_true',
+                    help='conserva el JSONL original y retira sus líneas inválidas')
     ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
                     help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
     ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
@@ -3556,6 +3547,15 @@ def main():
 
     if a.agentes:
         print(informe_agentes(root, a.docs))
+        return 0
+
+    if a.recuperar_metricas:
+        excluir(root)
+        try:
+            copia = metricas.recuperar(root)
+        except OSError as error:
+            ap.error(str(error))
+        print(f'Métricas recuperadas. Copia del original en {copia}' if copia else 'Registro sin líneas inválidas.')
         return 0
 
     if a.metricas is not None:
@@ -3823,8 +3823,7 @@ def bucle(a, root):
             for intento in range(getattr(a, 'reintentos_arnes', 3) + 1):
                 if (root / PARADA).exists():
                     return 2
-                f_met = root / METRICAS
-                n_met = len(f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+                n_met = len(leer_metricas(root))
                 try:
                     if recuperacion is not None:
                         recuperacion['perfil_iniciado'] = True
@@ -3854,8 +3853,8 @@ def bucle(a, root):
                 cuota = espera_cuota(salida) if codigo else None
                 cuota_agente = None
                 revision_pendiente = False
-                if cuota is None and f_met.exists():
-                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                if cuota is None:
+                    nuevas, _ = nuevas_metricas(root, n_met)
                     revision_pendiente = revision_sin_dictamen(nuevas, paso, arg)
                     if revision_pendiente:
                         m['revision_pendiente'] = True
