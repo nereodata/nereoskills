@@ -1418,8 +1418,9 @@ class SuiteRecoveryTests(unittest.TestCase):
         motor.excluir(self.root)
 
     def git(self, *args):
+        """Decodifica la salida UTF-8 de Git sin depender de la página de códigos."""
         return subprocess.run(['git', *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding='utf-8').stdout.strip()
 
     def evidence(self, text='format: src/app.js: error', command='suite'):
         with (self.root / motor.EVIDENCIAS).open('a', encoding='utf-8') as out:

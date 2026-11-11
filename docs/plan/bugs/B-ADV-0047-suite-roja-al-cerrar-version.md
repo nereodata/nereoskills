@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.1.3"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 suite_cierre: true
@@ -400,3 +400,27 @@ Ejecutar el comando indicado en la evidencia desde la raíz del proyecto.
     Ran 263 tests in 348.121s
     
     FAILED (failures=11, skipped=2)
+
+
+## Triaje de alcance
+
+- base_calidad: ea1ebfc524d471f723fc4e926b12b738717f8998
+- A [SKIP] Contratos existentes sin cambio; los fallos son del montaje y observación de las pruebas.
+- B [SKIP] Sin decisión de arquitectura ni código de producción nuevo.
+- C1 [EXEC] Reparar las fixtures de ControlIntervencionesTests, la decodificación de Git en SuiteRecoveryTests y la instantánea de RevisionesReleaseTests. Mantener las aserciones funcionales existentes.
+- C2 [SKIP] No se ha identificado un defecto de producción: excluir() usa el cwd del proceso, mientras esta fixture simula Path.cwd sin situar Git en su repositorio temporal; Git emite UTF-8 y el helper usa la página de códigos de Windows; el nuevo candado de métricas es un auxiliar operativo excluido de Git.
+- D [EXEC] Hades /review-test del delta de pruebas completo y /review-code con N/A justificado si se confirma que no hay cambios de producción.
+- E [SKIP] No cambia el comportamiento público ni los manuales.
+- F [EXEC] Verificación dirigida, revisión de versión, calidad final y commit fix(B-ADV-0047).
+- Verificación al cierre: `python -m unittest tests.test_control_intervenciones tests.test_orquestar.SuiteRecoveryTests tests.test_revision_release` cubre las tres áreas con fallos, sin ejecutar la suite completa.
+- Chequeo estático: `git diff --check`. No hay configuración de lint, tipado ni dependencias modificadas; calidad deducida por --calidad.
+- DEC: conservar hotfix/v1.1.3, rama ya preparada por el bucle. Usar el repositorio temporal para las llamadas Git de la fixture, decodificar explícitamente UTF-8 y excluir de la instantánea solo el candado de métricas, manteniendo observables las copias de recuperación.
+
+
+## Corrección y validación
+
+La ejecución dirigida anterior al arreglo reprodujo 50 pruebas y 11 fallos (100.344 s). La pregunta de la fixture no llegaba a bloquear la tarea: el Git invocado desde excluir() consultaba el checkout externo y el archivo de preguntas quedaba sin excluir en el repositorio temporal. El helper de la fixture ahora delega en Git real con cwd explícito. Las dos comparaciones con tildes fallaban al decodificar la salida UTF-8 con la página de códigos de Windows. La instantánea incluye todos los artefactos salvo el candado operativo de métricas, conservando las copias de recuperación y las aserciones funcionales.
+
+Después del ajuste, las 50 pruebas del triaje pasaron (104.989 s), acreditadas con --verificar. No se ejecutó la suite completa. git diff --check pasó. --calidad omitió formato y lint por ausencia de herramientas/configuración; no se presentan como comprobaciones ejecutadas en verde.
+
+Hades aprobó /review-test con media 9/10, sin hallazgos, y justificó N/A en /review-code porque no cambia producción. Informes: [pruebas](../../review/test_reviews/B-ADV-0047-test-review.md) y [código](../../review/code_reviews/B-ADV-0047-code-review.md). La revisión usó la reserva autorizada Codex al agotar cuota el perfil principal. No hubo decisiones pendientes ni enrutados.
