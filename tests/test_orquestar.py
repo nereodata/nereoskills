@@ -83,6 +83,53 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
         self.assertIn('Destino: `artemisa`', trazas)
 
 
+    def test_detector_conserva_destino_antes_de_recortar_evidencia(self):
+        """El destino sobrevive a salidas largas tanto en la tarea como en la salida."""
+        for fuente in ('tarea', 'salida'):
+            with self.subTest(fuente=fuente):
+                tarea = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+                tarea.write_text(
+                    '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\n'
+                    'pendiente_de: humano\n---\n\n## Hallazgo\n'
+                    + ('Destino: especificador\n' if fuente == 'tarea' else ''), encoding='utf-8')
+                salida = ('Destino: especificador\n' if fuente == 'salida' else '') + 'x' * 5000
+                with patch.object(motor.intervencion, 'solicitar') as solicitar:
+                    motor.intervencion.detectar_bloqueo(self.root, motor, 'T-ADV-0101', None, salida)
+                solicitar.assert_not_called()
+                fm = motor.frontmatter(tarea)
+                self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
+                self.assertEqual(motor.listar_preguntas(self.root), [])
+                self.assertIn('ejecutar especificar', tarea.read_text(encoding='utf-8'))
+
+    def test_detector_reconoce_etiquetas_markdown(self):
+        """La presentación de la etiqueta no convierte el destino técnico en humano."""
+        for declaracion in ('Destino: especificador', '**Destino**: especificador',
+                            '`Destino`: `especificador`', '**Destino:** **especificador**',
+                            '_Destino_: especificador'):
+            with self.subTest(declaracion=declaracion):
+                tarea = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+                tarea.write_text(
+                    '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\n'
+                    'pendiente_de: humano\n---\n\n## Hallazgo\n' + declaracion, encoding='utf-8')
+                with patch.object(motor.intervencion, 'solicitar') as solicitar:
+                    motor.intervencion.detectar_bloqueo(self.root, motor, 'T-ADV-0101', None)
+                solicitar.assert_not_called()
+                self.assertEqual(motor.frontmatter(tarea)['pendiente_de'], 'especificador')
+                self.assertEqual(motor.listar_preguntas(self.root), [])
+
+    def test_detector_prioriza_ultima_declaracion_de_salida_sobre_tarea(self):
+        """Una decisión nueva del paso prevalece sobre el contexto anterior de la tarea."""
+        with patch.object(motor.intervencion, 'solicitar') as solicitar:
+            motor.intervencion.detectar_bloqueo(
+                self.root, motor, 'T-ADV-0101', None,
+                'Destino: humano\nDecisión revisada: Destino: artemisa\n' + 'x' * 5000)
+        solicitar.assert_not_called()
+        fm = motor.frontmatter(motor.fichero_de(self.root, 'T-ADV-0101'))
+        self.assertEqual(fm['status'], 'planned')
+        self.assertNotIn('pendiente_de', fm)
+        self.assertEqual(motor.listar_preguntas(self.root), [])
+
+
 class OrquestarRegressionTests(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.object(motor, 'iniciar_gateway'))
