@@ -1,63 +1,55 @@
 **Veredicto:** RECHAZADO
-Producto revisado: 381878a43ad2164a6a74852edf841f04840ff7ca852c6ffe9d0d12aebf2dca14
-Rechazo reevaluado: 2d780edd0cc1872cf489c32ec62732364196b6d0
+Producto revisado: 486cc9cae2950935e605c9824f865ab69a127fc970a7eb904b3d778f903ee903
+Rechazo reevaluado: c5e390eba8f0a366a5bd64bcc42e197fa766a9d2
 
-# B-ADV-0044 · Reevaluación independiente de código D
+# B-ADV-0044 · Revisión independiente de código D
 
-**Calificación global de 7,00/10.** Las tres regresiones de la última C1 pasan en el árbol `cff52f5481280368df0943abe889928d6e0e88fe`. D7 queda resuelto. D3 y D6 persisten en dos recorridos de compatibilidad del informe canónico. D8 afecta a la renovación de intentos al incorporar una respuesta durante la espera del bucle.
-
-## Estado de los hallazgos anteriores
-
-| Hallazgo | Estado | Comprobación |
-|---|---|---|
-| D3 · Restauración de un informe revocado | **Persiste.** Resuelto el caso del lenguaje del ejemplo. | Se omite la etiqueta de lenguaje y se conservan las palabras del ejemplo. La regresión comprueba el bloqueo de la copia y el cierre con la referencia correcta. Al retirar el cerco exterior de un informe íntegro aún se libera el cierre. |
-| D6 · Atribución entre productos | **Persiste.** Resuelto el caso con huella explícita en la nueva aprobación de B. | El recorrido cronológico conserva la huella de A cuando una nota la elimina al introducir B. Si la aprobación propia de B es histórica y carece de huella, la comparación vuelve a mezclar los productos. |
-| D7 · Rechazo propio antes de una cita HTML | **Resuelto.** | El lector entrega el prefijo visible y omite el contenido del `blockquote`. La regresión acredita un único rechazo de `claude` y una sola llamada al principal. El control H3 sigue activando la reserva cuando la única aprobación está citada. |
-| H1–H7, D1, D2, D4 y D5 | **Siguen resueltos en los recorridos acreditados.** | Se mantienen el objetivo por ID tras relanzar, la recuperación de la cabecera y de la referencia, la selección de reserva, el consumo, el WIP rastreado, las dependencias históricas, el avance por reevaluación, el mandato temporal y el rechazo tras el encabezado citado. |
-
-## Hallazgos que persisten
-
-### D3 · 🔴 Crítico · Quitar el cerco exterior permite cerrar con una aprobación revocada
-
-En un Git temporal confirmé una aprobación con huella de A y el cuerpo «Revisado el doble.», envuelta íntegramente en un bloque `~~~markdown`. El selector permitió `revisar-version`. Confirmé un rechazo de A y comprobé que pasó a `revisar-tarea`. Restauré en el WIP la aprobación original quitando únicamente las dos líneas del cerco. **El selector volvió a `revisar-version` y `pendientes_cierre` devolvió `[]`.** El producto, el veredicto, la huella y las palabras de la revisión eran los mismos.
-
-El lector de cabeceras admite expresamente ese envoltorio y lo retira en `adevv/revisiones.py:97`. El comparador histórico lee el texto crudo en `adevv/revisiones.py:188`. Dentro del cerco cuenta las palabras de la cabecera y la propia huella como cuerpo. Al retirar el cerco, excluye esos campos. La comprobación de subsecuencia en la línea 243 pierde la coincidencia y la huella de A permite cerrar.
-
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Normalizar el envoltorio de informe completo de manera coherente en ambas lecturas, conservando el contenido de los ejemplos internos. En esta secuencia el selector debe mantener el ID en `revisar-tarea` y el preflight debe incluirlo hasta una reevaluación válida.
-
-### D6 · 🟠 Alta · Una aprobación histórica propia de B queda bloqueada por la aprobación escueta de A
-
-Para el mismo ID confirmé una aprobación de A con huella y cuerpo vacío. Cambié el código a B y confirmé un rechazo. Después confirmé una aprobación de B en formato histórico, sin línea de huella y con una explicación propia. Verifiqué que las huellas de A y B difieren. **El selector mantuvo `revisar-tarea` y el preflight diagnosticó «aprobación restaurada anterior al rechazo».**
-
-La aprobación actual tiene un commit de emisión conocido. En `adevv/revisiones.py:238`, el filtro por producto solo se aplica si hay huella explícita en esa aprobación. Así llega a la línea 243 el cuerpo vacío de A, que coincide por construcción con cualquier explicación. El retorno anticipado impide aplicar la acreditación histórica por commit prevista en la línea 279.
-
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Comparar los productos de ambas emisiones usando su commit cuando falte la huella declarada. La aprobación histórica de B debe liberar el selector y el preflight. La copia revocada del mismo producto debe seguir pendiente.
+**7,33/10.** D3, D6 y D8 quedan resueltos en los casos del rechazo anterior. La corrección de D6 introduce D9, un cierre indebido reproducido con una ficha antigua. Confirmar una copia literal de la aprobación de A permite cerrar B después de que Hades haya rechazado B.
 
 ## Hallazgo nuevo
 
-### D8 · 🟠 Alta · Una respuesta incorporada durante la espera deja consumido el intento anterior
+### D9 · 🔴 Crítico · Confirmar la restauración de un informe histórico libera el cierre de un producto rechazado
 
-Ejercité `bucle` con dos intentos y un fallo técnico sin dictamen. Entre pasos abrí una pregunta para ese ID. El selector alcanzó la espera de intervención. Entregué la respuesta por el adaptador local con el motor activo y dejé que la espera real la incorporase. La pregunta terminó en `incorporada`. **El siguiente fallo técnico paró el bucle con código 2. Hubo dos llamadas en total, una antes y una después de responder.** Con la renovación documentada corresponden tres, una antes y dos después.
+En un repositorio Git temporal creé un ID en estado `completed`. Confirmé el producto A, donde `doble(n)` devuelve `2*n`, junto con una aprobación histórica sin huella y con una comprobación concreta de que el doble de tres es seis. En el siguiente commit cambié la función para que devolviera `n` y confirmé el rechazo de B. Restauré el informe de A desde Git y después confirmé únicamente ese archivo. Verifiqué que su blob era idéntico al de la aprobación original.
 
-En `skills/orquestar/orquestar.py:139`, `esperar_intervencion` consume las respuestas incorporadas y devuelve un booleano. El bucle continúa y, en la línea 3687, la cola ya está vacía. Por tanto, no borra el contador de ese ID. La siguiente revisión sin avance alcanza el límite en la línea 4048. La incorporación ordinaria en la cabecera del bucle, cubierta por el verde dirigido, sí entrega los IDs al reinicio.
+| Estado observado | Selector | Preflight de cierre |
+|---|---|---|
+| Rechazo confirmado de B | `revisar-tarea` | Incluye el ID por informe rechazado |
+| Informe de A restaurado en el árbol de trabajo | `revisar-tarea` | Incluye el ID por aprobación restaurada |
+| El mismo informe tras confirmar solo la copia | `revisar-version` | Devuelve `[]` |
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Hacer llegar al mismo reinicio por ID las respuestas incorporadas durante la espera. Conservar el presupuesto consumido por otros IDs y comprobar el número de llamadas después de reanudar.
+También consulté `cierre_revisado` para `bug-fix`, con el commit del rechazo como base. Devolvió `True`, de modo que el bucle puede dar por completado el paso tras un error del arnés. El código de B seguía devolviendo tres.
 
-## Alcance y evidencia
+**Causa.** En `adevv/revisiones.py:248`, al faltar la huella declarada, el commit de la copia aporta la huella de B. En la línea 253 se descarta la aprobación de A por la diferencia de producto antes de comparar su cuerpo. En la línea 293 basta entonces con que la emisión y el objetivo sean el mismo commit. El acto de confirmar la copia le atribuye una revisión de B.
 
-Contrasté el delta de B-ADV-0044 desde la base de triaje `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` con el diseño, la guía, la firma por paso, la recuperación por error y cuota, la transferencia de contadores en recarga y los consumidores del dictamen. El triaje sitúa el origen del reinicio por HEAD en `31d7acd` y documenta cómo se añadieron el WIP y la recuperación por cambios confirmados. Los cambios concurrentes de otros IDs conservan su autoría. C1 mantiene su aprobación de **9,50/10**.
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Conservar la procedencia de una aprobación histórica restaurada al confirmarla. El caso de aceptación debe mantener el ID en `revisar-tarea`, incluirlo en `pendientes_cierre` y devolver `False` en `cierre_revisado`. Como control positivo, la aprobación histórica de B con explicación propia debe seguir liberando ambos consumidores tras la aprobación escueta de A.
 
-Antes de escribir el informe comprobé en Git la coincidencia del árbol de trabajo rastreado con el árbol de evidencia, recalculé la huella SHA-256 de sus entradas de producto y verifiqué que la última modificación confirmada del informe canónico era el rechazo de la cabecera. Las tres comprobaciones adicionales descritas arriba usaron repositorios Git temporales ya retirados, el código de este árbol y proveedores simulados. Se observaron los resultados del selector y el preflight para D3 y D6, y el estado de la pregunta, las llamadas y la salida de `bucle` para D8.
+## Reevaluación del rechazo anterior
 
-**Verificación reutilizada.** Las tres regresiones estaban en rojo por aserción en `e453d91f77`. En el árbol revisado pasaron 161 pruebas dirigidas en 259,395 s. Ruff selectivo, ambas comprobaciones de `git diff --check` y el escaneo de secretos terminaron con código 0. `--calidad` terminó con código 0 e informó de que había omitido formato y lint por ausencia de herramientas. Ruff se ejecutó por separado. El proyecto carece de tipado configurado y el delta conserva las dependencias.
+| Hallazgo | Estado | Fundamento |
+|---|---|---|
+| D3 · Cerco exterior | **Resuelto** | La cabecera y el comparador histórico usan `contenido_del_informe`. Quitar el cerco exterior conserva las palabras de la aprobación revocada. El selector y el preflight mantienen pendiente la copia del mismo producto y aceptan la reevaluación propia. |
+| D6 · Aprobación histórica propia de B | **Resuelto** | El commit de emisión permite atribuir a B su aprobación sin huella y con explicación propia. Los dos recorridos de C1 liberan selector y preflight, tanto con rechazo previo de A como con rechazo de B. El control con huella explícita también pasa. D9 documenta por separado el efecto sobre una copia confirmada. |
+| D8 · Respuesta durante la espera | **Resuelto** | La espera entrega las respuestas incorporadas. Tanto la espera como la cabecera del bucle llaman a `renovar_intentos_de_respuestas` con sus IDs. Con dos intentos por ID, A recibe una llamada antes de responder y dos después. B conserva su intento consumido. |
+| H1–H7, D1, D2, D4, D5 y D7 | **Resueltos en los recorridos acreditados** | Se mantienen los controles de objetivo por ID, huella y referencia del informe, lectura de citas, reservas, consumo, índice y dependencias. |
+
+## Alcance y verificación
+
+Revisé el delta de producción de B-ADV-0044 desde `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5`, con la atribución por commit de los cambios concurrentes. Contrasté la firma por paso con los entregables del diseño, el límite de reintentos con las salidas por error y cuota, y la vigencia del dictamen con sus tres consumidores. La recarga transfiere los contadores por paso e ID. El arranque manual abre otra tanda y conserva las métricas y el trabajo en Git. La marca del diagnóstico de suite conserva su contrato JSON.
+
+Antes de escribir el informe comprobé que los archivos rastreados coincidían con el árbol de evidencia `0c523fc036bc554e0ade546389e173c3819c0e2b`, que su huella de producto coincidía con la cabecera y que el último commit del informe era el rechazo indicado. La reproducción de D9 utilizó el código de ese árbol en un repositorio temporal que se eliminó al terminar.
+
+**Evidencia reutilizada.** C1 aprobó las regresiones con 9,50/10 tras observar cuatro fallos de comportamiento y dos controles verdes. En el árbol revisado pasaron los seis casos focalizados y las 165 pruebas del triaje. La suite completa corresponde al cierre de versión.
+
+**Análisis estático.** Ruff selectivo (`E9,F63,F7,F82`), el escaneo de secretos y los controles de espacios del trabajo local y de las rutas del ID terminaron en verde. El control global desde la base devolvió 2 por espacios finales en la ficha histórica de B-ADV-0047. `--calidad` devolvió 0 con formato y lint omitidos por falta de configuración reconocida. El proyecto carece de tipado configurado y el delta conserva las dependencias.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Corrección | 5/10 | D3 permite un cierre indebido. D6 impide un cierre válido y D8 detiene una revisión un intento antes de lo debido. |
-| Seguridad | 9/10 | Las consultas Git pasan argumentos separados y el escaneo de secretos está en verde. |
-| Conformidad | 6/10 | Se conservan las capas y la biblioteca estándar. Persisten diferencias con el diseño en la identidad del informe histórico y la renovación de intentos por ID. |
-| Calidad | 7/10 | Selector y preflight comparten la decisión de vigencia. La cabecera y el comparador interpretan de dos maneras el mismo envoltorio admitido. |
-| Eficiencia | 8/10 | La reconstrucción consulta la historia de la ruta canónica y lee un blob por revisión confirmada. |
-| Documentación | 7/10 | La guía recoge el límite y la persistencia. La garantía de renovación de intentos tras una respuesta falla en la vía de espera. |
+| Corrección | 5/10 | D9 libera tres decisiones de cierre con un rechazo aún vigente. |
+| Seguridad | 9/10 | Las consultas Git usan argumentos separados. El escaneo de secretos está en verde. |
+| Conformidad | 6/10 | El presupuesto por ID sigue el diseño. D9 incumple la barrera de cierre revisado de B-ADV-0039. Se mantiene la arquitectura de Python y Git del plan de plataforma. |
+| Calidad | 8/10 | Los lectores comparten la normalización del informe y el bucle comparte la renovación por respuesta. La atribución histórica confunde el commit de copia con la emisión. |
+| Eficiencia | 8/10 | La consulta de revisiones recorre la historia de la ruta canónica. Solo compara las huellas históricas cuando hay aprobaciones revocadas. |
+| Documentación | 8/10 | La guía identifica el límite y el estado que persiste. D9 contradice la garantía documentada para una aprobación restaurada. |

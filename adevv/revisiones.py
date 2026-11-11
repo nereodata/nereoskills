@@ -86,31 +86,39 @@ class CitasHTML(HTMLParser):
         return visible if visible.strip() else None
 
 
+CERCO = r' {0,3}(`{3,}|~{3,})'
+
+
+def cierra_cerco(linea, marca):
+    """CommonMark permite cerrar con el mismo signo y longitud igual o mayor."""
+    return re.fullmatch(r' {0,3}' + marca + marca[0] + r'*[ \t]*', linea)
+
+
+def contenido_del_informe(texto):
+    """Retira un cerco Markdown que envuelve el informe entero y conserva los ejemplos internos."""
+    lineas = texto.strip('\r\n').splitlines()
+    if len(lineas) >= 3 and (inicio := re.fullmatch(CERCO + r'(?:markdown|md)?\s*', lineas[0], re.I)):
+        if cierra_cerco(lineas[-1], inicio[1]) and not any(cierra_cerco(l, inicio[1]) for l in lineas[1:-1]):
+            return lineas[1:-1]
+    return lineas
+
+
 def lineas_del_informe(texto):
     """Conserva las declaraciones del informe fuera de citas y ejemplos de código."""
-    lineas = texto.strip('\r\n').splitlines()
-    cerco = r' {0,3}(`{3,}|~{3,})'
-    def cierra(linea, marca):
-        """CommonMark permite cerrar con el mismo signo y longitud igual o mayor."""
-        return re.fullmatch(r' {0,3}' + marca + marca[0] + r'*[ \t]*', linea)
-
-    if len(lineas) >= 3 and (inicio := re.fullmatch(cerco + r'(?:markdown|md)?\s*', lineas[0], re.I)):
-        if cierra(lineas[-1], inicio[1]) and not any(cierra(l, inicio[1]) for l in lineas[1:-1]):
-            lineas = lineas[1:-1]
     abierto = ''
     parrafo_citado = False
     citas_html = CitasHTML()
-    for linea in lineas:
+    for linea in contenido_del_informe(texto):
         if not abierto:
             linea = citas_html.sin_citas(linea)
             if linea is None:
                 parrafo_citado = False
                 yield None
                 continue
-        marca = re.match(cerco, linea)
+        marca = re.match(CERCO, linea)
         contenido = linea.strip()
         if abierto:
-            if cierra(linea, abierto):
+            if cierra_cerco(linea, abierto):
                 abierto = ''
         elif marca:
             abierto = marca[1]
@@ -185,7 +193,7 @@ def palabras_informe(texto):
     """Identifica el cuerpo histórico aunque al restaurarlo se sangre, cite o intercale una nota."""
     cuerpo = []
     cerco = ''
-    for linea in texto.splitlines():
+    for linea in contenido_del_informe(texto):
         contenido = linea.strip().lstrip('> \t')
         marca = re.match(r'(`{3,}|~{3,})', contenido)
         if cerco:
@@ -233,11 +241,16 @@ def acreditacion_anterior(root, ruta, historial, texto, carpetas):
             aprobaciones.append((emision, huella, informe))
     if ultimo_rechazo and referencia:
         return emision, huella, referencia != ultimo_rechazo
+    if not revocadas:
+        return emision, huella, False
+    producto_actual = huella
+    if producto_actual is None and emision:
+        producto_actual = huella_producto(root, emision, carpetas)
     palabras = palabras_informe(texto)
     for origen, declarada, historico in aprobaciones[:revocadas]:
-        if huella is not None:
+        if producto_actual is not None:
             producto = declarada if declarada is not None else huella_producto(root, origen, carpetas)
-            if producto != huella:
+            if producto != producto_actual:
                 continue
         actuales = iter(palabras)
         if all(p in actuales for p in palabras_informe(historico)):

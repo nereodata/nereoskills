@@ -136,10 +136,19 @@ def responder_pregunta_local(root, referencia, respuesta):
 def esperar_intervencion(root):
     """Espera cooperativamente sin desconectar el gateway ni ignorar parada manual."""
     while listar_preguntas(root, True) and not (root / PARADA).exists():
-        if incorporar_respuestas(root):
-            return True
+        incorporadas = incorporar_respuestas(root)
+        if incorporadas:
+            return incorporadas
         time.sleep(1)
-    return False
+    return []
+
+
+def renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis):
+    """Renueva los presupuestos correspondientes a los IDs con respuestas incorporadas."""
+    ids = {respuesta['tarea_id'] for respuesta in respuestas}
+    for contadores in (intentos_revision, recuperaciones_analisis):
+        for clave in [k for k in contadores if k[1] in ids]:
+            del contadores[clave]
 
 
 def directorio_version_almacen(script=None):
@@ -3684,10 +3693,7 @@ def bucle(a, root):
                                              'orquestar'):
             return 0
         if not a.estado:
-            for respuesta in incorporar_respuestas(root):
-                for contadores in (intentos_revision, recuperaciones_analisis):
-                    for clave in [k for k in contadores if k[1] == respuesta['tarea_id']]:
-                        del contadores[clave]
+            renovar_intentos_de_respuestas(incorporar_respuestas(root), intentos_revision, recuperaciones_analisis)
             for iid, titulo in ingerir(root):
                 print(f'[orquestar] alta desde Telegram: {iid} {titulo}', flush=True)
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
@@ -3728,7 +3734,8 @@ def bucle(a, root):
             return 0
         if e[0] == 'PARAR':
             if espera_humana:
-                if a.espera_max > 0 and esperar_intervencion(root):
+                if a.espera_max > 0 and (respuestas := esperar_intervencion(root)):
+                    renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis)
                     continue
                 return 2
             return parar(root, evento_de(e), e[1])
