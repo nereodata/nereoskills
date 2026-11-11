@@ -421,6 +421,25 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
 
+    def test_confirmar_copia_historica_de_a_no_cierra_b_rechazado(self):
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
+        self.escribir(self.informe, '**Veredicto:** APROBADO\nHe comprobado que doble(3) devuelve 6.')
+        self.commit('aprobar A con su comprobación')
+        aprobado = self.git('rev-parse', 'HEAD')
+        self.escribir('producto.py', 'def doble(n):\n    return n\n')
+        self.escribir(self.informe, '**Veredicto:** RECHAZADO\nEn B doble(3) devuelve 3.')
+        self.commit('rechazar B')
+        rechazado = self.git('rev-parse', 'HEAD')
+        self.git('restore', '--source', aprobado, '--', self.informe)
+        self.commit('archivar una copia del informe de A')
+        with self.subTest(consumidor='selector'):
+            self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        with self.subTest(consumidor='preflight'):
+            self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+        with self.subTest(consumidor='cierre tras error'):
+            self.assertFalse(motor.cierre_revisado(self.root, 'bug-fix', self.iid, rechazado))
+
     def test_restaurar_aprobacion_con_huella_del_mismo_producto(self):
         self.comprobar_restauracion('')
 

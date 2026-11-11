@@ -159,3 +159,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: D RECHAZADO por Hades (7,33/10) en el árbol 0c523fc036bc554e0ade546389e173c3819c0e2b. D3, D6 y D8 resueltos en los casos de C1. D9 crítico, para Artemisa en C2: tras rechazar B, confirmar solo la copia literal del informe histórico sin huella de A permite cerrar B. Conservar la procedencia de esa copia también tras el commit y el control positivo de una aprobación histórica propia de B. Reproducir en selector, preflight y cierre_revisado y someter la corrección a Hades. Las 165 pruebas del triaje pasaron en 209,582 s. Reproducción independiente e informe en docs/review/code_reviews/B-ADV-0044-code-review.md.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobada por Hades con 9,75/10. D9 para Artemisa en C2. La regresión reproduce las tres decisiones de cierre indebidas tras confirmar el informe de A y la aprobación propia de B pasa como control. Corregir la procedencia histórica y reevaluar el código.
