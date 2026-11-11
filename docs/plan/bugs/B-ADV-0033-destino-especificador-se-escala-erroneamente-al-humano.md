@@ -5,9 +5,10 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 created_at: 2026-11-09
 updated_at: 2026-11-11
+pendiente_de: humano
 ---
 
 # B-ADV-0033: El orquestador escala al humano hallazgos de Hades destinados al especificador
@@ -87,3 +88,9 @@ updated_at: 2026-11-11
 - Hades review-test RECHAZADO (8,5/10): RT-01 ALTA para desarrollador, falta caso de dos declaraciones contradictorias en tarea sin destino en salida. Informe transcrito de su salida; sin acceso local del arnés, adjuntos exactos y limitación declarada.
 - El motor ordenó detener el paso por dos rechazos consecutivos. RT-01 enrutado a Artemisa para la próxima ejecución. No se declara completado ni se ha iniciado la corrección de producción o review-code de este intento.
 - Próximo intento: resolver RT-01, repetir review-test, corregir H-01/H-02 de producción y solicitar review-code. Suite completa reservada al cierre de versión.
+
+
+## Intervención humana Q-ADV-0002
+¿Puedes habilitar el acceso de Claude Code o configurar Hades con uno de sus arneses de reserva operativo para poder ejecutar la revisión obligatoria?
+RT-01 añadido. RED del triaje: 5 tests, 7 fallos de subcasos esperados; producción sin modificar. Hades no emite dictamen: Your organization has disabled Claude subscription access for Claude Code. El motor no conmuta a reservas ante este fallo y sigue encontrando Claude fuera del PATH. No existe valor por defecto seguro para habilitar una suscripción o cambiar la configuración de roles; hace falta un recurso operativo de revisión. Tras resolver: repetir review-test, corregir H-01/H-02 y solicitar review-code. Delta y evidencia documentados en ficha y revisión v1.1.2.
+Responder: /responder Q-ADV-0002 <respuesta>
