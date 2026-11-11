@@ -5,12 +5,11 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
-pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -77,3 +76,12 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades review-spec RECHAZADO sobre adjunto incompleto: RS-0040-01/02/05/06 altos para especificador, destino resolver. Artemisa omitió por error cuatro escenarios al extraer el mandato; Hades no pudo leer disco. Los escenarios sí existen en el contrato aprobado: reenviar los cinco bloques completos sin duplicarlos ni alterar requisitos. Borradores y diagnóstico rojo conservados en wip/B-ADV-0040 (0e24407); anterior WIP preservado en wip/B-ADV-0040-anterior-20261111. Sin implementación ni cierre; sin pregunta humana.
+
+## Resolución del especificador · Evidencia completa · 2026-11-11
+
+- DEC-ESP-0040-03: conservar sin cambios los cinco bloques BDD aprobados en `d0f9471`. El diff de `skills/orquestar/features/orquestacion.feature` contra ese commit está vacío. El último rechazo se refiere a un adjunto truncado, no a escenarios ausentes del repositorio; se descarta duplicar o reformular el contrato para corregir un fallo de extracción.
+- Se entrega a Hades el esquema con sus dos filas y los cuatro escenarios completos: continuación con reservas, rechazo auténtico, perfil estricto, indisponibilidad repetida y recuperación de ambas preguntas. La extracción recorre todas las etiquetas exactas `@B-ADV-0040` y comprueba cinco bloques; no termina en la segunda etiqueta del mismo ID.
+- RS-0040-01/02/05/06: la evidencia de reevaluación incluye respectivamente los escenarios ya existentes de perfil estricto, rechazo y destino, indisponibilidad total repetida y recuperación aislada de Q-ADV-0001/Q-ADV-0002 con WIP, historial, respuestas y trabajo ajeno. Se adjuntan instrucciones completas de Hades y `/review-spec` para permitir un dictamen sobre la evidencia aunque falle el acceso del arnés al disco.
+- DEC-ESP-0040-04: mantener el alcance documental y la verificación `git diff --check` mediante el coordinador conforme a DEC-ESP-0040-02. Las regresiones funcionales del triaje corresponden al siguiente bug-fix; no se restauran los borradores del WIP `0e24407`, no se acredita su rojo como evidencia del árbol actual y no se ejecuta la suite completa. El hueco de producción sigue vigente: `agente()` continúa solo por cuota y retorna en otros errores.
+
+- Cierre de esta reevaluación: Hades `/review-spec` APROBADO, media 8,75/10, RS-0040-01/02/05/06 resueltos y sin nuevos hallazgos. Se devuelve a `planned` sin `pendiente_de` para retomar bug-fix. Informe transcrito con límite de acceso al disco y antecedentes íntegros; sin acreditar diseño, pruebas o implementación.

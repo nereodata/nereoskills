@@ -1,3 +1,62 @@
+**Veredicto:** APROBADO
+
+# B-ADV-0040 · Reevaluación con evidencia completa · 2026-11-11
+
+- Revisor: Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`, aplicando las instrucciones completas de Hades y `/review-spec` adjuntas.
+- Alcance: cinco bloques BDD exactos del árbol (seis casos contando las dos filas). No hay modificación BDD desde `d0f9471`; se suministraron los cuatro bloques omitidos en el rechazo anterior.
+- Límite: el arnés falló al acceder al disco con `registered Core launch requires an installed app`. Hades revisó exclusivamente los adjuntos; no comprobó el árbol ni escribió el reporte, no modificó estados ni ejecutó pruebas. Atenea transcribe el dictamen y sintetiza las tablas, conservando íntegro el reporte anterior debajo.
+
+## Comprobaciones obligatorias
+
+| Comprobación | Resultado | Motivo del revisor |
+|---|---|---|
+| No regresión | Conforme sobre la garantía declarada | Escenarios anteriores intactos, sin cambios BDD desde aprobación previa. No contrastado contra disco por Hades. |
+| Coherencia | Conforme en el contexto adjunto | Distingue acceso deshabilitado, cuotas, restricción estricta y rechazo auténtico; conserva tratamiento de errores genéricos de autenticación/red. |
+| Trazabilidad | Conforme | Cinco bloques con `@B-ADV-0040`, correspondientes a los cuatro criterios; sin etiquetas CA adicionales. |
+| Delta real | Conforme | Selección de reserva, rechazo con destino, perfil estricto, indisponibilidad repetida y recuperación son casos distintos; aportar bloques omitidos no duplica BDD. |
+
+## Puntuaciones
+
+| Dimensión | Puntuación | Motivo del revisor |
+|---|---:|---|
+| Claridad | 9/10 | Desencadenante literal, resultados diferenciados para revisión completada, rechazo y bloqueo técnico. |
+| Completitud | 9/10 | Ambas reservas, orden, omisión por cuota, perfil estricto, rechazo auténtico, fallo repetido y recuperación de ambas tareas. |
+| Testeabilidad | 9/10 | Secuencias exactas, dictámenes, destinatario, estado y preservación de trabajo y respuestas. |
+| Estructura | 8/10 | Bloques separados y esquema para variantes equivalentes; ubicación en feature funcional no comprobada por el revisor. |
+| **Media** | **8,75/10** | Supera el umbral de 8. |
+
+## Reevaluación
+
+| Hallazgo | Severidad anterior | Para | Destino | Resultado y evidencia |
+|---|---|---|---|---|
+| RS-0040-01 | Alta | especificador | resolver | Resuelto: perfil Claude con estricto true, reserva operativa, solo Claude se lanza; revisión pendiente, conservación del perfil sin preguntar por reserva. |
+| RS-0040-02 | Alta | especificador | resolver | Resuelto: RECHAZADO auténtico de agy, hallazgo alto para especificador, tarea blocked y pendiente_de especificador con hallazgo registrado, sin confundirlo con indisponibilidad técnica. |
+| RS-0040-05 | Alta | especificador | resolver | Resuelto: ambos perfiles fallan con diagnóstico literal en dos solicitudes; revisión pendiente, trabajo y preguntas conservados sin duplicación ni progreso ficticio; último escenario cubre recuperación con reserva operativa. |
+| RS-0040-06 | Alta | especificador | resolver | Resuelto: copias aisladas de ambas preguntas con respuestas y WIP; dictamen real, conservación del WIP, historial y respuestas, respeto al trabajo ajeno sin exigir otra respuesta. |
+
+RS-0040-03/04 mantienen su resolución previa: registro del arnés final y elegibilidad de Codex con omisión de agy agotado.
+
+## Cobertura
+
+| Criterio | Evidencia |
+|---|---|
+| Reserva elegible, orden, cuotas, restricción estricta y registro | Esquema Claude/agy y Claude/Codex; escenario de perfil estricto. |
+| Dictamen real y destino sin preguntas de configuración | APROBADO sin preguntas; RECHAZADO con destinatario, estado y siguiente paso. |
+| Conservación, recuperación, ausencia de duplicación y progreso ficticio | Dos solicitudes fallidas y recuperación posterior con reserva disponible. |
+| Recuperación de ambas tareas y preservación del estado | Copias aisladas de ambas preguntas con WIP, historial, respuestas y trabajo ajeno; las regresiones posteriores usarán lanzadores simulados. |
+
+## Hallazgos nuevos y dictamen
+
+Hades no identifica hallazgos críticos, altos, medios ni bajos nuevos.
+
+Dictamen recibido: «Los cuatro hallazgos del rechazo por adjunto incompleto quedan **resueltos** al aportar los escenarios omitidos. El contrato completo satisface los criterios suministrados y queda **APROBADO para especificación**».
+
+La aprobación no acredita diseño, implementación, pruebas funcionales ni cierre del bug. La comprobación de disco de Atenea confirma un diff BDD vacío contra `d0f9471`; no se atribuye esa comprobación a Hades.
+
+---
+
+## Antecedente íntegro · Rechazo sobre adjunto incompleto
+
 **Veredicto:** RECHAZADO
 
 # B-ADV-0040 · Revisión aislada del intento de bug-fix · 2026-11-11
