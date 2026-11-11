@@ -117,6 +117,21 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
                 self.assertEqual(motor.frontmatter(tarea)['pendiente_de'], 'especificador')
                 self.assertEqual(motor.listar_preguntas(self.root), [])
 
+    def test_detector_prioriza_ultima_declaracion_de_tarea_sin_destino_en_salida(self):
+        """Sin destino en salida, la última decisión de la sección final gobierna."""
+        tarea = motor.fichero_de(self.root, 'T-ADV-0101')
+        tarea.write_text(
+            tarea.read_text(encoding='utf-8').replace(
+                'Destino: especificador', 'Destino: humano\nDestino: especificador'),
+            encoding='utf-8')
+        with patch.object(motor.intervencion, 'solicitar') as solicitar:
+            motor.intervencion.detectar_bloqueo(
+                self.root, motor, 'T-ADV-0101', None, 'Sin nueva decisión del paso.')
+        solicitar.assert_not_called()
+        fm = motor.frontmatter(tarea)
+        self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
+        self.assertEqual(motor.listar_preguntas(self.root), [])
+
     def test_detector_prioriza_ultima_declaracion_de_salida_sobre_tarea(self):
         """Una decisión nueva del paso prevalece sobre el contexto anterior de la tarea."""
         with patch.object(motor.intervencion, 'solicitar') as solicitar:
