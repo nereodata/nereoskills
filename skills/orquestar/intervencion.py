@@ -380,12 +380,12 @@ DESTINOS_HALLAZGO = {'artemisa', 'especificador', 'humano'}
 
 
 def destino_hallazgo(texto):
-    """Extrae el destino explícito de un hallazgo de Hades, sin inferirlo del estado del árbol."""
-    coincidencia = re.search(
-        r'\bdestino\s*(?::|=|\|)\s*[*`_ ]*(artemisa|especificador|humano)\b',
+    """Extrae el último destino explícito, admitiendo etiquetas Markdown."""
+    coincidencias = re.findall(
+        r'(?<!\w)[*`_]*destino[*`_ ]*(?::|=|\|)\s*[*`_ ]*(artemisa|especificador|humano)\b',
         texto or '', re.IGNORECASE,
     )
-    return coincidencia.group(1).lower() if coincidencia else ''
+    return coincidencias[-1].lower() if coincidencias else ''
 
 
 def anotar_hallazgo(root, motor, iid, destino, contexto):
@@ -435,6 +435,7 @@ def detectar_bloqueo(root, motor, iid, base_commit, salida=''):
         return
     if any(q['tarea_id'] == iid for q in listar(root, True)):
         return
-    contexto = (tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1] + '\n' + (salida or ''))[-4000:]
-    destino = destino_hallazgo(contexto)
+    seccion = tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1]
+    destino = destino_hallazgo(salida) or destino_hallazgo(seccion)
+    contexto = (seccion + '\n' + (salida or ''))[-4000:]
     enrutar_hallazgo(root, motor, iid, destino or 'humano', contexto=contexto, base_commit=base_commit)

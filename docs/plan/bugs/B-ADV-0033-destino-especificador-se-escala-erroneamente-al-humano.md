@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 created_at: 2026-11-09
 updated_at: 2026-11-11
 ---
@@ -53,9 +53,9 @@ updated_at: 2026-11-11
 - Subfase B: Diseño — `[EXEC]`; añade el contrato explícito de enrutado y su trazabilidad.
 - Subfase C1: Pruebas — `[EXEC]`; regresión que comprueba `artemisa`, `especificador` y `humano`.
 - Subfase C2: Corrección — `[EXEC]`; el motor preserva destinos de Hades, y la CLI permite declararlos sin degradarlos a pregunta humana.
-- Subfase D: QA — `[PENDIENTE]`; revisión del delta completo al finalizar ambas correcciones del hotfix.
+- Subfase D: QA — `[EXEC]`; revisión de reanudación aprobada por Hades, H-01/H-02 resueltos.
 - Subfase E: Documentación — `[EXEC]`; escenario de orquestación y changelog.
-- Subfase F: Cierre — `[PENDIENTE]`; tras calidad y revisión.
+- Subfase F: Cierre — `[EXEC]`; calidad y revisión acreditadas; commit de cierre.
 - Verificación al cierre: `python -m unittest tests.test_orquestar.HallazgosHadesRoutingTests`, porque acredita los tres destinos y la ausencia de preguntas para el especificador.
 
 ## Resolución
@@ -97,3 +97,15 @@ Responder: /responder Q-ADV-0002 <respuesta>
 
 ## Intervención humana Q-ADV-0002
 Q-ADV-0002: Decisión humana de 7495519376: Ya no tengo cuenta de claude. ¿No hay forma de hacer las pruebas con mocks? ¿Necesitamos tener llms para las pruebas? No deberíamos, no?
+
+## Reanudación actual
+
+RT-01 ya añadido en el árbol recibido. Se conserva base_calidad y el alcance de HallazgosHadesRoutingTests. Revisiones reiniciadas; no requiere modelos para ejecutar los tests, solo para el dictamen independiente de Hades.
+
+## Resultado de la reanudación
+
+- H-01/H-02 corregidos: seleccionar destino antes de truncar, última coincidencia de salida con prioridad sobre última de tarea, etiquetas Markdown reconocidas.
+- RT-01 ya incorporado al retomar; RT-02 resuelto verificando los campos Destino persistidos en tarea y revisión para las dos fuentes largas.
+- Hades review-test APROBADO (8,75/10) y review-code APROBADO (9/10), por --agente con adjuntos exactos ante la limitación de lectura local del arnés. Informes canónicos actualizados; sin hallazgos altos pendientes.
+- RED: 5 tests / 7 fallos esperados; GREEN: 5 tests OK mediante --verificar, sin LLM ni red. No se ejecutó la suite completa.
+- Triaje final: A [SKIP] contrato existente; B/C1/C2/D/E/F [EXEC]. Calidad conserva base_calidad; formato/lint omitidos por ausencia de herramientas, sin tipado/scanner configurados. Sin dependencias nuevas.

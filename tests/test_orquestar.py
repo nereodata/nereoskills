@@ -100,6 +100,8 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
                 self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
                 self.assertEqual(motor.listar_preguntas(self.root), [])
                 self.assertIn('ejecutar especificar', tarea.read_text(encoding='utf-8'))
+                for ruta in (tarea, self.root / 'docs/review/versions/v1.1.1-revision.md'):
+                    self.assertIn('- Destino: `especificador`', ruta.read_text(encoding='utf-8'))
 
     def test_detector_reconoce_etiquetas_markdown(self):
         """La presentación de la etiqueta no convierte el destino técnico en humano."""
