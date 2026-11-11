@@ -2498,6 +2498,47 @@ class SubprocesoColgadoTests(unittest.TestCase):
         proceso.wait.assert_called_once_with(timeout=2)
 
     @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
+    def test_posix_eof_con_hijo_redirigido(self):
+        """Conserva el JSON del padre y termina al hijo aunque ambos lectores reciban EOF."""
+        pid_file = self.root / 'hijo.pid'
+        mensaje = '{"status":"SUCCESS","response":"ok","usage":{"input_tokens":7}}'
+        padre = (
+            'import subprocess, sys; from pathlib import Path; '
+            'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], '
+            'stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); '
+            f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+            f'print({mensaje!r}, flush=True)'
+        )
+        try:
+            resultado = motor._ejecutar_captura_json(
+                [sys.executable, '-c', padre], self.root, 'agy', timeout=15, gracia_cierre=10)
+            self.assertEqual(resultado, (0, mensaje + '\n', '', False, False))
+            self.comprobar_hijo_terminado(int(pid_file.read_text()))
+        finally:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def comprobar_hijo_terminado(self, pid):
+        """Admite procesos ausentes o zombis tras la entrega asíncrona de SIGKILL."""
+        limite = time.monotonic() + 2
+        while True:
+            consulta = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],
+                                      capture_output=True, text=True, timeout=2)
+            self.assertIn(consulta.returncode, (0, 1), consulta.stderr)
+            self.assertEqual(consulta.stderr.strip(), '')
+            estado = consulta.stdout.strip()
+            if consulta.returncode == 0:
+                self.assertTrue(estado, 'ps tuvo éxito sin devolver estado del proceso')
+            if not estado or estado.startswith('Z'):
+                return
+            if time.monotonic() >= limite:
+                self.fail(f'Descendiente {pid} sigue vivo: {estado}')
+            time.sleep(0.02)
+
+    @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
     def test_descendiente_real_no_sobrevive_al_timeout_ni_a_gracia_json(self):
         """Mata al hijo que hereda pipes sin alcanzar al grupo del invocador."""
         for json_final, padre_sale in ((False, False), (True, False), (False, True), (True, True)):
@@ -2523,21 +2564,7 @@ class SubprocesoColgadoTests(unittest.TestCase):
                     self.assertEqual(codigo, 0 if json_final else 124)
                     self.assertTrue(metricas.get('cierre_forzado' if json_final else 'timeout'))
                     self.assertNotEqual(int(grupo_file.read_text()), grupo_invocador)
-                    hijo_pid = int(pid_file.read_text())
-                    limite = time.monotonic() + 2
-                    while True:
-                        consulta = subprocess.run(['ps', '-o', 'stat=', '-p', str(hijo_pid)],
-                                                  capture_output=True, text=True, timeout=2)
-                        self.assertIn(consulta.returncode, (0, 1), consulta.stderr)
-                        self.assertEqual(consulta.stderr.strip(), '')
-                        estado = consulta.stdout.strip()
-                        if consulta.returncode == 0:
-                            self.assertTrue(estado, 'ps tuvo éxito sin devolver estado del proceso')
-                        if not estado or estado.startswith('Z'):
-                            break
-                        if time.monotonic() >= limite:
-                            self.fail(f'Descendiente {hijo_pid} sigue vivo: {estado}')
-                        time.sleep(0.02)
+                    self.comprobar_hijo_terminado(int(pid_file.read_text()))
                     self.assertEqual(os.getpgrp(), grupo_invocador)
                 finally:
                     if pid_file.exists():

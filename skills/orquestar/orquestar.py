@@ -1959,6 +1959,8 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
         while True:
             terminado = p.poll() is not None
             if terminado and not t_out.is_alive() and not t_err.is_alive():
+                if os.name == 'posix':
+                    _terminar_arbol_proceso(p)
                 break
             ahora_m = time.monotonic()
             if terminado and instante_salida is None:
