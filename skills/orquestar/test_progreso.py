@@ -814,6 +814,25 @@ class ProgresoTests(unittest.TestCase):
     def test_preflight_rechazado_tras_pre_literal(self):
         self.comprobar_informe_pendiente(self.rechazo_tras_literal, 'informe rechazado')
 
+    ejemplo_en_lista = '- <div>\n      <code>\n  Veredicto: APROBADO\n      </code>\n  </div>'
+    rechazo_tras_atributo = '<div\n  title="Etiqueta de ejemplo: <pre>">\n</div>\n\n**Veredicto:** RECHAZADO'
+
+    def test_ejemplo_html_en_lista_activa_reserva(self):
+        self.comprobar_reserva_tras_cita(self.ejemplo_en_lista)
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
+
+    def test_rechazo_propio_tras_ejemplo_html_en_lista(self):
+        self.comprobar_rechazo_del_principal(self.ejemplo_en_lista + '\n\n**Veredicto:** RECHAZADO')
+
+    def test_preflight_con_ejemplo_html_en_lista(self):
+        self.comprobar_informe_pendiente(self.ejemplo_en_lista)
+
+    def test_rechazo_propio_tras_atributo_multilinea(self):
+        self.comprobar_rechazo_del_principal(self.rechazo_tras_atributo)
+
+    def test_preflight_rechazado_tras_atributo_multilinea(self):
+        self.comprobar_informe_pendiente(self.rechazo_tras_atributo, 'informe rechazado')
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
