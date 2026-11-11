@@ -74,3 +74,8 @@ En esta misma revisión se reprodujo H3: la primera línea del dictamen literal 
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: C1 APROBADO, 9,25/10. N1–N3 resueltos. N4 (baja, resolver, desarrollador): conservar la pareja de comprobaciones por bug-fix y recuperar la comprobación positiva de revisar-tarea con la misma aprobación vigente. Artemisa incorpora esta aserción y continúa hacia la reevaluación de código.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades D, árbol 5f9b5ac7f3f63b8beb0717dc32dc8ced1c681141, RECHAZADO (7,00/10). H4–H7 resueltos. Artemisa reanuda el desarrollo para conservar el objetivo del intento al relanzar (H1), reconocer solo la huella y el veredicto propios del revisor (H2–H3), detectar la reevaluación vigente como avance (D1), omitir el mandato efímero de su huella (D2) y acreditar los informes históricos restaurados en WIP (D3). Informe en docs/review/code_reviews/B-ADV-0044-code-review.md.

@@ -319,6 +319,7 @@ class ProgresoTests(unittest.TestCase):
         self.escribir(self.informe, veredicto + f'Producto revisado: {huella_b}\n' + nota)
         self.commit('reevaluación independiente')
         self.assertTrue(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
+        self.assertTrue(motor.cierre_revisado(self.root, 'revisar-tarea', self.iid, base))
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
         self.escribir('otro.py', 'otro = True\n')
         self.commit('otra tarea')
