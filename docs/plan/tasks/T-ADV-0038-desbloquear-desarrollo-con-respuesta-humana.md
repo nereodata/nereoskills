@@ -1,15 +1,17 @@
 ---
-id: T-ADV-0034
+id: T-ADV-0038
 title: "cuando un desarrollo se queda bloqueado a la espera de decisión humana, sería necesario un endpoint /desbloquear con la info de desbloqueo que permita al bucle continuar"
 type: funcional
 weight: 100
-version: ""
-status: backlog
+version: "v1.2.0"
+status: planned
+dificultad: media
+depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 ---
 
-# T-ADV-0034: cuando un desarrollo se queda bloqueado a la espera de decisión humana, sería necesario un endpoint /desbloquear con la info de desbloqueo que permita al bucle continuar
+# T-ADV-0038: cuando un desarrollo se queda bloqueado a la espera de decisión humana, sería necesario un endpoint /desbloquear con la info de desbloqueo que permita al bucle continuar
 
 ## 🎯 Objetivo de Negocio
 cuando un desarrollo se queda bloqueado a la espera de decisión humana, sería necesario un endpoint /desbloquear con la info de desbloqueo que permita al bucle continuar
