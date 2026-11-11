@@ -1,0 +1,13 @@
+# B-ADV-0036 · Diagnóstico de la suite de cierre
+
+El bug conserva la identidad por versión y comando. Un JSON junto al Markdown del bug conserva los grupos, la comprobación y causa observadas, las evidencias y los commits de cada arreglo, el dictamen y la acción pendiente. Se versionan con el bug. El frontmatter sigue mostrando el presupuesto del grupo actual. Para un bug anterior al cambio se recuperan el contador, nivel y última salida disponibles.
+
+La identidad causal combina la comprobación que falla con el diagnóstico de esa comprobación. Se extraen del bloque de fallo, omitiendo ruido de ejecución y normalizando ubicaciones temporales y fechas. Para suites con salida propia se admite una línea estructurada con comprobación y causa. Al volver un grupo se recupera su historial. Solo una verificación nueva después de un arreglo completado consume una recaída de una causa conocida. Cada intento identifica árbol, salida y commits desde la observación previa. Una promoción en el nivel vigente reinicia el presupuesto de ese nivel.
+
+Al tercer intento en difícil se guarda una solicitud pendiente. Hades recibe el grupo y sus evidencias mediante el lanzador de roles con el ID del bug y sus perfiles efectivos. Su respuesta JSON identifica causa, decisión y destino. Una estrategia técnica o contractual incluye una conclusión terminal explícita para una recaída posterior. Una intervención humana requiere pregunta y justificación. Una conclusión terminal sin destinatario humano detiene la automatización del grupo e identifica al responsable y el recurso requerido. Una respuesta inválida o un fallo del revisor deja pendiente la misma solicitud para otro arranque. Se conserva el dictamen antes de aplicar su destino. Las transiciones usan el enrutador y el registro de preguntas existentes.
+
+## Impacto
+
+- `registrar_fallo_suite` solo se usa desde `bucle` y `SuiteRecoveryTests`. El cierre reanuda primero una acción pendiente. Un fallo operativo del diagnóstico detiene el paso sin emitir un aviso de bloqueo humano. La revisión de versión sigue exigiendo suite verde.
+- Cambia el contrato histórico de `docs/design/B-ADV-0006-design.md:6` según DEC-36-1. Las pruebas del máximo, aviso largo y parada del bucle pasan a exigir un dictamen humano explícito. Las de promoción y comando escapado mantienen la causa y varían la evidencia. Se preservan los bloqueos previos y la identidad por versión y comando.
+- Las regresiones usan repositorios Git temporales, ejecutan el registro y el planificador reales y sustituyen exclusivamente el proceso de Hades por respuestas reproducibles. El acceso al historial y a Hades se limita a cierres rojos o a una transición pendiente. Se mantiene Python estándar y la arquitectura de roles.

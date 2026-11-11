@@ -398,6 +398,102 @@ Característica: Continuidad con arneses ausentes
     Y los usuarios 111 y 222 reciben un único aviso del evento respuesta con T-ADV-0101, la referencia Q-ADV-0001, la pregunta y la instrucción "/responder Q-ADV-0001 <respuesta>"
     Y en la siguiente vuelta del bucle se ejecuta T-ADV-0102 con árbol y base_calidad limpios sin incluir src/modulo_a.py, mientras T-ADV-0103 permanece en espera por depender de T-ADV-0101
 
+  @B-ADV-0040
+  Esquema del escenario: Continuar la revisión con una reserva tras acceso por suscripción deshabilitado
+    Dado que Hades tiene Claude principal y reservas autorizadas agy y Codex en ese orden sin perfil estricto
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Y la disponibilidad de agy es <disponibilidad> y Codex está disponible, autorizado y sin cuota vigente
+    Y la reserva que revise emitirá un dictamen APROBADO válido
+    Cuando se solicita la revisión pendiente
+    Entonces el dictamen real APROBADO de <revisor> llega al paso sin abrir preguntas
+    Y los arneses lanzados son exactamente <lanzamientos> en ese orden
+    Y el historial identifica el fallo de acceso de Claude y el arnés <revisor> que completó la revisión sin inventar cuota ni veredicto
+    Ejemplos:
+      | disponibilidad | revisor | lanzamientos |
+      | disponible y sin cuota vigente | agy | Claude, agy |
+      | cuota vigente | Codex | Claude, Codex |
+
+  @B-ADV-0040
+  Escenario: Aplicar el destino de un rechazo auténtico emitido por la reserva
+    Dado que Hades tiene Claude principal y agy como reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Y agy emite un dictamen RECHAZADO con un hallazgo alto para especificador y destino resolver
+    Cuando se solicita la revisión pendiente y el paso recibe el dictamen
+    Entonces el registro identifica a agy como revisor y conserva su RECHAZADO y su hallazgo
+    Y la tarea queda blocked con pendiente_de especificador y el hallazgo registrado para ejecutar especificar
+    Y no se abre una pregunta humana ni se trata el rechazo como indisponibilidad técnica
+
+  @B-ADV-0040
+  Escenario: Respetar el perfil fijado estricto aunque exista una reserva operativa
+    Dado que la tarea fija explícitamente para Hades el perfil Claude con estricto true
+    Y la configuración por dificultad ofrece agy como reserva autorizada, disponible y sin cuota vigente
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Cuando se solicita la revisión pendiente
+    Entonces solo se lanza Claude y no se ejecuta agy ni otra reserva
+    Y la revisión permanece pendiente sin dictamen con diagnóstico de acceso deshabilitado y restricción del perfil estricto
+    Y se conserva el trabajo y no se pregunta por una reserva ni se cambia el perfil fijado
+
+  @B-ADV-0040
+  Escenario: Conservar la revisión cuando ningún perfil autorizado puede revisar
+    Dado que Hades tiene Claude principal y una reserva Claude de otro modelo autorizada y elegible sin perfil estricto
+    Y ambos perfiles devuelven código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Cuando se solicita dos veces la misma revisión
+    Entonces se informa el impedimento técnico y la revisión sigue pendiente sin dictamen
+    Y se conservan el trabajo y las preguntas sin duplicarlas ni acreditar progreso de revisión
+    Y los errores genéricos de autenticación o red conservan su tratamiento anterior
+
+  @B-ADV-0040
+  Escenario: Retomar dos revisiones tras respuestas ya recibidas sin perder WIP ni trabajo ajeno
+    Dado una copia aislada de Q-ADV-0001 de B-ADV-0032 y Q-ADV-0002 de B-ADV-0033 con respuestas recibidas y WIP guardado
+    Y ambas tareas tienen una reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Cuando se incorporan entre pasos y se restauran sus cambios mientras existe trabajo local ajeno
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code." y una reserva completa cada revisión
+    Entonces ambas revisiones reciben el dictamen real y conservan WIP, historial y respuestas
+    Y el trabajo ajeno permanece intacto y no se exige responder otra vez
+
+  @B-ADV-0040
+  Esquema del escenario: Conservar el tratamiento de errores genéricos al revisar con Hades
+    Dado que Hades tiene Claude principal y Codex como reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y no existe sesión anterior de Hades y todos los ejecutables están disponibles
+    Y el lanzador simulado de Claude devuelve código 1 y "<error>" sin diagnóstico de suscripción deshabilitada ni cuota
+    Cuando se solicita la revisión pendiente
+    Entonces se devuelve código 1 y el diagnóstico conserva "<error>"
+    Y solo se lanza Claude una vez y Codex no recibe ninguna petición
+    Y la revisión queda pendiente sin dictamen ni progreso de revisión
+    Y el intento registra el fallo sin agotamiento de cuota ni ausencia de ejecutable
+    Ejemplos:
+      | error |
+      | authentication failed |
+      | network connection failed |
+
+  @B-ADV-0040
+  Esquema del escenario: Recuperar una revisión respondida desde una instantánea identificada
+    Dado un repositorio temporal independiente por fila con la instantánea sintética <pregunta> de <tarea> sin modificar las preguntas reales
+    Y la revisión pendiente es review-test sin dictamen y su historial contiene el rechazo anterior "RT-PREVIO" y el fallo de acceso de Claude
+    Y la pregunta conserva ese historial, la referencia a wip/<tarea>, wip_restaurado false y la respuesta literal "Usar la reserva Codex ya configurada; pruebas con mocks"
+    Y su estado inicial es <estado_pregunta> con <recepcion> y la tarea está <estado_tarea>
+    Y wip/<tarea> contiene el archivo exclusivo borrador.txt con bytes UTF-8 "WIP-<tarea>\n" y su commit se registra como W0
+    Y el árbol de destino tiene un cambio ajeno sin confirmar en ajeno.txt con bytes UTF-8 "AJENO\n" cuyo contenido e índice se guardan como A0
+    Y Hades tiene Claude principal y Codex como única reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y los lanzadores simulados devuelven código 1 y "Your organization has disabled Claude subscription access for Claude Code." para Claude y código 0 con dictamen APROBADO sin hallazgos para Codex
+    Cuando el bucle intenta incorporar la respuesta y preparar la revisión entre pasos con ese cambio ajeno presente
+    Entonces conserva A0 sin confirmar, sobrescribir ni apartar el cambio ajeno y no lanza la revisión en ese árbol
+    Y conserva W0, el historial y la respuesta sin crear preguntas ni avisar de reanudación efectiva
+    Cuando el propietario guarda el cambio ajeno en un commit y el bucle reintenta entre pasos en el árbol limpio
+    Entonces la pregunta queda incorporada una sola vez y la tarea queda planned sin pendiente_de antes de iniciar bug-fix
+    Y al preparar bug-fix se restaura borrador.txt con los bytes originales y wip_restaurado pasa a true sin modificar el commit W0
+    Y ajeno.txt conserva los bytes de A0 y no forma parte del delta restaurado de la tarea
+    Cuando el paso solicita la revisión review-test pendiente con la respuesta ya incorporada
+    Entonces se lanzan exactamente Claude y Codex en ese orden y el paso recibe APROBADO de Codex sin hallazgos que enrutar
+    Y el registro identifica el fallo de Claude y a Codex como revisor final sin inventar cuota
+    Y la revisión review-test queda aprobada y permite continuar bug-fix sin acreditar implementación ni cierre de la tarea
+    Y se conserva RT-PREVIO y se añade el nuevo dictamen sin borrar el historial ni duplicar la respuesta
+    Y otra incorporación no restaura WIP por segunda vez ni exige nueva respuesta ni crea preguntas
+    Ejemplos:
+      | pregunta | tarea | estado_pregunta | recepcion | estado_tarea |
+      | Q-ADV-0001 | B-ADV-0032 | pendiente | una recepción en cola con la respuesta indicada aún no incorporada | blocked con pendiente_de humano |
+      | Q-ADV-0002 | B-ADV-0033 | incorporada | respuesta indicada ya incorporada y cola vacía | planned sin pendiente_de |
+
   @B-ADV-0033 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5
   Esquema del escenario: Enrutar un hallazgo de Hades según su destino sin escalarlo al humano
     Dado una tarea bloqueada con un hallazgo de Hades que declara destino <destino>
@@ -460,3 +556,57 @@ Característica: Continuidad con arneses ausentes
     Cuando el proceso del bucle se recarga o se reinicia antes de ejecutar el siguiente paso
     Entonces el estado de Q-ADV-0001 y Q-ADV-0002 se conserva íntegro en disco
     Y el nuevo ciclo incorpora Q-ADV-0001 exactamente una vez y no vuelve a reanudar ni duplicar Q-ADV-0002
+
+  @B-ADV-0034 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5 @CA-6
+  Esquema del escenario: Responder desde CLI sin Telegram y compartir la recepción con el gateway
+    Dado que Q-ADV-0001 bloquea T-ADV-0101 en un proyecto sin Telegram configurado
+    Y el bucle ejecuta otra tarea independiente
+    Cuando el operador consulta "adevv orquestar --preguntas"
+    Y ejecuta 'adevv orquestar --responder <referencia> "Usar OAuth interno"'
+    Entonces la consulta muestra Q-ADV-0001 y la respuesta confirma recepción durable en cola
+    Y la recepción identifica al operador como local sin autorizarlo en Telegram
+    Y no cambia ningún archivo rastreado durante el paso activo
+    Y la respuesta es un dato que nunca se ejecuta como orden
+    Y la misma respuesta enviada por un usuario Telegram autorizado no agrega otra recepción
+    Ejemplos:
+      | referencia |
+      | Q-ADV-0001 |
+      | T-ADV-0101 |
+
+  @B-ADV-0034 @CA-3 @CA-7
+  Esquema del escenario: Rechazar respuestas CLI inválidas sin mutaciones
+    Dado que el proyecto tiene preguntas pendientes y una pregunta cerrada
+    Cuando el operador responde desde CLI con <entrada>
+    Entonces recibe un diagnóstico de <motivo> sin modificar preguntas ni tareas
+    Ejemplos:
+      | entrada | motivo |
+      | Q-ADV-9999 con texto | referencia inexistente |
+      | Q-OTRO-0001 con texto | referencia ajena |
+      | T-ADV-0101 con dos preguntas pendientes | ambigüedad |
+      | Q-ADV-0002 ya incorporada | pregunta cerrada |
+      | Q-ADV-0001 con texto vacío | falta de respuesta |
+      | referencia arbitraria con texto | referencia inexistente |
+
+  @B-ADV-0034 @CA-4 @CA-7
+  Escenario: Serializar entregas de ambos canales y aislar raíces
+    Dado que dos raíces independientes contienen una pregunta Q-ADV-0001
+    Y en la primera raíz hay un paso activo
+    Cuando CLI y Telegram autorizado entregan concurrentemente el mismo texto en la primera raíz
+    Entonces se guarda una sola recepción durable en esa raíz
+    Y la segunda raíz conserva su registro intacto
+    Y un usuario Telegram no autorizado no puede consultar ni responder preguntas
+
+  @B-ADV-0034 @CA-5 @CA-7
+  Esquema del escenario: Incorporar una respuesta CLI entre pasos y mostrar su resultado real
+    Dado que Q-ADV-0001 recibió desde CLI una respuesta durable antes de reiniciar
+    Cuando se incorpora entre pasos con <condicion>
+    Entonces se observa <resultado>
+    Y otra incorporación no duplica la decisión ni la reanudación
+    Ejemplos:
+      | condicion | resultado |
+      | respuesta concreta y bucle detenido por falta de elegibles | pregunta incorporada y bucle lanzado una sola vez |
+      | parada manual activa | respuesta conservada sin relanzar |
+      | respuesta PENDIENTE: falta URL | pregunta pendiente y diagnóstico falta URL |
+      | respuesta INSUFICIENTE: falta puerto | pregunta pendiente y diagnóstico falta puerto |
+      | otra pregunta pendiente de la misma tarea | respuesta incorporada y tarea bloqueada por esa pregunta |
+      | dependencia no completada | respuesta incorporada y tarea en espera de su dependencia sin anunciar elegibilidad ni relanzar por esa tarea |

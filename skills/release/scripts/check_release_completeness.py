@@ -29,6 +29,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from adevv.revisiones import clave_version, pendientes_cierre
+
 # Force UTF-8 stdout to avoid cp1252 crashes on Windows when item
 # titles contain unicode characters.
 if hasattr(sys.stdout, "buffer"):
@@ -163,7 +166,7 @@ def main() -> int:
                 continue
 
             task_ver = fm.get("version", "")
-            if task_ver == args.version:
+            if clave_version(task_ver) == clave_version(args.version):
                 status = (fm.get("status") or "").lower()
                 if status not in {"completed", "cancelled", "superseded", "rejected"}:
                     incomplete.append(
@@ -181,6 +184,11 @@ def main() -> int:
             "heuristico esta activo. Revisa la configuracion.",
             file=sys.stderr,
         )
+
+    pendientes = pendientes_cierre(root_dir, args.version)
+    if pendientes:
+        print("ERROR: cierre pendiente:\n" + "\n".join(pendientes))
+        return 1
 
     if incomplete:
         print(

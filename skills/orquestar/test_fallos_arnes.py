@@ -249,3 +249,156 @@ class FallosArnesTests(unittest.TestCase):
         self.assertEqual([c.kwargs['rol']['model'] for c in self.ejecutar.call_args_list],
                          ['reserva', 'reserva', 'principal', 'principal'])
         self.assertEqual(self.esperar.call_count, 2)
+
+    def revisar_dentro_del_paso(self, pendiente=False, dos_invocaciones=False, limpio=False):
+        """Ejecuta reservas reales del rol dentro del paso con proveedores simulados."""
+        self.args.espera_max = 0
+        self.args.reintentos_arnes = 0
+        cfg = {'hades': {'harness': 'claude', 'model': 'opus', 'reserva': [
+            {'harness': 'agy', 'model': 'gemini'}, {'harness': 'codex', 'model': 'gpt'}]}}
+        error = 'Your organization has disabled Claude subscription access for Claude Code.'
+        resultados = [(1, {'modelos': {'opus': {'entrada': 2}}}, error),
+                      (3, {'modelos': {'gemini': {'entrada': 3}}}, 'quota resets in 1 hour'),
+                      (0, {'modelos': {'gpt': {'entrada': 5}}}, 'Veredicto: APROBADO')]
+        if pendiente:
+            resultados[-1] = (1, {}, 'quota resets in 2 hours')
+            resultados.append((0, {'modelos': {'gpt': {'entrada': 7}}}, 'Veredicto: APROBADO'))
+        elif dos_invocaciones:
+            resultados = [(1, {}, 'network'), *resultados]
+        def ejecutar(*args, **kwargs):
+            with (patch.object(motor, 'config', return_value=cfg),
+                  patch.object(motor, 'buscar_sesion_agente', return_value=None),
+                  patch.object(motor, 'lanzar', side_effect=resultados),
+                  patch.dict(motor.os.environ, kwargs['env'])):
+                if dos_invocaciones:
+                    self.assertEqual(motor.agente(self.root, 'hades', 'primera'), 1)
+                revision = motor.agente(self.root, 'hades', 'revisa')
+                if pendiente:
+                    self.assertEqual(revision, 1)
+                    cfg['hades'] = {'harness': 'codex', 'model': 'gpt-otra'}
+                    self.assertEqual(motor.agente(self.root, 'hades', 'otra revisión'), 0)
+                else:
+                    self.assertEqual(revision, 0)
+                    informe = self.root / 'review.md'
+                    informe.write_text('Veredicto: APROBADO', encoding='utf-8')
+            self.registrar_cierre(completado=not pendiente, limpio=not pendiente or limpio)
+            self.progreso = True
+            return 0, {'modelos': {'principal': {'entrada': 11}}}, 'paso terminado'
+        self.ejecutar.side_effect = ejecutar
+        return self.correr()
+
+    def test_reserva_recuperada_no_propaga_cuota(self):
+        """Claude denegado y Gemini agotado no detienen un paso revisado por Codex."""
+        codigo, filas = self.revisar_dentro_del_paso()
+        self.assertEqual(codigo, 0)
+        self.esperar.assert_not_called()
+        agentes = [f for f in filas if f.get('tipo') == 'agente']
+        self.assertTrue(agentes[0]['acceso_denegado'])
+        self.assertEqual(agentes[1]['modelo_cuota'], 'gemini')
+        self.assertGreaterEqual(agentes[1]['cuota_espera_s'], 3600)
+        self.assertEqual(agentes[-1]['veredicto'], 'APROBADO')
+        self.assertEqual([f['modelos'] for f in agentes], [
+            {'opus': {'entrada': 2}}, {'gemini': {'entrada': 3}}, {'gpt': {'entrada': 5}}])
+        pasos = [f for f in filas if f.get('tipo') == 'paso']
+        self.assertEqual([f['modelos'] for f in pasos], [{'principal': {'entrada': 11}}])
+        self.assertFalse(any(f.get('sin_cuota') or f.get('espera_s') for f in pasos))
+        marcas = motor.marcas_cuota(self.root, motor.fecha_estado(motor.ahora()))
+        self.assertIn(('agy', 'gemini'), marcas)
+        self.assertNotIn(('codex', 'gpt'), marcas)
+
+    def test_revisiones_distintas_no_borran_cuota_pendiente(self):
+        """Otra aprobación y progreso parcial no satisfacen la revisión que falta."""
+        codigo, filas = self.revisar_dentro_del_paso(pendiente=True)
+        self.assertEqual(codigo, 2)
+        self.esperar.assert_not_called()
+        mensaje = self.aviso.call_args.args[2]
+        self.assertIn('agy', mensaje)
+        self.assertIn('gemini', mensaje)
+        self.assertIn('cuota', mensaje)
+        pasos = [f for f in filas if f.get('tipo') == 'paso']
+        self.assertFalse(any(f.get('sin_cuota') or f.get('espera_s') for f in pasos))
+
+    def test_invocaciones_de_un_rol_se_correlacionan(self):
+        """Dos llamadas al mismo rol conservan identidades independientes."""
+        codigo, filas = self.revisar_dentro_del_paso(dos_invocaciones=True)
+        self.assertEqual(codigo, 0)
+        agentes = [f for f in filas if f.get('tipo') == 'agente']
+        self.assertNotEqual(agentes[0]['invocacion'], agentes[1]['invocacion'])
+        self.assertEqual(len({f['invocacion'] for f in agentes[1:]}), 1)
+
+    def test_paso_completado_supera_espera_de_revision_anterior(self):
+        """Una revisión reintentada y cerrada no deja cuota en el paso limpio."""
+        self.args.espera_max = 0
+        def ejecutar(*args, **kwargs):
+            motor.registrar(self.root, {'tipo': 'agente', 'fecha': motor.ahora(),
+                'rol': 'hades', 'arnes': 'agy', 'modelo_cuota': 'gemini',
+                'codigo': 3, 'sin_cuota': True, 'espera_s': 3600})
+            motor.registrar(self.root, {'tipo': 'agente', 'fecha': motor.ahora(),
+                'rol': 'hades', 'arnes': 'codex', 'codigo': 0, 'veredicto': 'APROBADO'})
+            self.registrar_cierre()
+            self.progreso = True
+            return 0, {}, 'completado y commiteado'
+        self.ejecutar.side_effect = ejecutar
+        codigo, filas = self.correr()
+        self.assertEqual(codigo, 0)
+        self.esperar.assert_not_called()
+        paso = [f for f in filas if f.get('tipo') == 'paso'][-1]
+        self.assertFalse(paso.get('sin_cuota') or paso.get('espera_s'))
+
+    def registrar_cierre(self, completado=True, limpio=True):
+        """Persiste el estado y revisión; simula un commit distinto con árbol limpio."""
+        bugs = self.root / 'docs/plan/bugs'
+        bugs.mkdir(parents=True, exist_ok=True)
+        estado = 'completed' if completado else 'in_progress'
+        (bugs / 'B-ADV-0011.md').write_text(
+            f'---\nid: B-ADV-0011\nstatus: {estado}\n---\n', encoding='utf-8')
+        informes = self.root / 'docs/review/code_reviews'
+        informes.mkdir(parents=True, exist_ok=True)
+        if completado:
+            (informes / 'B-ADV-0011-code-review.md').write_text('**Veredicto:** APROBADO', encoding='utf-8')
+        def git(*args, **kwargs):
+            if args == ('rev-parse', 'HEAD'):
+                return 'commit-final'
+            if args == ('status', '--porcelain'):
+                return '' if limpio else ' M bug.md'
+            return ''
+        self.git.side_effect = git
+
+    def test_revision_pendiente_con_commit_parcial_limpio(self):
+        """Un commit parcial limpio no resuelve la revisión obligatoria que falta."""
+        codigo, filas = self.revisar_dentro_del_paso(pendiente=True, limpio=True)
+        self.assertEqual(codigo, 2)
+        self.assertIn('agy/gemini', self.aviso.call_args.args[2])
+        self.esperar.assert_not_called()
+        paso = [f for f in filas if f.get('tipo') == 'paso'][-1]
+        self.assertEqual(paso['bloqueo_agente']['modelo_cuota'], 'gemini')
+        self.assertFalse(paso.get('sin_cuota'))
+
+    def test_resumen_no_renueva_recuperacion_original(self):
+        """El tiempo de las reservas se descuenta sin desplazar el agotamiento real."""
+        cfg = {'hades': {'harness': 'agy', 'model': 'primero',
+                        'reserva': [{'harness': 'codex', 'model': 'segundo'}]}}
+        def lanzar(*args, **kwargs):
+            if args[2] == 'agy':
+                return 1, {}, 'quota resets in 1 hour'
+            self.tiempo += 4000
+            return 1, {}, 'quota resets in 10 minutes'
+        with (patch.object(motor, 'config', return_value=cfg),
+              patch.object(motor, 'buscar_sesion_agente', return_value=None),
+              patch.object(motor, 'lanzar', side_effect=lanzar)):
+            self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
+        filas = motor.leer_metricas(self.root)
+        resumen = filas[-1]
+        self.assertEqual(resumen['modelo_cuota'], 'primero')
+        self.assertEqual(resumen['espera_s'], 0)
+        self.assertEqual(resumen['fecha'], filas[0]['fecha'])
+        instante = motor.fecha_estado(motor.ahora())
+        marcas = motor.marcas_cuota(self.root, instante)
+        primero, segundo = filas[:2]
+        vencimiento = motor.fecha_estado(primero['fecha']) + timedelta(seconds=primero['cuota_espera_s'])
+        self.assertEqual(marcas[('agy', 'primero')]['hasta'], vencimiento)
+        self.assertLessEqual(vencimiento, instante)
+        _, vigentes = motor.consumo_cuotas(self.root, instante)
+        self.assertNotIn(('agy', 'primero'), vigentes)
+        self.assertEqual(vigentes[('codex', 'segundo')],
+                         motor.fecha_estado(segundo['fecha']) + timedelta(seconds=segundo['cuota_espera_s']))

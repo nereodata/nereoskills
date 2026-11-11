@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -30,7 +33,7 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
         tarea.write_text(
             '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\npendiente_de: humano\n---\n\n'
             '# T-ADV-0101\n\n## Hallazgo\nDestino: especificador\n', encoding='utf-8')
-        revision = self.root / 'docs/review/versions/v1.1-revision.md'
+        revision = self.root / 'docs/review/versions/v1.1.1-revision.md'
         revision.parent.mkdir(parents=True)
         revision.write_text('# Revisión\n', encoding='utf-8')
         for nombre, contenido in [('requirements.md', '# Idea\n'), ('req_analysis.md', 'APROBADO\n'),
@@ -75,9 +78,73 @@ class HallazgosHadesRoutingTests(unittest.TestCase):
         self.assertEqual(q['id'], 'Q-ADV-0001')
         solicitar.assert_called_once()
 
-        trazas = (self.root / 'docs/review/versions/v1.1-revision.md').read_text(encoding='utf-8')
+        trazas = (self.root / 'docs/review/versions/v1.1.1-revision.md').read_text(encoding='utf-8')
         self.assertIn('Destino: `especificador`', trazas)
         self.assertIn('Destino: `artemisa`', trazas)
+
+
+    def test_detector_conserva_destino_antes_de_recortar_evidencia(self):
+        """El destino sobrevive a salidas largas tanto en la tarea como en la salida."""
+        for fuente in ('tarea', 'salida'):
+            with self.subTest(fuente=fuente):
+                tarea = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+                tarea.write_text(
+                    '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\n'
+                    'pendiente_de: humano\n---\n\n## Hallazgo\n'
+                    + ('Destino: especificador\n' if fuente == 'tarea' else ''), encoding='utf-8')
+                salida = ('Destino: especificador\n' if fuente == 'salida' else '') + 'x' * 5000
+                with patch.object(motor.intervencion, 'solicitar') as solicitar:
+                    motor.intervencion.detectar_bloqueo(self.root, motor, 'T-ADV-0101', None, salida)
+                solicitar.assert_not_called()
+                fm = motor.frontmatter(tarea)
+                self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
+                self.assertEqual(motor.listar_preguntas(self.root), [])
+                self.assertIn('ejecutar especificar', tarea.read_text(encoding='utf-8'))
+                for ruta in (tarea, self.root / 'docs/review/versions/v1.1.1-revision.md'):
+                    self.assertIn('- Destino: `especificador`', ruta.read_text(encoding='utf-8'))
+
+    def test_detector_reconoce_etiquetas_markdown(self):
+        """La presentación de la etiqueta no convierte el destino técnico en humano."""
+        for declaracion in ('Destino: especificador', '**Destino**: especificador',
+                            '`Destino`: `especificador`', '**Destino:** **especificador**',
+                            '_Destino_: especificador'):
+            with self.subTest(declaracion=declaracion):
+                tarea = self.root / 'docs/plan/tasks/T-ADV-0101.md'
+                tarea.write_text(
+                    '---\nid: T-ADV-0101\nversion: "v1.1.1"\nstatus: blocked\n'
+                    'pendiente_de: humano\n---\n\n## Hallazgo\n' + declaracion, encoding='utf-8')
+                with patch.object(motor.intervencion, 'solicitar') as solicitar:
+                    motor.intervencion.detectar_bloqueo(self.root, motor, 'T-ADV-0101', None)
+                solicitar.assert_not_called()
+                self.assertEqual(motor.frontmatter(tarea)['pendiente_de'], 'especificador')
+                self.assertEqual(motor.listar_preguntas(self.root), [])
+
+    def test_detector_prioriza_ultima_declaracion_de_tarea_sin_destino_en_salida(self):
+        """Sin destino en salida, la última decisión de la sección final gobierna."""
+        tarea = motor.fichero_de(self.root, 'T-ADV-0101')
+        tarea.write_text(
+            tarea.read_text(encoding='utf-8').replace(
+                'Destino: especificador', 'Destino: humano\nDestino: especificador'),
+            encoding='utf-8')
+        with patch.object(motor.intervencion, 'solicitar') as solicitar:
+            motor.intervencion.detectar_bloqueo(
+                self.root, motor, 'T-ADV-0101', None, 'Sin nueva decisión del paso.')
+        solicitar.assert_not_called()
+        fm = motor.frontmatter(tarea)
+        self.assertEqual((fm['status'], fm['pendiente_de']), ('blocked', 'especificador'))
+        self.assertEqual(motor.listar_preguntas(self.root), [])
+
+    def test_detector_prioriza_ultima_declaracion_de_salida_sobre_tarea(self):
+        """Una decisión nueva del paso prevalece sobre el contexto anterior de la tarea."""
+        with patch.object(motor.intervencion, 'solicitar') as solicitar:
+            motor.intervencion.detectar_bloqueo(
+                self.root, motor, 'T-ADV-0101', None,
+                'Destino: humano\nDecisión revisada: Destino: artemisa\n' + 'x' * 5000)
+        solicitar.assert_not_called()
+        fm = motor.frontmatter(motor.fichero_de(self.root, 'T-ADV-0101'))
+        self.assertEqual(fm['status'], 'planned')
+        self.assertNotIn('pendiente_de', fm)
+        self.assertEqual(motor.listar_preguntas(self.root), [])
 
 
 class OrquestarRegressionTests(unittest.TestCase):
@@ -163,7 +230,7 @@ class RevisionProductoTests(unittest.TestCase):
         for f, texto in [('task_config.yaml', ''), ('docs/requirements.md', 'idea'),
                          ('docs/req_analysis.md', '**Estado:** ASUNCIONES_REALIZADAS'),
                          ('docs/platform_plan.md', ''), ('docs/platform_review.md', '**Veredicto:** APROBADO'),
-                         ('docs/work_plan.md', ''), ('docs/review/code_reviews/T1-code-review.md', ''),
+                         ('docs/work_plan.md', ''), ('docs/review/code_reviews/T1-code-review.md', 'APROBADO'),
                          ('docs/review/versions/v0.1-arquitectura.md', '')]:
             (self.root / f).parent.mkdir(parents=True, exist_ok=True)
             (self.root / f).write_text(texto, encoding='utf-8')
@@ -316,6 +383,19 @@ class AvisosTelegramTests(unittest.TestCase):
         codigo, enviados = self.avisos(('FIN', 'Todas las tareas con versión están cerradas.'))
         self.assertEqual(codigo, 0)
         self.assertIn('Producto terminado', enviados[0][2])
+
+    def test_version_summary_preserves_optional_patch(self):
+        for version in ('v0.1', 'v1.1.2'):
+            with self.subTest(version=version):
+                closure = MagicMock()
+                closure.resumen.return_value = 'Resumen de tareas y validaciones'
+                with patch.object(motor, 'cargar_cierre_version', return_value=closure):
+                    codigo, enviados = self.avisos(('PARAR', f'Versión {version} terminada. Revisa'))
+                self.assertEqual(codigo, 2)
+                closure.resumen.assert_called_once_with(self.root, version)
+                self.assertTrue(enviados)
+                for _, _, mensaje in enviados:
+                    self.assertIn('Resumen de tareas y validaciones', mensaje)
 
     def test_human_answer_needed_notifies(self):
         _, enviados = self.avisos(('PARAR', 'Requisitos con preguntas sin valor por defecto seguro.'))
@@ -1182,6 +1262,7 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(metricas[1]['veredicto'], 'APROBADO')
 
     def test_agente_exhausts_all_reservas_records_min_quota_and_fails(self):
+        self.enterContext(patch.object(motor, 'ahora', return_value='2026-11-11T12:00:00+00:00'))
         cfg = {
             'hades': {
                 'harness': 'claude',
@@ -1215,12 +1296,13 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(len(llamadas), 3)
 
         metricas = [json.loads(l) for l in (self.root / motor.METRICAS).read_text(encoding='utf-8').splitlines()]
-        self.assertEqual(len(metricas), 3)
-        self.assertNotIn('sin_cuota', metricas[0])
-        self.assertNotIn('sin_cuota', metricas[1])
-        self.assertTrue(metricas[2]['sin_cuota'])
-        # Menor cuota de las tres: sondeo supuesto de 300 segundos.
-        self.assertEqual(metricas[2]['espera_s'], 300)
+        self.assertEqual(len(metricas), 4)
+        self.assertFalse(any(f.get('sin_cuota') for f in metricas[:3]))
+        self.assertEqual([f['modelo_cuota'] for f in metricas[:3]], ['opus', 'sonnet', 'flash'])
+        self.assertTrue(metricas[3]['sin_cuota'])
+        self.assertEqual(metricas[3]['espera_s'], 300)
+        self.assertEqual((metricas[3]['arnes'], metricas[3]['modelo_cuota']), ('claude', 'sonnet'))
+        self.assertEqual(metricas[3]['modelos'], {})
 
     def test_loop_retries_immediately_with_reserva_on_quota_without_waiting(self):
         cfg = {
@@ -1340,18 +1422,72 @@ class SuiteRecoveryTests(unittest.TestCase):
 
     def evidence(self, text='format: src/app.js: error', command='suite'):
         with (self.root / motor.EVIDENCIAS).open('a', encoding='utf-8') as out:
-            out.write(json.dumps({'arbol': 'a' * 40, 'comando': command, 'codigo': 1,
-                                  'salida': text}) + '\n')
+            out.write(json.dumps({'arbol': self.git('rev-parse', 'HEAD'), 'comando': command,
+                                  'codigo': 1, 'salida': text}) + '\n')
 
     def observe_failure(self, text='format: src/app.js: error', command='suite'):
         self.evidence(text, command)
         return motor.registrar_fallo_suite(self.root, 'v0.1', command)
 
-    def complete(self, iid):
+    def hades(self, destino, decision='Aplicar la migración', *, causa='Falta la columna moneda',
+              terminal=None, codigos=(0,)):
+        """Sustituye solo el proceso externo de diagnóstico y captura el mandato real."""
+        terminal = terminal or {'destino': 'humano', 'pregunta': '¿Puedes autorizar la migración de moneda?',
+                                'motivo': 'Solo el administrador puede autorizar el cambio de esquema.'}
+        respuesta = {'causa': causa, 'destino': destino,
+                     'decision': decision, 'terminal': terminal}
+        if destino == 'humano':
+            respuesta.update(pregunta=terminal['pregunta'], motivo=terminal['motivo'])
+        mandatos = []
+        ejecutar = subprocess.run
+
+        def proceso(args, *pos, **kwargs):
+            if '--agente' not in args:
+                return ejecutar(args, *pos, **kwargs)
+            self.assertEqual(args[args.index('--agente') + 1], 'hades')
+            self.assertEqual(kwargs['env']['ORQUESTAR_ID'], 'B-DEM-0001')
+            mandato = Path(args[args.index('--prompt-file') + 1]).read_text(encoding='utf-8')
+            mandatos.append(mandato)
+            codigo = codigos[len(mandatos) - 1]
+            return subprocess.CompletedProcess(args, codigo, '' if codigo else json.dumps(respuesta),
+                                               'revisor no disponible' if codigo else '')
+
+        self.enterContext(patch.object(subprocess, 'run', side_effect=proceso))
+        return mandatos
+
+    def pedidos(self, n):
+        return (f'ERROR: test_pedidos (integracion.Pedidos.test_pedidos)\n'
+                f'Archivo temporal /tmp/tmp{n}/informe\nsqlite3.OperationalError: no such column: moneda')
+
+    def umbral(self):
+        iid, _ = self.observe_failure(self.pedidos(0))
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        intentos = []
+        for n in (1, 2):
+            intentos.append((self.complete(iid), self.pedidos(n)))
+            self.observe_failure(self.pedidos(n))
+        return iid, intentos
+
+    def complete(self, iid, mensaje='fix attempt'):
         p = motor.fichero_de(self.root, iid)
         p.write_text(p.read_text(encoding='utf-8').replace('status: planned', 'status: completed'), encoding='utf-8')
         self.git('add', '.')
-        self.git('commit', '-qm', 'fix attempt')
+        self.git('commit', '-qm', mensaje)
+        return self.git('rev-parse', 'HEAD')
+
+    def assert_terminal(self, iid, intentos):
+        p = motor.fichero_de(self.root, iid)
+        self.assertEqual(motor.frontmatter(p)['status'], 'blocked')
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        historial = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+        observaciones = historial['grupos'][historial['actual']]['evidencias']
+        for commit, salida in intentos:
+            self.assertTrue(any(fila['arbol'] == commit and fila['salida'] == salida and fila['codigo'] == 1
+                                and any(commit in arreglo for arreglo in fila['arreglos']) for fila in observaciones),
+                            f'Falta el arreglo {commit} con su resultado')
+        estado = motor.estado(self.root, 'docs')
+        self.assertEqual(estado[0], 'PARAR')
+        self.assertIn(iid, estado[1])
 
     def test_capture_and_green_reuse_keep_return_contract(self):
         command = f'"{sys.executable}" -c "import sys; print(123); print(456, file=sys.stderr); sys.exit(7)"'
@@ -1384,7 +1520,7 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(p.parent, self.root / 'backlog/bugs')
         fm = motor.frontmatter(p)
         self.assertEqual(fm['status'], 'planned')
-        self.assertEqual(motor.vkey(fm['version']), (0, 1))
+        self.assertEqual(motor.vkey(fm['version']), (0, 1, 0))
         self.assertEqual(motor.lista(fm['depende_de']), [])
         self.assertIn('format: src/app.js: error', p.read_text(encoding='utf-8'))
         self.assertIn('suite', p.read_text(encoding='utf-8'))
@@ -1398,7 +1534,7 @@ class SuiteRecoveryTests(unittest.TestCase):
             out.write('\n## Triaje del arreglo\nTrabajo del desarrollador.\n')
         for count in range(1, 4):
             self.complete(iid)
-            same, stop = self.observe_failure(f'new error {count}')
+            same, stop = self.observe_failure(f'run {count}\nformat: src/app.js: error')
             self.assertEqual(same, iid)
             self.assertFalse(stop)
             fm = motor.frontmatter(p)
@@ -1406,28 +1542,206 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.assertEqual(fm['suite_intentos'], str(count if count < 3 else 0))
             self.assertEqual(fm['dificultad'], 'media' if count < 3 else 'dificil')
             self.assertIn('Trabajo del desarrollador.', p.read_text(encoding='utf-8'))
-            self.assertIn(f'new error {count}', p.read_text(encoding='utf-8'))
+            self.assertIn(f'run {count}', p.read_text(encoding='utf-8'))
         self.assertEqual(len(list(p.parent.glob('*.md'))), 1)
         rows = motor.leer_metricas(self.root)
         self.assertEqual(len([r for r in rows if r.get('tipo') == 'promocion']), 1)
 
-    def test_maximum_stops_after_three_failed_fixes_with_last_output(self):
-        iid, _ = self.observe_failure()
-        motor.actualizar_dificultad(self.root, iid, 'dificil')
-        for count in range(1, 4):
+    def test_pending_diagnosis_survives_unavailable_reviewer_without_human_block(self):
+        calls = self.hades('desarrollador', codigos=(1, 0))
+        iid, intentos = self.umbral()
+        intentos.append((self.complete(iid), self.pedidos(3)))
+        report = self.root / f'docs/review/code_reviews/{iid}-code-review.md'
+        report.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'review')
+        self.evidence(self.pedidos(3))
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        with (patch.object(motor, 'verificar', return_value=1), patch.object(motor, 'avisar') as avisar,
+              patch.object(motor, 'ejecutar') as ejecutar):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+            ejecutar.assert_not_called()
+            self.assertFalse(any(c.args[1] in ('respuesta', 'version') for c in avisar.call_args_list))
+        self.assertEqual(len(calls), 1)
+        p = motor.fichero_de(self.root, iid)
+        self.assertNotIn('humano', motor.frontmatter(p).get('pendiente_de', ''))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertIn(iid, calls[0])
+        historial = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+        grupo = historial['grupos'][historial['actual']]
+        registros = []
+        decoder = json.JSONDecoder()
+        for i, char in enumerate(calls[0]):
+            if char == '{':
+                try:
+                    registro, _ = decoder.raw_decode(calls[0], i)
+                except ValueError:
+                    continue
+                if 'arreglos' in registro:
+                    registros.append(registro)
+        for commit, salida in intentos:
+            self.assertTrue(any(fila.get('salida') == salida and fila.get('codigo') == 1
+                                and any(commit in arreglo for arreglo in fila['arreglos']) for fila in registros),
+                            f'Falta la evidencia individual del arreglo {commit} en el mandato')
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        solicitud = grupo['solicitud']
+        self.assertTrue(solicitud)
+        self.assertIn(solicitud, calls[0])
+        with (patch.object(motor, 'verificar') as verificar, patch.object(motor, 'avisar'),
+              patch.object(motor, 'ejecutar', return_value=(0, {}, '')) as ejecutar):
+            motor.bucle(args, self.root)
+            verificar.assert_not_called()
+            self.assertEqual(ejecutar.call_args.kwargs['env']['ORQUESTAR_PASO'], 'bug-fix')
+        self.assertEqual(calls, [calls[0], calls[0]])
+        self.assertIn('Aplicar la migración', p.read_text(encoding='utf-8'))
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        self.assertFalse(motor.listar_preguntas(self.root))
+
+    def test_group_distinguishes_check_and_cause_independently(self):
+        pedidos = self.pedidos(0)
+        iid, _ = self.observe_failure(pedidos)
+        p = motor.fichero_de(self.root, iid)
+        for salida, recaidas in ((pedidos.replace('column: moneda', 'table: clientes'), 0),
+                                 (pedidos.replace('test_pedidos', 'test_lineas'), 0),
+                                 (self.pedidos(1), 1)):
             self.complete(iid)
-            same, stop = self.observe_failure(f'last failure {count}')
-            self.assertEqual(same, iid)
-            self.assertEqual(bool(stop), count == 3)
-            fm = motor.frontmatter(motor.fichero_de(self.root, iid))
-            self.assertEqual(fm['suite_intentos'], str(count))
-            self.assertEqual(fm['dificultad'], 'dificil')
-            self.assertEqual(fm['status'], 'planned' if count < 3 else 'blocked')
-        self.assertIn(iid, stop)
-        self.assertIn('last failure 3', stop)
-        fm = motor.frontmatter(motor.fichero_de(self.root, iid))
-        self.assertEqual(fm['status'], 'blocked')
-        self.assertEqual(fm['pendiente_de'], 'humano')
+            self.assertEqual(self.observe_failure(salida), (iid, ''))
+            self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(recaidas))
+
+    def test_group_promotion_preserves_other_groups_level_and_budget(self):
+        iid, _ = self.observe_failure(self.pedidos(0))
+        p = motor.fichero_de(self.root, iid)
+        for n in (1, 2):
+            self.complete(iid)
+            self.observe_failure(self.pedidos(n))
+        for n in range(4):
+            self.complete(iid)
+            self.observe_failure(f'run {n}\nfirma: certificado revocado')
+        self.assertEqual(motor.frontmatter(p)['dificultad'], 'dificil')
+        self.observe_failure(self.pedidos(4))
+        fm = motor.frontmatter(p)
+        self.assertEqual((fm['dificultad'], fm['suite_dificultad'], fm['suite_intentos']), ('media', 'media', '2'))
+        self.complete(iid)
+        self.observe_failure(self.pedidos(5))
+        fm = motor.frontmatter(p)
+        self.assertEqual((fm['dificultad'], fm['suite_intentos']), ('dificil', '0'))
+
+    def test_destination_commit_failure_resumes_with_original_verdict(self):
+        calls = self.hades('humano')
+        iid, _ = self.umbral()
+        self.complete(iid)
+        p = motor.fichero_de(self.root, iid)
+        run = subprocess.run
+
+        def fallo(args, *pos, **kwargs):
+            if args[:2] == ['git', 'commit'] and any('aplicar diagnóstico de la suite' in arg for arg in args):
+                raise subprocess.CalledProcessError(1, args, stderr=b'commit rechazado')
+            return run(args, *pos, **kwargs)
+
+        with patch.object(subprocess, 'run', side_effect=fallo):
+            with self.assertRaises((motor.diagnostico_suite.DiagnosticoPendiente, subprocess.CalledProcessError)):
+                self.observe_failure(self.pedidos(3))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('diagnosticar-suite', iid))
+        pregunta, = motor.listar_preguntas(self.root)
+        self.assertEqual(pregunta['pregunta'], '¿Puedes autorizar la migración de moneda?')
+        _, motivo = motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertIn(pregunta['pregunta'], motivo)
+        self.assertEqual(motor.listar_preguntas(self.root), [pregunta])
+        self.assertEqual(len(calls), 1)
+        self.assertIn('aplicar diagnóstico de la suite', self.git('log', '-1', '--format=%s'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertEqual(p.read_text(encoding='utf-8').count('## Conclusión del diagnóstico'), 1)
+        self.assertEqual(motor.estado(self.root, 'docs')[0], 'PARAR')
+
+    def test_destination_add_failure_resumes_developer_strategy_once(self):
+        calls = self.hades('desarrollador')
+        iid, _ = self.umbral()
+        self.complete(iid)
+        p = motor.fichero_de(self.root, iid)
+        run = subprocess.run
+
+        def fallo(args, *pos, **kwargs):
+            if args[:2] == ['git', 'add'] and any(arg.endswith('-revision.md') for arg in args):
+                raise subprocess.CalledProcessError(1, args, stderr=b'add rechazado')
+            return run(args, *pos, **kwargs)
+
+        with patch.object(subprocess, 'run', side_effect=fallo):
+            with self.assertRaises((motor.diagnostico_suite.DiagnosticoPendiente, subprocess.CalledProcessError)):
+                self.observe_failure(self.pedidos(3))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('diagnosticar-suite', iid))
+        self.assertEqual(motor.registrar_fallo_suite(self.root, 'v0.1', 'suite'), (iid, ''))
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('bug-fix', iid))
+        self.assertIn('aplicar diagnóstico de la suite', self.git('log', '-1', '--format=%s'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertEqual(p.read_text(encoding='utf-8').count('## Hallazgo de Hades enrutado'), 1)
+
+    def test_causal_groups_resume_budget_and_one_revised_fix(self):
+        calls = self.hades('desarrollador')
+        iid, intentos = self.umbral()
+        self.complete(iid)
+        p = motor.fichero_de(self.root, iid)
+        firma = 'ERROR: test_firma (integracion.Facturas.test_firma)\nValueError: certificado caducado'
+        for n in (0, 1):
+            self.assertEqual(self.observe_failure(firma), (iid, ''))
+            self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(n))
+            arreglo = self.complete(iid)
+        intentos.append((arreglo, self.pedidos(3)))
+        self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
+        self.assertEqual(len(calls), 1)
+        self.assertIn('Aplicar la migración', p.read_text(encoding='utf-8'))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('bug-fix', iid))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertFalse(motor.listar_preguntas(self.root))
+        ultimo = self.complete(iid, 'fix attempt: aplicar migración')
+        _, stop = self.observe_failure(self.pedidos(4))
+        self.assertTrue(stop)
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertEqual(len(calls), 1)
+        preguntas = motor.listar_preguntas(self.root)
+        self.assertEqual(len(preguntas), 1)
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes autorizar la migración de moneda?')
+        self.assertIn('Solo el administrador', preguntas[0]['contexto'])
+        self.assert_terminal(iid, intentos + [(ultimo, self.pedidos(4))])
+        self.assertIn(self.pedidos(4).splitlines()[-1], p.read_text(encoding='utf-8'))
+
+    def test_specifier_receives_contradiction_without_question(self):
+        calls = self.hades('especificador', 'Aclarar de quién se hereda la moneda')
+        iid, _ = self.umbral()
+        self.complete(iid)
+        self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('especificar', iid))
+        self.assertIn('Aclarar de quién', motor.fichero_de(self.root, iid).read_text(encoding='utf-8'))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertEqual(len(calls), 1)
+
+    def test_immediate_terminal_question_is_justified_and_idempotent(self):
+        calls = self.hades('humano', 'La revocación es irreversible', causa='Certificado revocado',
+                           terminal={'destino': 'humano', 'pregunta': '¿Puedes emitir un certificado de pruebas nuevo?',
+                                     'motivo': 'Solo el titular puede emitir el reemplazo.'})
+        fallo = 'ERROR: test_firma (integracion.Facturas)\nValueError: certificado revocado'
+        iid, _ = self.observe_failure(fallo)
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        intentos = []
+        for n in (1, 2, 3):
+            intentos.append((self.complete(iid, f'fix attempt: firma {n}'), fallo))
+            _, stop = self.observe_failure(fallo)
+            self.assertEqual(bool(stop), n == 3)
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertEqual(len(calls), 1)
+        p = motor.fichero_de(self.root, iid)
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        preguntas = motor.listar_preguntas(self.root)
+        self.assertEqual(len(preguntas), 1)
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes emitir un certificado de pruebas nuevo?')
+        self.assertIn('Solo el titular', preguntas[0]['contexto'])
+        self.assert_terminal(iid, intentos)
 
     def test_blocked_and_cancelled_are_not_reopened(self):
         iid, _ = self.observe_failure()
@@ -1518,7 +1832,10 @@ class SuiteRecoveryTests(unittest.TestCase):
         report.write_text('APROBADO', encoding='utf-8')
         self.git('add', '.')
         self.git('commit', '-qm', 'review')
-        self.evidence('final error src/app.js')
+        self.hades('humano', 'Hace falta la configuración de formato', causa='format: src/app.js: error',
+                   terminal={'destino': 'humano', 'pregunta': '¿Puedes facilitar la regla de formato?',
+                             'motivo': 'Solo el mantenedor conserva la configuración de referencia.'})
+        self.evidence('final error src/app.js\nformat: src/app.js: error')
         args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
                                        max_pasos=1, reintentos=2, espera_max=0, cmd=None)
         with (patch.object(motor, 'verificar', return_value=1),
@@ -1537,7 +1854,7 @@ class SuiteRecoveryTests(unittest.TestCase):
             iid, _ = self.observe_failure(command=command)
             for count in (1, 2):
                 self.complete(iid)
-                same, stop = self.observe_failure(f'error {count}', command=command)
+                same, stop = self.observe_failure(f'run {count}\nformat: src/app.js: error', command=command)
                 self.assertEqual(same, iid)
                 self.assertFalse(stop)
                 fm = motor.frontmatter(motor.fichero_de(self.root, iid))
@@ -1551,7 +1868,10 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.complete(iid)
             self.observe_failure()
         self.complete(iid)
-        text = '\U0001f600' * 5000 + '\nlast error src/app.js'
+        self.hades('humano', 'Hace falta la configuración de formato', causa='format: src/app.js: error',
+                   terminal={'destino': 'humano', 'pregunta': '¿Puedes facilitar la regla de formato?',
+                             'motivo': 'Solo el mantenedor conserva la configuración de referencia.'})
+        text = '\U0001f600' * 5000 + '\nlast error src/app.js\nformat: src/app.js: error'
         _, stop = self.observe_failure(text)
         with (patch.object(motor, 'telegram', return_value=('fake', ['123'], {'version'})),
               patch.object(motor, 'enviar', return_value=True) as send,
@@ -1594,6 +1914,40 @@ class SuiteRecoveryTests(unittest.TestCase):
 
     def test_checkout_precedes_suite_for_final_stop(self):
         self.check_checkout_before_suite(('PARAR', 'Versión v0.1 terminada. Revisa'))
+
+    def test_hotfix_final_stop_checks_selected_branch(self):
+        self.git('branch', '-m', 'hotfix/v1.1.2')
+        task = self.root / 'backlog/tasks/T-DEM-0001.md'
+        task.write_text(task.read_text(encoding='utf-8').replace('v0.1.0', 'v1.1.2'), encoding='utf-8')
+        architecture = self.root / 'docs/review/versions/v1.1.2-arquitectura.md'
+        architecture.parent.mkdir(parents=True, exist_ok=True)
+        architecture.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'hotfix ready for final stop')
+        self.git('checkout', '-qb', 'another')
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        for same_version_release in (False, True):
+            with self.subTest(same_version_release=same_version_release):
+                if same_version_release:
+                    self.git('branch', 'release/v1.1.2')
+                self.git('checkout', '-q', 'another')
+                selected = motor.estado(self.root, 'docs')
+                self.assertEqual(selected[0], 'PARAR')
+                self.assertIn('Versión v1.1.2 terminada.', selected[1])
+                observed = []
+                def verify(root, command):
+                    observed.append(self.git('branch', '--show-current'))
+                    return 0
+                with (patch.object(motor, 'verificar', side_effect=verify),
+                      patch.object(motor, 'avisar') as notify,
+                      patch.object(motor, 'ejecutar') as execute):
+                    self.assertEqual(motor.bucle(args, self.root), 2)
+                self.assertEqual(observed, ['hotfix/v1.1.2'])
+                self.assertEqual(self.git('branch', '--show-current'), 'hotfix/v1.1.2')
+                execute.assert_not_called()
+                self.assertEqual(notify.call_args.args[1], 'version')
+                self.assertIn('Versión v1.1.2 terminada.', notify.call_args.args[2])
 
     def test_dirty_tree_is_stashed_before_checkout_and_suite(self):
         self.git('checkout', '-qb', 'another')
@@ -1980,6 +2334,245 @@ class SubprocesoColgadoTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @unittest.skipUnless(os.name == 'nt', 'Requiere procesos Windows reales')
+    def test_windows_descendiente_con_padre_salido_y_pipes_heredados(self):
+        """El cierre alcanza al hijo después de salir el padre, en ambos lectores."""
+        for modo in ('json_gracia', 'json_timeout', 'lineas_timeout'):
+            with self.subTest(modo=modo):
+                pid_file = self.root / 'hijo.pid'
+                resultado = self.root / 'resultado.json'
+                pid_file.unlink(missing_ok=True)
+                resultado.unlink(missing_ok=True)
+                mensaje = ('{"status":"SUCCESS","response":"ok","usage":{"input_tokens":7}}'
+                           if modo == 'json_gracia' else 'iniciado')
+                padre = (
+                    'import subprocess, sys; from pathlib import Path; '
+                    'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                    f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+                    f'print({mensaje!r}, flush=True)'
+                )
+                cmd = [sys.executable, '-c', padre]
+                harness = 'codex' if modo == 'lineas_timeout' else 'agy'
+                if harness == 'agy':
+                    cmd += ['--output-format', 'json']
+                worker = (
+                    'import json; from pathlib import Path; from tests.test_orquestar import motor; '
+                    f'r = motor.lanzar({cmd!r}, Path({str(self.root)!r}), {harness!r}, '
+                    f'timeout=3, gracia_cierre={0.2 if modo == "json_gracia" else 10}); '
+                    f'Path({str(resultado)!r}).write_text(json.dumps(r))'
+                )
+                proceso = subprocess.Popen([sys.executable, '-c', worker],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    try:
+                        proceso.wait(timeout=12)
+                    except subprocess.TimeoutExpired:
+                        self.assertTrue(pid_file.exists(), 'El padre no llegó a crear al hijo')
+                        self.fail('lanzar sigue bloqueado 12 s después de iniciar el padre')
+                    self.assertEqual(proceso.returncode, 0)
+                    codigo, metricas, salida = json.loads(resultado.read_text())
+                    self.assertEqual(codigo, 0 if modo == 'json_gracia' else 124)
+                    self.assertTrue(metricas.get('cierre_forzado' if modo == 'json_gracia' else 'timeout'))
+                    self.assertIn(mensaje, salida)
+                    if modo == 'json_gracia':
+                        self.assertEqual(metricas['modelos']['agy']['entrada'], 7)
+                    self.assertTrue(pid_file.exists(), 'El padre no llegó a crear al hijo')
+                    consulta = subprocess.run(
+                        ['tasklist', '/FI', f'PID eq {int(pid_file.read_text())}', '/FO', 'CSV', '/NH'],
+                        capture_output=True, timeout=3)
+                    self.assertEqual(consulta.returncode, 0, consulta.stderr)
+                    self.assertNotIn(f'"{int(pid_file.read_text())}"'.encode('ascii'), consulta.stdout,
+                                     'El descendiente continúa vivo tras devolver el control')
+                finally:
+                    if proceso.poll() is None:
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proceso.pid)],
+                                       capture_output=True, timeout=3)
+                        proceso.wait(timeout=3)
+                    if pid_file.exists():
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', pid_file.read_text()],
+                                       capture_output=True, timeout=3)
+
+    def test_padre_salido_con_pipes_abiertos_agota_gracia(self):
+        """El cierre del padre no abandona al descendiente que mantiene los pipes."""
+        cerrado = motor.threading.Event()
+        proceso = MagicMock(returncode=0)
+        proceso.poll.return_value = 0
+        proceso.stdout.fileno.side_effect = ValueError
+        proceso.stderr.fileno.side_effect = ValueError
+        partes = [b'{"status":"SUCCESS","response":"ok"}\n']
+
+        def leer_out(*args):
+            if partes:
+                return partes.pop()
+            cerrado.wait(5)
+            return b''
+
+        def leer_err(*args):
+            cerrado.wait(5)
+            return b''
+
+        proceso.stdout.read.side_effect = leer_out
+        proceso.stderr.read.side_effect = leer_err
+        try:
+            with (patch.object(motor.subprocess, 'Popen', return_value=proceso),
+                  patch.object(motor, '_terminar_arbol_proceso', side_effect=lambda p: cerrado.set()) as terminar):
+                codigo, salida, _, timeout, forzado = motor._ejecutar_captura_json(
+                    ['agy'], self.root, 'agy', timeout=1, gracia_cierre=0.05)
+            terminar.assert_called_once_with(proceso)
+            self.assertEqual(codigo, 0)
+            self.assertIn('SUCCESS', salida)
+            self.assertFalse(timeout)
+            self.assertTrue(forzado)
+        finally:
+            cerrado.set()
+
+    def test_eof_no_cancela_timeout_antes_de_esperar_proceso(self):
+        """Recibir EOF mantiene protegido el wait final por el mismo timeout."""
+        terminado = motor.threading.Event()
+        proceso = MagicMock(returncode=0)
+        proceso.__enter__.return_value = proceso
+        proceso.stdout = []
+        proceso.wait.side_effect = lambda *a, **kw: terminado.wait(1)
+        proceso.__exit__.side_effect = lambda *a: proceso.wait()
+        with (patch.object(motor.subprocess, 'Popen', return_value=proceso),
+              patch.object(motor, '_terminar_arbol_proceso', side_effect=lambda p: terminado.set()),
+              patch('builtins.print')):
+            codigo, metricas, _ = motor.lanzar(['codex'], self.root, 'codex', timeout=0.05)
+        self.assertTrue(terminado.is_set(), 'Se canceló el timeout antes de esperar al proceso')
+        self.assertEqual(codigo, 124)
+        self.assertTrue(metricas.get('timeout'))
+
+    def test_captura_lineas_crea_sesion_posix_propia(self):
+        """El camino por líneas aísla el grupo que puede terminar por timeout."""
+        proceso = MagicMock(returncode=0)
+        proceso.__enter__.return_value = proceso
+        proceso.stdout = []
+        with (patch.object(motor.os, 'name', 'posix'),
+              patch.object(motor.subprocess, 'Popen', return_value=proceso) as popen,
+              patch('builtins.print')):
+            motor.lanzar(['codex'], self.root, 'codex', timeout=None)
+        self.assertIs(popen.call_args.kwargs.get('start_new_session'), True)
+
+    def test_timeout_explicito_desactivado_no_recupera_entorno(self):
+        """None explícito desactiva; omitir el argumento conserva el entorno."""
+        respuesta = (0, '{"status":"SUCCESS","response":"ok"}', '', False, False)
+        with (patch.object(motor, '_ejecutar_captura_json', return_value=respuesta) as captura,
+              patch('builtins.print')):
+            motor.lanzar(['agy', '--output-format', 'json'], self.root, 'agy',
+                         env={'ORQUESTAR_TIMEOUT_S': '60'}, timeout=None)
+            self.assertIsNone(captura.call_args.kwargs['timeout'])
+            motor.lanzar(['agy', '--output-format', 'json'], self.root, 'agy',
+                         env={'ORQUESTAR_TIMEOUT_S': '60'})
+            self.assertEqual(captura.call_args.kwargs['timeout'], 60)
+
+    def test_ejecutar_propaga_timeout_desactivado_del_perfil(self):
+        """El perfil con cero prevalece sobre el entorno durante el paso."""
+        with (patch.object(motor, 'comando', return_value=['agy']),
+              patch.object(motor, 'arnes', return_value='agy'),
+              patch.object(motor, 'lanzar', return_value=(0, {}, '')) as lanzar):
+            motor.ejecutar(MagicMock(), self.root, 'mandato',
+                           env={'ORQUESTAR_TIMEOUT_S': '60'}, rol={'timeout_s': 0})
+        self.assertIn('timeout', lanzar.call_args.kwargs)
+        self.assertIsNone(lanzar.call_args.kwargs['timeout'])
+
+    def test_timeout_no_finito_conserva_valor_seguro(self):
+        """Una configuración inválida no desactiva el timeout del agente."""
+        for valor in ('inf', '-inf', 'nan'):
+            with self.subTest(valor=valor):
+                self.assertEqual(motor.timeout_de_rol({'timeout_s': valor}, 1800), 1800)
+                for clave in ('ORQUESTAR_TIMEOUT_AGENTE_S', 'ORQUESTAR_TIMEOUT_S'):
+                    self.assertEqual(motor.timeout_de_rol({}, 1800, {clave: valor}), 1800)
+        self.assertIsNone(motor.timeout_de_rol({'timeout_s': 0}, 1800))
+        self.assertEqual(motor.timeout_de_rol({'timeout_s': 12}, 1800), 12)
+
+    def test_terminacion_posix_dirigida_al_grupo_aislado(self):
+        """La señal se dirige al grupo del arnés incluso si su padre ya salió."""
+        proceso = MagicMock(pid=12345, returncode=0)
+        proceso.poll.return_value = 0
+        with (patch.object(motor.os, 'name', 'posix'),
+              patch.object(motor, 'signal', signal, create=True),
+              patch.object(motor.os, 'killpg', create=True) as matar_grupo,
+              patch.object(motor.signal, 'SIGKILL', 9, create=True)):
+            motor._terminar_arbol_proceso(proceso)
+        matar_grupo.assert_called_once_with(12345, 9)
+        proceso.wait.assert_called_once_with(timeout=2)
+
+    @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
+    def test_posix_eof_con_hijo_redirigido(self):
+        """Conserva el JSON del padre y termina al hijo aunque ambos lectores reciban EOF."""
+        pid_file = self.root / 'hijo.pid'
+        mensaje = '{"status":"SUCCESS","response":"ok","usage":{"input_tokens":7}}'
+        padre = (
+            'import subprocess, sys; from pathlib import Path; '
+            'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], '
+            'stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); '
+            f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+            f'print({mensaje!r}, flush=True)'
+        )
+        try:
+            resultado = motor._ejecutar_captura_json(
+                [sys.executable, '-c', padre], self.root, 'agy', timeout=15, gracia_cierre=10)
+            self.assertEqual(resultado, (0, mensaje + '\n', '', False, False))
+            self.comprobar_hijo_terminado(int(pid_file.read_text()))
+        finally:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def comprobar_hijo_terminado(self, pid):
+        """Admite procesos ausentes o zombis tras la entrega asíncrona de SIGKILL."""
+        limite = time.monotonic() + 2
+        while True:
+            consulta = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)],
+                                      capture_output=True, text=True, timeout=2)
+            self.assertIn(consulta.returncode, (0, 1), consulta.stderr)
+            self.assertEqual(consulta.stderr.strip(), '')
+            estado = consulta.stdout.strip()
+            if consulta.returncode == 0:
+                self.assertTrue(estado, 'ps tuvo éxito sin devolver estado del proceso')
+            if not estado or estado.startswith('Z'):
+                return
+            if time.monotonic() >= limite:
+                self.fail(f'Descendiente {pid} sigue vivo: {estado}')
+            time.sleep(0.02)
+
+    @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
+    def test_descendiente_real_no_sobrevive_al_timeout_ni_a_gracia_json(self):
+        """Mata al hijo que hereda pipes sin alcanzar al grupo del invocador."""
+        for json_final, padre_sale in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(json_final=json_final, padre_sale=padre_sale):
+                pid_file = self.root / 'hijo.pid'
+                grupo_file = self.root / 'grupo.pid'
+                grupo_invocador = os.getpgrp()
+                script = (
+                    'import os, subprocess, sys, time; from pathlib import Path; '
+                    'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                    f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+                    f'Path({str(grupo_file)!r}).write_text(str(os.getpgrp())); '
+                    f'print({("{\"status\":\"SUCCESS\",\"response\":\"ok\"}" if json_final else "iniciado")!r}, flush=True); '
+                    + ('sys.exit(0)' if padre_sale else 'time.sleep(60)')
+                )
+                inicio = time.monotonic()
+                try:
+                    with patch('builtins.print'):
+                        codigo, metricas, _ = motor.lanzar(
+                            [sys.executable, '-c', script, '--output-format', 'json'],
+                            self.root, 'agy', timeout=2, gracia_cierre=0.1)
+                    self.assertLess(time.monotonic() - inicio, 8)
+                    self.assertEqual(codigo, 0 if json_final else 124)
+                    self.assertTrue(metricas.get('cierre_forzado' if json_final else 'timeout'))
+                    self.assertNotEqual(int(grupo_file.read_text()), grupo_invocador)
+                    self.comprobar_hijo_terminado(int(pid_file.read_text()))
+                    self.assertEqual(os.getpgrp(), grupo_invocador)
+                finally:
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
     def test_lanzar_agy_cierra_con_gracia_cuando_proceso_se_cuelga_tras_emitir_json(self):
         script = (
             'import sys, time; '
@@ -2007,7 +2600,7 @@ class SubprocesoColgadoTests(unittest.TestCase):
         script = 'import sys, time; sys.stdout.write("escribiendo informes...\\n"); sys.stdout.flush(); time.sleep(60)'
         cmd = [sys.executable, '-c', script, '--output-format', 'json']
         with patch('builtins.print'):
-            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=0.2, gracia_cierre=0.1)
+            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=2.0, gracia_cierre=0.1)
         self.assertEqual(codigo, 124)
         self.assertTrue(m.get('timeout'))
         self.assertTrue(m.get('error'))

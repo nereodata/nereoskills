@@ -17,7 +17,7 @@ Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los a
 ## 📋 Comandos y Conversación Libre
 
 - `/preguntas` (`/pendientes`, `/questions`): muestra preguntas pendientes, ID de tarea, contexto, referencia y diagnóstico de aviso.
-- `/responder <Q-ID> <respuesta>` (`/reply`, `/answer`): registra una decisión para esa pregunta. Admite ID de tarea inequívoco; sin referencia requiere una única pregunta pendiente. Solo usuarios autorizados; rechaza preguntas ajenas, inexistentes o cerradas y detecta entregas repetidas.
+- `/responder <Q-ID> <respuesta>` (`/reply`, `/answer`): registra una decisión para esa pregunta. Admite ID de tarea inequívoco; sin referencia requiere una única pregunta pendiente. Solo usuarios autorizados; rechaza preguntas ajenas, inexistentes o cerradas y detecta entregas repetidas. Comparte la operación durable con `adevv orquestar --responder <Q-ID> "<respuesta>"` (operador local sin Telegram); ambas vías distinguen recepción, incorporación y reanudación efectiva.
 
 Con el bucle activo la confirmación indica «respuesta recibida»: el repositorio se actualiza entre pasos. Una respuesta concreta devuelve la tarea a planificación para continuar su validación. `PENDIENTE:` o `INSUFICIENTE:` conserva el bloqueo y explica qué falta. Si el bucle esperaba sin tareas elegibles, retoma automáticamente; `orquestar.parar` mantiene la parada manual. Las respuestas no conceden permisos de publicación y no sustituyen `/cerrar vX.Y confirmo`.
 - `/estado` o `/status`: resumen conciso del bucle, fase, versión y backlog; los agentes y porcentajes se consultan con `/agentes`.

@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from adevv.revisiones import nombre_version
 
 try:
     import msvcrt
@@ -23,9 +24,9 @@ RESPUESTAS = 'orquestar_respuestas.jsonl'
 
 
 @contextmanager
-def bloqueo(root):
+def bloqueo(root, nombre='adevv-intervencion.lock'):
     """Serializa gateway y motor mediante un bloqueo liberado por el sistema operativo."""
-    ruta = Path(git(root, 'rev-parse', '--absolute-git-dir')) / 'adevv-intervencion.lock'
+    ruta = Path(git(root, 'rev-parse', '--absolute-git-dir')) / nombre
     with ruta.open('a+b') as fichero:
         if os.name == 'nt':
             fichero.seek(0)
@@ -69,8 +70,13 @@ def listar(root, solo_pendientes=False):
     return [q for q in leer(root) if not solo_pendientes or q['estado'] == 'pendiente']
 
 
-def git(root, *args, entrada=None):
-    """Ejecuta Git en la raíz explícita y propaga cualquier fallo."""
+def git(root, *args, entrada=None, binario=False):
+    """Ejecuta Git preservando los bytes de parches y propaga cualquier fallo."""
+    if binario or entrada is not None:
+        datos = entrada.encode('utf-8') if isinstance(entrada, str) else entrada
+        salida = subprocess.run(['git', *args], cwd=root, input=datos,
+                                capture_output=True, check=True).stdout
+        return salida if binario else salida.decode('utf-8').strip()
     return subprocess.run(['git', *args], cwd=root, input=entrada, text=True,
                           encoding='utf-8', capture_output=True, check=True).stdout.strip()
 
@@ -80,7 +86,7 @@ def revision(root, motor, iid):
     v = motor.vkey(motor.frontmatter(motor.fichero_de(root, iid)).get('version'))
     if not v:
         raise ValueError('La intervención requiere una tarea con versión')
-    return root / f'docs/review/versions/v{v[0]}.{v[1]}-revision.md'
+    return root / f'docs/review/versions/{nombre_version(v)}-revision.md'
 
 
 def asegurar_destino(root, motor, q):
@@ -217,9 +223,22 @@ def responder(root, motor, usuario, argumento, autorizados):
     """Recibe una respuesta autorizada sin modificar el árbol durante un paso."""
     if str(usuario) not in autorizados:
         return None
+    return recibir(root, motor, usuario, argumento)
+
+
+def recibir(root, motor, usuario, argumento, referencia_obligatoria=False):
+    """Serializa recepción, incorporación y eventual arranque entre adaptadores."""
+    with bloqueo(root, 'adevv-respuesta.lock'):
+        return recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria)
+
+
+def recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria):
+    """Aplica el contrato compartido bajo el bloqueo de recepción del proyecto."""
     with bloqueo(root):
         preguntas = leer(root)
         referencia, _, texto = argumento.strip().partition(' ')
+        if referencia_obligatoria and not referencia.startswith(('Q-', 'T-', 'B-')):
+            return 'La referencia no existe.'
         q = next((x for x in preguntas if referencia == x['id']), None)
         if referencia.startswith(('T-', 'B-')):
             candidatas = [x for x in preguntas if x['tarea_id'] == referencia and x['estado'] == 'pendiente']
@@ -258,10 +277,18 @@ def responder(root, motor, usuario, argumento, autorizados):
     if (root / motor.PARADA).exists():
         return f'Respuesta recibida para {qid}; se respeta la parada manual.'
     aplicada = any(q['id'] == qid for q in incorporadas)
+    actual = next(q for q in listar(root) if q['id'] == qid)
+    if not aplicada and actual.get('motivo_insuficiente') and not actual.get('cola'):
+        return f'Respuesta recibida para {qid}; sigue bloqueada: {actual["motivo_insuficiente"]}'
     tarea = motor.fichero_de(root, iid) if aplicada else None
     reanudable = tarea and motor.frontmatter(tarea).get('status') == 'planned'
     if aplicada and not reanudable:
         return f'Respuesta incorporada para {qid}; la tarea sigue bloqueada por otra pregunta.'
+    if aplicada:
+        items = {i['id']: i for i in motor.backlog(root)}
+        pendientes = motor.pendientes_de(items[iid], items)
+        if pendientes:
+            return f'Respuesta incorporada para {qid}; tarea {iid} en espera de dependencias: {", ".join(pendientes)}.'
     if aplicada and esperando:
         motor.en_fondo(root, argumentos=[])
         return f'Respuesta incorporada; tarea {iid} reanudada.'
@@ -307,14 +334,27 @@ def incorporar(root, motor):
                 hechas.append(q.copy())
             q.pop('respuesta_en_cola', None)
             guardar(root / PREGUNTAS, preguntas)
-            mensaje = (detalle if insuficiente else f'Tarea {q["tarea_id"]} reanudada: {texto}'
+            mensaje = (detalle if insuficiente else f'Respuesta incorporada para tarea {q["tarea_id"]}: {texto}'
                        if cambios['status'] == 'planned' else f'{q["id"]} incorporada; tarea bloqueada por otra pregunta.')
             motor.avisar(root, 'respuesta', mensaje)
     return hechas
 
 
+def notificar_reanudacion(root, motor, iid):
+    """Avisa una sola vez después de que el bucle haya ejecutado la tarea retomada."""
+    if not (root / PREGUNTAS).exists():
+        return
+    with bloqueo(root):
+        preguntas = leer(root)
+        for q in preguntas:
+            if q['tarea_id'] == iid and q['estado'] == 'incorporada' and not q.get('reanudacion_avisada'):
+                q['reanudacion_avisada'] = True
+                guardar(root / PREGUNTAS, preguntas)
+                motor.avisar(root, 'respuesta', f'Tarea {iid} reanudada: {q["respuesta"]}')
+
+
 def restaurar(root, motor, iid):
-    """Aplica el delta WIP sobre la rama actual preservando cambios independientes."""
+    """Restaura WIP sobre destino limpio; devuelve False si debe esperar trabajo ajeno."""
     if not (root / PREGUNTAS).exists():
         return
     with bloqueo(root):
@@ -322,10 +362,16 @@ def restaurar(root, motor, iid):
         for q in preguntas:
             if q['tarea_id'] != iid or q['estado'] != 'incorporada' or not q['wip_rama'] or q['wip_restaurado']:
                 continue
+            sucio = bool(git(root, 'status', '--porcelain'))
+            if sucio:
+                q['impedimento_incorporacion'] = 'WIP pendiente: hay trabajo local en índice o árbol; no se restaura.'
+            if sucio or not asegurar_destino(root, motor, q):
+                guardar(root / PREGUNTAS, preguntas)
+                return False
             parche = git(root, 'diff', '--binary', q['base_commit'], q['wip_rama'], '--', '.',
-                         ':!docs/plan', ':!docs/review/versions')
+                         ':!docs/plan', ':!docs/review/versions', binario=True)
             if parche:
-                git(root, 'apply', '--3way', '-', entrada=parche + '\n')
+                git(root, 'apply', '--3way', '-', entrada=parche)
             q['wip_restaurado'] = True
             guardar(root / PREGUNTAS, preguntas)
 
@@ -334,12 +380,12 @@ DESTINOS_HALLAZGO = {'artemisa', 'especificador', 'humano'}
 
 
 def destino_hallazgo(texto):
-    """Extrae el destino explícito de un hallazgo de Hades, sin inferirlo del estado del árbol."""
-    coincidencia = re.search(
-        r'\bdestino\s*(?::|=|\|)\s*[*`_ ]*(artemisa|especificador|humano)\b',
+    """Extrae el último destino explícito, admitiendo etiquetas Markdown."""
+    coincidencias = re.findall(
+        r'(?<!\w)[*`_]*destino[*`_ ]*(?::|=|\|)\s*[*`_ ]*(artemisa|especificador|humano)\b',
         texto or '', re.IGNORECASE,
     )
-    return coincidencia.group(1).lower() if coincidencia else ''
+    return coincidencias[-1].lower() if coincidencias else ''
 
 
 def anotar_hallazgo(root, motor, iid, destino, contexto):
@@ -389,6 +435,7 @@ def detectar_bloqueo(root, motor, iid, base_commit, salida=''):
         return
     if any(q['tarea_id'] == iid for q in listar(root, True)):
         return
-    contexto = (tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1] + '\n' + (salida or ''))[-4000:]
-    destino = destino_hallazgo(contexto)
+    seccion = tarea.read_text(encoding='utf-8').rsplit('\n## ', 1)[-1]
+    destino = destino_hallazgo(salida) or destino_hallazgo(seccion)
+    contexto = (seccion + '\n' + (salida or ''))[-4000:]
     enrutar_hallazgo(root, motor, iid, destino or 'humano', contexto=contexto, base_commit=base_commit)

@@ -4,10 +4,10 @@ title: "El orquestador escala al humano hallazgos de Hades destinados al especif
 type: bug
 weight: 20
 dificultad: media
-version: "v1.1.1"
+version: "v1.1.2"
 status: completed
 created_at: 2026-11-09
-updated_at: 2026-11-10
+updated_at: 2026-11-11
 ---
 
 # B-ADV-0033: El orquestador escala al humano hallazgos de Hades destinados al especificador
@@ -46,13 +46,16 @@ updated_at: 2026-11-10
 
 ## Triaje de alcance
 
+- base_calidad: `e37c0f41b61271d57e69ef849cfd7203f991b48e` (reanudación H-01/H-02; implementación previa ya incorporada).
+- Reanudación: A [SKIP], contrato BDD existente sin cambios; B [EXEC], documentar precedencia; C1/C2/D/E/F [EXEC] sobre H-01/H-02. Las revisiones de este intento parten de cero.
+
 - Subfase A: Definición — `[EXEC]`; escenario BDD con los tres destinos.
 - Subfase B: Diseño — `[EXEC]`; añade el contrato explícito de enrutado y su trazabilidad.
 - Subfase C1: Pruebas — `[EXEC]`; regresión que comprueba `artemisa`, `especificador` y `humano`.
 - Subfase C2: Corrección — `[EXEC]`; el motor preserva destinos de Hades, y la CLI permite declararlos sin degradarlos a pregunta humana.
-- Subfase D: QA — `[PENDIENTE]`; revisión del delta completo al finalizar ambas correcciones del hotfix.
+- Subfase D: QA — `[EXEC]`; revisión de reanudación aprobada por Hades, H-01/H-02 resueltos.
 - Subfase E: Documentación — `[EXEC]`; escenario de orquestación y changelog.
-- Subfase F: Cierre — `[PENDIENTE]`; tras calidad y revisión.
+- Subfase F: Cierre — `[EXEC]`; calidad y revisión acreditadas; commit de cierre.
 - Verificación al cierre: `python -m unittest tests.test_orquestar.HallazgosHadesRoutingTests`, porque acredita los tres destinos y la ausencia de preguntas para el especificador.
 
 ## Resolución
@@ -61,3 +64,48 @@ updated_at: 2026-11-10
 - `especificador` conserva la tarea en `blocked` con `pendiente_de: especificador`, registra la evidencia y deja que el bucle ejecute `especificar`; `artemisa` la devuelve a `planned`; solo `humano` crea una pregunta persistente.
 - El detector de bloqueos conserva como salvaguarda el destino explícito presente en el contexto o salida del paso.
 - El selector del bucle reconoce también ramas `hotfix/v*`, de modo que el flujo automático funciona en `hotfix/v1.1.1`.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades RECHAZADO (docs/review/code_reviews/B-ADV-0033-code-review.md). H-01 ALTA para desarrollador/Artemisa: detectar_bloqueo recorta a 4000 caracteres antes de extraer destino y puede perder especificador, creando pregunta humana; extraer antes del recorte y definir precedencia. H-02 ALTA para desarrollador/Artemisa: destino_hallazgo no reconoce etiquetas Markdown resaltadas o entre backticks; soportarlas sin degradar a humano. Decisión: reanudar desarrollo, corregir ambos y ampliar únicamente HallazgosHadesRoutingTests con los casos indicados antes de reevaluar.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: H-01 y H-02 del informe B-ADV-0033-code-review: conservar destino antes del recorte y admitir etiquetas Markdown. Decisión: Artemisa corrige ambos y amplía HallazgosHadesRoutingTests.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-test RECHAZADO: RT-01 ALTA para desarrollador, añadir caso sin destino en salida y dos declaraciones contradictorias en tarea; debe ganar la última sin pregunta humana. Decisión: reanudar desarrollo en siguiente ejecución. El motor ordena parar por dos rechazos consecutivos; conservar RED y no corregir ahora.
+
+## Reanudación v1.1.2 · parada por rechazos
+
+- Añadidas regresiones de H-01/H-02 solo en HallazgosHadesRoutingTests. RED mediante --verificar: 4 tests, 6 fallos de subcasos por solicitud humana indebida; evidencia completa en el registro local. Producción todavía sin modificar.
+- Diseño actualizado con precedencia última declaración de salida > última declaración en sección final de tarea, extracción previa al recorte y etiquetas Markdown.
+- Hades review-test RECHAZADO (8,5/10): RT-01 ALTA para desarrollador, falta caso de dos declaraciones contradictorias en tarea sin destino en salida. Informe transcrito de su salida; sin acceso local del arnés, adjuntos exactos y limitación declarada.
+- El motor ordenó detener el paso por dos rechazos consecutivos. RT-01 enrutado a Artemisa para la próxima ejecución. No se declara completado ni se ha iniciado la corrección de producción o review-code de este intento.
+- Próximo intento: resolver RT-01, repetir review-test, corregir H-01/H-02 de producción y solicitar review-code. Suite completa reservada al cierre de versión.
+
+
+## Intervención humana Q-ADV-0002
+¿Puedes habilitar el acceso de Claude Code o configurar Hades con uno de sus arneses de reserva operativo para poder ejecutar la revisión obligatoria?
+RT-01 añadido. RED del triaje: 5 tests, 7 fallos de subcasos esperados; producción sin modificar. Hades no emite dictamen: Your organization has disabled Claude subscription access for Claude Code. El motor no conmuta a reservas ante este fallo y sigue encontrando Claude fuera del PATH. No existe valor por defecto seguro para habilitar una suscripción o cambiar la configuración de roles; hace falta un recurso operativo de revisión. Tras resolver: repetir review-test, corregir H-01/H-02 y solicitar review-code. Delta y evidencia documentados en ficha y revisión v1.1.2.
+Responder: /responder Q-ADV-0002 <respuesta>
+
+
+## Intervención humana Q-ADV-0002
+Q-ADV-0002: Decisión humana de 7495519376: Ya no tengo cuenta de claude. ¿No hay forma de hacer las pruebas con mocks? ¿Necesitamos tener llms para las pruebas? No deberíamos, no?
+
+## Reanudación actual
+
+RT-01 ya añadido en el árbol recibido. Se conserva base_calidad y el alcance de HallazgosHadesRoutingTests. Revisiones reiniciadas; no requiere modelos para ejecutar los tests, solo para el dictamen independiente de Hades.
+
+## Resultado de la reanudación
+
+- H-01/H-02 corregidos: seleccionar destino antes de truncar, última coincidencia de salida con prioridad sobre última de tarea, etiquetas Markdown reconocidas.
+- RT-01 ya incorporado al retomar; RT-02 resuelto verificando los campos Destino persistidos en tarea y revisión para las dos fuentes largas.
+- Hades review-test APROBADO (8,75/10) y review-code APROBADO (9/10), por --agente con adjuntos exactos ante la limitación de lectura local del arnés. Informes canónicos actualizados; sin hallazgos altos pendientes.
+- RED: 5 tests / 7 fallos esperados; GREEN: 5 tests OK mediante --verificar, sin LLM ni red. No se ejecutó la suite completa.
+- Triaje final: A [SKIP] contrato existente; B/C1/C2/D/E/F [EXEC]. Calidad conserva base_calidad; formato/lint omitidos por ausencia de herramientas, sin tipado/scanner configurados. Sin dependencias nuevas.

@@ -108,8 +108,9 @@ class DeudaMenorTests(unittest.TestCase):
                     comprobar.assert_called_once_with(self.root, nombre)
 
     def test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun(self):
-        self.assertEqual(orquestar.vkey('v1.20.4'), (1, 20))
-        self.assertIs(orquestar.vkey, metricas.clave_version_numerica)
+        self.assertEqual(orquestar.vkey('v1.20.4'), (1, 20, 4))
+        self.assertEqual(metricas.clave_version_numerica('v1.20.4'), (1, 20))
+        self.assertNotEqual(orquestar.vkey('v1.20.4'), metricas.clave_version_numerica('v1.20.4'))
         archivo = self.root / orquestar.METRICAS
         archivo.write_text('{"comando":"uno\u2028dos"}\n', encoding='utf-8')
         self.assertEqual(orquestar.leer_metricas(self.root), [{'comando': 'uno\u2028dos'}])

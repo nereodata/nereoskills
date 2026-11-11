@@ -1,10 +1,16 @@
 """Pruebas de empaquetado por lista blanca e inspección de contenido distribuible."""
 
+import io
+import os
 import tempfile
+import tomllib
 import unittest
 import zipfile
+from email import message_from_bytes
 from pathlib import Path
+from unittest.mock import patch
 
+from adevv import __version__, cli
 from adevv._build import (
     ForbiddenContentError,
     build_wheel,
@@ -118,6 +124,44 @@ class TestPackageAndInstructions(unittest.TestCase):
         """CA-M-2 / H-04: La raíz real del repositorio pasa la inspección de contenido distribuible."""
         real_root = Path(__file__).resolve().parents[1]
         inspect_distribution_cleanliness(real_root)
+
+
+class TestVersionPublica(unittest.TestCase):
+    """Contrasta la versión distribuida y la usada sin instalación activa."""
+
+    def test_version_del_paquete_y_consumidores_locales(self):
+        """La versión de publicación identifica el módulo, la consulta y la instalación."""
+        raiz = Path(__file__).resolve().parents[1]
+        with (raiz / "pyproject.toml").open("rb") as manifiesto:
+            version = tomllib.load(manifiesto)["project"]["version"]
+
+        with tempfile.TemporaryDirectory() as temporal:
+            wheel = build_wheel(temporal, config_settings={"root": str(raiz)})
+            with zipfile.ZipFile(Path(temporal) / wheel) as archivo:
+                metadatos = archivo.read(f"adevv-{version}.dist-info/METADATA")
+                self.assertEqual(message_from_bytes(metadatos)["Version"], version)
+                self.assertEqual(archivo.read("adevv/__init__.py"), (raiz / "adevv/__init__.py").read_bytes())
+
+            with self.subTest(origen="módulo"):
+                self.assertEqual(__version__, version)
+
+            almacen = Path(temporal) / "almacen"
+            with patch.dict(os.environ, {"ADEVV_HOME": str(almacen)}):
+                with self.subTest(origen="--version"), patch.object(cli, "DESTINOS", {}), patch.object(
+                    cli, "_resincronizar_desfasados_al_arrancar"
+                ):
+                    salida = io.StringIO()
+                    self.assertEqual(cli.main_cli(["--version"], out=salida, err=io.StringIO()), 0)
+                    self.assertEqual(salida.getvalue().splitlines()[0], f"Adevv {version}")
+
+                with (
+                    self.subTest(origen="instalar"),
+                    patch.object(cli.updater, "materializar_version_local") as materializar,
+                    patch.object(cli.updater, "limpiar_versiones_antiguas"),
+                    patch.object(cli, "sincronizar_destinos", return_value={}),
+                ):
+                    self.assertEqual(cli.comando_instalar(False, io.StringIO(), io.StringIO()), 0)
+                    materializar.assert_called_once_with(version)
 
 
 if __name__ == "__main__":

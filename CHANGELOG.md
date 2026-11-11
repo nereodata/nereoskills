@@ -2,6 +2,23 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.2] - 2026-11-11
+
+### Corregido
+
+- **B-ADV-0039** — Las cuotas de reservas de Hades conservan su historial sin detener pasos completados por otro proveedor; una revisión aún pendiente informa su proveedor y modelo reales.
+
+- **B-ADV-0036** — El cierre cuenta las recaídas por comprobación y causa. Tras tres en difícil, Hades revisa los arreglos y sus evidencias. Solo abre una pregunta humana cuando identifica la intervención necesaria.
+
+- **B-ADV-0033** — El detector conserva el destino antes de recortar la evidencia, admite etiquetas Markdown y prioriza la última declaración de salida sobre la última de la tarea.
+
+- **B-ADV-0040** — Hades continúa por sus reservas autorizadas ante suscripción de Claude deshabilitada, incluido el diagnóstico sin punto final y con sufijo explicativo, respeta perfiles estrictos y conserva la revisión pendiente sin preguntas nuevas. La recuperación del WIP espera al trabajo ajeno y preserva los bytes del parche en Windows.
+
+- **B-ADV-0034** — Responder preguntas del orquestador desde CLI local sin Telegram, compartiendo validación, persistencia e incorporación con el gateway y respetando dependencias.
+
+- **B-ADV-0032** — Los arneses se aíslan en una sesión POSIX para terminar también sus descendientes al vencer el timeout o la gracia tras JSON. Los timeouts no finitos recuperan el valor seguro por defecto. La supervisión continúa tras salir el padre o recibir EOF, y la desactivación explícita prevalece sobre el entorno. En Windows, un Job Object asignado antes de reanudar el arnés permite terminar los descendientes aunque el padre ya haya salido.
+- **B-ADV-0037** — El preflight, Telegram y la API de publicación bloquean el cierre con revisiones formales pendientes o rechazadas e indican cómo reanudarlas. El selector distingue parches; las métricas mantienen su agrupación histórica.
+
 ## [1.1.1] - 2026-11-10
 
 ### Corregido
