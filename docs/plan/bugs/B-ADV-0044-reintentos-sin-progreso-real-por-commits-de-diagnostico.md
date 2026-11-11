@@ -209,3 +209,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: C1 aprobada (9,75/10) sobre f9bf920b045f95ceb484762bf77b511e5d2ff7de. Ocho fallos de aserción reproducen D16, D17 y D18 en proveedor y preflight. Artemisa reanuda C2 para conservar la continuación citada, reconocer el rechazo tras x<y y mantener literal el guion dentro de HTML. Reevaluar D.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Reevaluación D rechazada por Hades (7,67/10) sobre el árbol 1a134d9bcb834658906fcf5b7ec08d49efeb65c1. D16, D17 y D18 resueltos. D19 alto, para Artemisa en C2: en un div, el atributo @click de pre hace que el lector acredite la aprobación del ejemplo y permita cerrar pese al rechazo exterior. Recuperar el rechazo del principal en una sola llamada y mantener la ficha pendiente por informe rechazado. Conservar el control con title, D17 y D15. Las ocho regresiones y las 194 pruebas del triaje pasaron. Reproducción en proveedor y preflight e informe literal en docs/review/code_reviews/B-ADV-0044-code-review.md.

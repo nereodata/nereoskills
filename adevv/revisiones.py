@@ -54,9 +54,10 @@ class CitasHTML(HTMLParser):
         r'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|'
         r'header|hgroup|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|'
         r'p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s/>]|$)', re.I)
-    etiqueta_aislada = re.compile(
-        r""" {0,3}(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*(?:\s+[\w:.-]+(?:\s*=\s*"""
-        r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*/?>)[ \t]*""", re.I)
+    etiqueta = (r"""(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*(?:\s+[\w:.-]+(?:\s*=\s*"""
+                r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*/?>)""")
+    etiqueta_aislada = re.compile(r' {0,3}' + etiqueta + r'[ \t]*', re.I)
+    inicio_incompleto = re.compile(r'(?!' + etiqueta + r')<(?=/?[a-z])', re.I)
 
     def __init__(self):
         super().__init__()
@@ -141,19 +142,30 @@ def contenido_del_informe(texto):
     return lineas
 
 
+def interrumpe_cita(linea):
+    """Reconoce bloques que pueden empezar sin línea en blanco tras un párrafo citado."""
+    return (CitasHTML.inicio_bloque_html.match(linea)
+            or re.match(r' {0,3}<(?:pre|script|style|textarea)(?=[\s>]|$)', linea, re.I)
+            or re.match(r' {0,3}<(?:!--|\?|![A-Z]|!\[CDATA\[)', linea)
+            or re.fullmatch(r' {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*', linea))
+
+
 def lineas_del_informe(texto):
     """Conserva las declaraciones del informe fuera de citas y ejemplos de código."""
     abierto = ''
     parrafo_citado = False
     citas_html = CitasHTML()
     sangrias = []
-    for original in contenido_del_informe(texto):
-        literal = abierto or citas_html.abiertas or citas_html.rawdata
+    for original in contenido_del_informe(CitasHTML.inicio_incompleto.sub('&lt;', texto)):
+        literal = abierto or citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata
         linea, marcador, cambio_lista = contenido_de_lista(original, sangrias, literal)
         if cambio_lista:
             citas_html = CitasHTML()
-            parrafo_citado = False
+            if marcador:
+                parrafo_citado = False
             abierto = ''
+        if parrafo_citado and interrumpe_cita(linea):
+            parrafo_citado = False
         if not abierto:
             visible = citas_html.sin_citas(linea)
             if visible is None:
