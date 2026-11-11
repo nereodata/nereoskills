@@ -2324,6 +2324,10 @@ def agente(root, rol, prompt):
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         timeout_rol = timeout_de_rol(cfg_actual, por_defecto=TIMEOUT_AGENTE_S)
         kwargs_lanzar = {'timeout': timeout_rol} if _acepta_kwarg(lanzar, 'timeout') else {}
+        if harness == 'codex' and os.name == 'nt' and 'CODEX_WINDOWS_REGISTERED_CORE' in os.environ:
+            entorno_rol = os.environ.copy()
+            entorno_rol.pop('CODEX_WINDOWS_REGISTERED_CORE', None)
+            kwargs_lanzar['env'] = entorno_rol
         if revision_formal and _acepta_kwarg(lanzar, 'solo_respuesta'):
             kwargs_lanzar['solo_respuesta'] = True
         entrada_arnes = None if harness == 'agy' else prompt_texto

@@ -1,6 +1,8 @@
 """Pruebas unitarias para reanudación de sesión codex y cálculo neto de tokens cacheados (B-ADV-0004)."""
 import importlib.util
 import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,6 +17,87 @@ def es_subsecuencia_contigua(sublista, lista):
     """Verifica si sublista aparece como elementos consecutivos en lista."""
     n = len(sublista)
     return any(lista[i:i + n] == sublista for i in range(len(lista) - n + 1))
+
+
+class EntornoRolTests(unittest.TestCase):
+    """Observa el comando y entorno entregados al crear el proceso de Hades."""
+
+    marca = 'CODEX_WINDOWS_REGISTERED_CORE'
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.padre = {self.marca: '1', 'CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY': 'familia',
+                      'CODEX_APP_TOOLS_PIPE_PATH': 'pipe-de-prueba', 'PROYECTO': 'ejemplo'}
+        self.enterContext(patch.dict(os.environ, self.padre, clear=True))
+        self.enterContext(patch.object(motor, 'buscar_ejecutable', side_effect=lambda nombre: nombre))
+        self.enterContext(patch.object(motor, 'construir_prompt_agente', return_value='revisa'))
+        self.enterContext(patch.object(motor, 'registrar'))
+        self.procesos = []
+
+    def lanzar_rol(self, plataforma='nt', sesion=None, codigos=(0,), arnes='codex'):
+        def proceso(cmd, **kwargs):
+            self.assertEqual(dict(os.environ), self.padre)
+            entorno = kwargs.get('env')
+            self.procesos.append((cmd, dict(os.environ if entorno is None else entorno)))
+            hijo = MagicMock()
+            hijo.returncode = codigos[len(self.procesos) - 1]
+            hijo.stdout = iter(())
+            return hijo
+
+        def captura(cmd, **kwargs):
+            hijo = proceso(cmd, **kwargs)
+            hijo.stdout, hijo.stderr = '{"result": "revisado"}', ''
+            return hijo
+
+        (self.root / 'orchestration.json').write_text(json.dumps({'hades': {'harness': arnes}}),
+                                                      encoding='utf-8')
+        with (patch.object(motor, 'os', wraps=os) as sistema,
+              patch.object(motor, 'buscar_sesion_agente', return_value=sesion),
+              patch.object(motor.subprocess, 'Popen', side_effect=proceso),
+              patch.object(motor.subprocess, 'run', side_effect=captura)):
+            sistema.name, sistema.environ = plataforma, os.environ
+            self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 0)
+        self.assertEqual(dict(os.environ), self.padre)
+
+    def comprobar_codex_windows(self, reanudaciones):
+        self.assertEqual(len(self.procesos), len(reanudaciones))
+        for (cmd, entorno), reanudada in zip(self.procesos, reanudaciones):
+            self.assertEqual(entorno, {k: v for k, v in self.padre.items() if k != self.marca})
+            self.assertEqual(cmd[:2], ['codex', 'exec'])
+            self.assertEqual('resume' in cmd, reanudada)
+            sandbox = ['-c', 'sandbox_mode="workspace-write"'] if reanudada else ['--sandbox', 'workspace-write']
+            self.assertTrue(es_subsecuencia_contigua(sandbox, cmd))
+            self.assertTrue(es_subsecuencia_contigua(['-c', 'approval_policy="never"'], cmd))
+            self.assertNotIn('--dangerously-bypass-approvals-and-sandbox', cmd)
+            self.assertNotIn('--skip-git-repo-check', cmd)
+            if reanudada:
+                self.assertTrue(es_subsecuencia_contigua(['resume', 'sesion-previa'], cmd))
+
+    def test_sesion_nueva(self):
+        self.lanzar_rol()
+        self.comprobar_codex_windows([False])
+
+    def test_sesion_reanudada(self):
+        self.lanzar_rol(sesion='sesion-previa')
+        self.comprobar_codex_windows([True])
+
+    def test_recuperacion_con_sesion_nueva(self):
+        self.lanzar_rol(sesion='sesion-previa', codigos=(1, 0))
+        self.comprobar_codex_windows([True, False])
+
+    def test_windows_sin_marca(self):
+        del self.padre[self.marca]
+        del os.environ[self.marca]
+        self.lanzar_rol()
+        self.comprobar_codex_windows([False])
+
+    def test_codex_fuera_de_windows(self):
+        self.lanzar_rol(plataforma='posix')
+        self.assertEqual([env for cmd, env in self.procesos], [self.padre])
+
+    def test_otro_arnes_en_windows(self):
+        self.lanzar_rol(arnes='claude')
+        self.assertEqual([env for cmd, env in self.procesos], [self.padre])
 
 
 class CodexResumeAndUsageTests(unittest.TestCase):
