@@ -6,6 +6,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0032** — Los arneses se aíslan en una sesión POSIX para terminar también sus descendientes al vencer el timeout o la gracia tras JSON. Los timeouts no finitos recuperan el valor seguro por defecto.
 - **B-ADV-0037** — El preflight, Telegram y la API de publicación bloquean el cierre con revisiones formales pendientes o rechazadas e indican cómo reanudarlas. El selector distingue parches; las métricas mantienen su agrupación histórica.
 
 ## [1.1.1] - 2026-11-10

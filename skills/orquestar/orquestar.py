@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1683,6 +1684,11 @@ def _terminar_arbol_proceso(p):
             )
         except Exception:
             pass
+    elif os.name == 'posix' and pid:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     try:
         p.kill()
     except Exception:
@@ -1704,6 +1710,8 @@ def timeout_de_rol(cfg, por_defecto=None, env=None):
         return por_defecto
     try:
         num = float(val)
+        if not math.isfinite(num):
+            return por_defecto
         return num if num > 0 else None
     except (TypeError, ValueError):
         return por_defecto
@@ -1746,6 +1754,7 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        start_new_session=(os.name == 'posix'),
     )
     if entrada is not None and p.stdin is not None:
         datos_in = entrada.encode('utf-8', errors='replace') if isinstance(entrada, str) else entrada
@@ -1902,7 +1911,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=None, gracia_cier
     temporizador = None
     with subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                          encoding='utf-8', errors='replace', env=env) as p:
+                          encoding='utf-8', errors='replace', env=env,
+                          start_new_session=(os.name == 'posix')) as p:
         if timeout is not None:
             def _vencio_timeout():
                 por_timeout[0] = True

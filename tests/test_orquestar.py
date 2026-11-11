@@ -1,8 +1,11 @@
 import importlib.util
 import json
+import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
@@ -2026,6 +2029,77 @@ class SubprocesoColgadoTests(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def test_timeout_no_finito_conserva_valor_seguro(self):
+        """Una configuración inválida no desactiva el timeout del agente."""
+        for valor in ('inf', '-inf', 'nan'):
+            with self.subTest(valor=valor):
+                self.assertEqual(motor.timeout_de_rol({'timeout_s': valor}, 1800), 1800)
+                for clave in ('ORQUESTAR_TIMEOUT_AGENTE_S', 'ORQUESTAR_TIMEOUT_S'):
+                    self.assertEqual(motor.timeout_de_rol({}, 1800, {clave: valor}), 1800)
+        self.assertIsNone(motor.timeout_de_rol({'timeout_s': 0}, 1800))
+        self.assertEqual(motor.timeout_de_rol({'timeout_s': 12}, 1800), 12)
+
+    def test_terminacion_posix_dirigida_al_grupo_aislado(self):
+        """La señal se dirige al grupo del arnés incluso si su padre ya salió."""
+        proceso = MagicMock(pid=12345, returncode=0)
+        proceso.poll.return_value = 0
+        with (patch.object(motor.os, 'name', 'posix'),
+              patch.object(motor, 'signal', signal, create=True),
+              patch.object(motor.os, 'killpg', create=True) as matar_grupo,
+              patch.object(motor.signal, 'SIGKILL', 9, create=True)):
+            motor._terminar_arbol_proceso(proceso)
+        matar_grupo.assert_called_once_with(12345, 9)
+        proceso.wait.assert_called_once_with(timeout=2)
+
+    @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
+    def test_descendiente_real_no_sobrevive_al_timeout_ni_a_gracia_json(self):
+        """Mata al hijo que hereda pipes sin alcanzar al grupo del invocador."""
+        for json_final in (False, True):
+            with self.subTest(json_final=json_final):
+                pid_file = self.root / 'hijo.pid'
+                grupo_file = self.root / 'grupo.pid'
+                grupo_invocador = os.getpgrp()
+                script = (
+                    'import os, subprocess, sys, time; from pathlib import Path; '
+                    'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                    f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+                    f'Path({str(grupo_file)!r}).write_text(str(os.getpgrp())); '
+                    f'print({("{\"status\":\"SUCCESS\",\"response\":\"ok\"}" if json_final else "iniciado")!r}, flush=True); '
+                    'time.sleep(60)'
+                )
+                inicio = time.monotonic()
+                try:
+                    with patch('builtins.print'):
+                        codigo, metricas, _ = motor.lanzar(
+                            [sys.executable, '-c', script, '--output-format', 'json'],
+                            self.root, 'agy', timeout=2, gracia_cierre=0.1)
+                    self.assertLess(time.monotonic() - inicio, 8)
+                    self.assertEqual(codigo, 0 if json_final else 124)
+                    self.assertTrue(metricas.get('cierre_forzado' if json_final else 'timeout'))
+                    self.assertNotEqual(int(grupo_file.read_text()), grupo_invocador)
+                    hijo_pid = int(pid_file.read_text())
+                    limite = time.monotonic() + 2
+                    while True:
+                        consulta = subprocess.run(['ps', '-o', 'stat=', '-p', str(hijo_pid)],
+                                                  capture_output=True, text=True, timeout=2)
+                        self.assertIn(consulta.returncode, (0, 1), consulta.stderr)
+                        self.assertEqual(consulta.stderr.strip(), '')
+                        estado = consulta.stdout.strip()
+                        if consulta.returncode == 0:
+                            self.assertTrue(estado, 'ps tuvo éxito sin devolver estado del proceso')
+                        if not estado or estado.startswith('Z'):
+                            break
+                        if time.monotonic() >= limite:
+                            self.fail(f'Descendiente {hijo_pid} sigue vivo: {estado}')
+                        time.sleep(0.02)
+                    self.assertEqual(os.getpgrp(), grupo_invocador)
+                finally:
+                    if pid_file.exists():
+                        try:
+                            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
     def test_lanzar_agy_cierra_con_gracia_cuando_proceso_se_cuelga_tras_emitir_json(self):
         script = (

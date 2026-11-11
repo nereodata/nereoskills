@@ -4,10 +4,10 @@ title: "Subproceso de agy colgado tras emitir salida o escribir artefactos bloqu
 type: bug
 weight: 20
 dificultad: media
-version: "v1.1.1"
+version: "v1.1.2"
 status: planned
 created_at: 2026-11-08
-updated_at: 2026-11-10
+updated_at: 2026-11-11
 ---
 
 # B-ADV-0032: Subproceso de agy colgado tras emitir salida o escribir artefactos bloquea indefinidamente lanzar() y --agente
@@ -46,14 +46,28 @@ updated_at: 2026-11-10
 - Subfase B: Diseño — `[EXEC]`; cambia el ciclo de vida de procesos compartido.
 - Subfase C1: Pruebas — `[EXEC]`; regresiones para JSON final, timeout y entrada de `agy`.
 - Subfase C2: Corrección — `[EXEC]`; lectura no bloqueante, terminación acotada y timeout propagado.
-- Subfase D: QA — `[PENDIENTE]`; revisión del delta completo al finalizar ambas correcciones del hotfix.
+- Subfase D: QA — `[EXEC]`; revisión del delta completo de B-ADV-0032 y resolución de H-01/H-02.
 - Subfase E: Documentación — `[EXEC]`; changelog de la versión parche.
-- Subfase F: Cierre — `[PENDIENTE]`; tras calidad y revisión.
+- Subfase F: Cierre — `[EXEC]`; tras calidad y revisión.
 - Verificación al cierre: `python -m unittest tests.test_orquestar.SubprocesoColgadoTests`, porque ejercita procesos reales que se cuelgan y la propagación de timeout.
 
 - base_calidad: 9a143486c663f2afe2bbe4e7ef3a30743c65532a (padre del commit de corrección 314f3d8; recuperada para la revisión formal pendiente).
+
+### Reanudación 2026-11-11
+
+- Se conserva la rama activa `hotfix/v1.1.2`, destinada al saneamiento de revisiones pendientes; no se cambia de rama ni se amplía el alcance a otros bugs.
+- H-01: aislar ambos Popen de lanzar en una sesión POSIX propia y terminar su grupo con SIGKILL; conservar taskkill /T en Windows y la espera acotada.
+- H-02: valores no finitos se tratan como configuración inválida y recuperan el valor por defecto; cero y negativos finitos mantienen la desactivación explícita existente.
+- C1 amplía exclusivamente SubprocesoColgadoTests: grupo POSIX, descendiente real con pipes heredados (timeout y gracia JSON), configuración no finita en perfil y entorno.
+- RED: 6 tests, 4 fallos de aserción esperados, 1 omitido por requerir POSIX. Host Windows sin WSL instalado; la regresión real POSIX queda conservada con skip explícito, nunca se declara ejecutada.
+- Chequeos adicionales del delta mediante --verificar: compilación de los dos Python afectados y git diff --check; calidad por --calidad con la base conservada. Sin herramientas de lint/tipado configuradas ni cambios de dependencias.
 
 ## Hallazgo de Hades enrutado
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades RECHAZADO en docs/review/code_reviews/B-ADV-0032-code-review.md. H-01 ALTA para desarrollador: POSIX mata solo al padre, debe aislar y terminar el grupo y verificar descendiente real dentro de SubprocesoColgadoTests. H-02 MEDIA para desarrollador, resolver: rechazar inf/nan y conservar timeout seguro. Decisión: Artemisa reanuda desarrollo; no se requiere recurso ni decisión humana.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-code RECHAZADO. H-01 persiste ALTA: padre JSON sale pero descendiente conserva pipes; vigilar streams y terminar grupo. H-03 MEDIA resolver: distinguir timeout ausente y desactivado al propagar perfil y entorno. H-04 ALTA: temporizador de captura por lineas se cancela antes de esperar proceso tras EOF. Todos para desarrollador/artemisa. Decision: reanudar desarrollo y ampliar solo SubprocesoColgadoTests; sin pregunta humana. H-02 resuelto; evidencia POSIX pendiente registrada en B-ADV-0038.

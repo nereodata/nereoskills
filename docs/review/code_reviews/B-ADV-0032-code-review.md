@@ -1,68 +1,109 @@
-**Veredicto:** RECHAZADO
+# B-ADV-0032 — Revisión independiente de código
 
-# Revisión de código — B-ADV-0032
+**Veredicto: RECHAZADO**
+**Media: 7,17/10. Persisten defectos de gravedad ALTA.**
 
-## Alcance y método
+## Alcance y limitaciones
 
-Revisión independiente del delta de `314f3d8df8660f4057e2723a41f9c992e76c0c05` respecto a `9a143486c663f2afe2bbe4e7ef3a30743c65532a`, contrastado con el código vigente adjunto. Alcance limitado a captura JSON, terminación de procesos, timeout, stdin de `agy` y propagación en sus llamantes.
+Revisión del delta completo de producción atribuible a B-ADV-0032 y de las correcciones de H-01/H-02, contrastado con las funciones vigentes adjuntas, la ficha del bug, el diseño y la plataforma.
 
-Se han considerado la ficha del bug, su diseño y el plan de plataforma facilitados. Quedan excluidos B-ADV-0033, las pruebas como código de producción y las distribuciones `dist/`.
+Se excluyen B-ADV-0033, B-ADV-0037, cualquier otro delta histórico y las pruebas como código de producción.
 
-Revisión realizada exclusivamente sobre los materiales adjuntos, sin herramientas ni acceso a disco. Las verificaciones siguientes son evidencia aportada por el invocador para el árbol `c5f35c016a`, sin cambios de código posteriores.
+El acceso al disco falló previamente en esta sesión. Esta revisión utiliza exclusivamente los materiales adjuntos: no se han leído las instrucciones instaladas de Hades y `/review-code`, comprobado el árbol ni escrito el archivo de destino. **No he ejecutado herramientas, pruebas ni modificaciones.**
 
-## Análisis estático y verificación
+## Evidencia aportada
 
-| Comprobación | Resultado y procedencia |
+| Comprobación | Resultado y límite |
 |---|---|
-| Regresión autorizada | `adevv orquestar --verificar "python -m unittest tests.test_orquestar.SubprocesoColgadoTests"`: 3 pruebas OK, 0,919 s, código 0. Evidencia reutilizada. |
-| Integridad del diff | `git diff --check 9a143486c663f2afe2bbe4e7ef3a30743c65532a`, mediante `--verificar`: código 0. Evidencia reutilizada. |
-| Formato y lint | `adevv orquestar --calidad --base 9a143486c663f2afe2bbe4e7ef3a30743c65532a`: código 0, pero ambas etapas **OMITIDAS** por ausencia de herramientas configuradas. No equivalen a comprobaciones aprobadas. |
-| Tipado | Omitido justificadamente: no hay herramientas configuradas. |
-| Dependencias | Auditoría no aplicable: no cambian dependencias en el alcance. |
-| Seguridad | Inspección manual del material: no se observan credenciales expuestas ni interpolación de comandos mediante shell en el delta revisado. No consta un escáner de seguridad ejecutado. |
+| Triaje autorizado mediante `--verificar` | 6 pruebas: 5 OK y 1 skip POSIX explícito; 0,897 s. Se reutiliza la evidencia. |
+| Compilación | `py_compile` de los dos Python afectados: OK. |
+| Integridad del diff | `git diff --check HEAD`: OK; comparación con base limitada a archivos de B-ADV-0032: OK. |
+| Comparación histórica global | Espacios finales preexistentes en informe de B-ADV-0033; excluidos de este alcance. |
+| Calidad | `--calidad --base 9a143486c663f2afe2bbe4e7ef3a30743c65532a --aplicar`: código 0 comunicado, con formato/lint **OMITIDOS**. No acredita su ejecución. |
+| Tipado y seguridad automatizada | Tipado no configurado; sin escáner de seguridad configurado. |
+| Dependencias y secretos | Sin dependencias nuevas declaradas. No se observan secretos en el material de producción revisado. |
+| Validación POSIX | No ejecutada. Seguimiento registrado como B-ADV-0038 según información aportada. |
 
-No se han repetido verificaciones ni ejecutado otros grupos de pruebas.
+La aprobación de las pruebas no acredita los caminos de producción señalados a continuación.
 
-## Puntuaciones
+## Puntuación
 
-| Criterio | Puntuación | Razón |
+| Criterio | Nota | Justificación |
 |---|---:|---|
-| Corrección | 6/10 | Corrige stdin y captura concurrente, pero no garantiza la terminación del árbol en POSIX. |
-| Seguridad | 9/10 | Invocaciones mediante argumentos y sin nuevas dependencias; no se observan secretos. |
-| Conformidad | 7/10 | Mantiene el motor y el stack establecidos; el cierre de descendientes exigido por el bug y el diseño queda incompleto. |
-| Calidad | 8/10 | Funciones separadas y contratos de retorno conservados; falta validar valores no finitos del timeout. |
-| Eficiencia | 8/10 | Sondeo y esperas explícitamente acotados; los descendientes pueden sobrevivir al cierre. |
-| Documentación | 8/10 | Explica el mecanismo, pero afirma una terminación del árbol que la implementación POSIX no realiza. |
+| Corrección | 6 | Corrige stdin y valores no finitos, pero quedan caminos de descendientes supervivientes y espera indefinida. |
+| Seguridad | 8 | Grupo POSIX aislado y comandos por argumentos; el cierre incompleto permite trabajo residual. |
+| Conformidad con diseño/arquitectura | 7 | Respeta motor y biblioteca estándar; no completa la garantía de terminación acotada. |
+| Calidad | 7 | Helpers separados, pero el ciclo de vida depende de la salida del padre y `None` tiene significados incompatibles. |
+| Eficiencia | 7 | Esperas y sondeo acotados en parte del flujo; persisten procesos residuales y una espera sin límite. |
+| Documentación | 8 | Diseño y changelog describen la intención y las limitaciones de validación; la garantía de cierre excede el comportamiento implementado. |
+| **Media** | **7,17** | No supera 8 y existen hallazgos ALTA. |
 
-**Media: 7,67/10.** Existe un hallazgo de gravedad alta; no procede aprobar.
+## Reevaluación de hallazgos anteriores
 
-## Hallazgos
+### H-01 — ALTA — PERSISTE parcialmente: salir el padre evita terminar el grupo
 
-### H-01 — 🟠 ALTA: en POSIX se termina únicamente el proceso directo
+**Para:** desarrollador
+**Destino:** resolver
+**Ubicación:** `skills/orquestar/orquestar.py`, `_ejecutar_captura_json()`, bucle `while p.poll() is None` y finalización de lectores.
 
-- **Para:** desarrollador
-- **Destino:** resolver
-- **Ubicación:** `skills/orquestar/orquestar.py`, líneas 1666–1687 y 1736–1743; llamadas desde 1800–1807.
-- **Evidencia:** `_terminar_arbol_proceso()` utiliza `taskkill /T` exclusivamente en Windows. En POSIX ejecuta solo `p.kill()` y `p.wait()`. El `Popen` tampoco establece una sesión o grupo independiente que permita terminar conjuntamente al arnés y sus descendientes.
-- **Caso concreto:** `agy` crea un hijo que hereda stdout o stderr y permanece vivo. Al vencer el timeout o la gracia posterior al JSON, se mata al proceso directo, pero el hijo continúa ejecutándose y conserva los descriptores heredados.
-- **Impacto:** incumple la terminación del árbol requerida para B-ADV-0032. Aunque la ruta JSON limita la espera de los lectores y puede devolver el control, deja trabajo del arnés activo: ese descendiente puede seguir consumiendo recursos o modificando artefactos después de que el invocador haya registrado el cierre.
-- **Corrección requerida:** establecer y terminar una unidad de procesos aislada en POSIX, sin alcanzar al orquestador, con espera acotada. Mantener el resultado JSON y sus métricas cuando corresponda.
-- **Validación requerida:** incorporar al grupo de regresión autorizado un caso con descendiente real que herede un pipe y comprobar que no sobrevive al timeout o al cierre forzado. El verde aportado no acredita expresamente esta condición.
+**Corrección reconocida:** ambos `Popen` crean sesión propia en POSIX. `_terminar_arbol_proceso()` señaliza el grupo mediante `killpg(pid, SIGKILL)` incluso si el líder ya salió, siempre que se invoque.
 
-### H-02 — 🟡 MEDIA: valores no finitos pueden eliminar el límite de espera
+**Defecto restante:** la captura JSON deja de vigilar timeout y gracia en cuanto termina el proceso directo. Si el padre crea un descendiente que hereda stdout/stderr, emite el JSON y sale, el bucle termina sin llamar al helper. Tras los `join` limitados se cierran los streams y se devuelve el resultado, pero el descendiente continúa vivo.
 
-- **Para:** desarrollador
-- **Destino:** resolver
-- **Ubicación:** `skills/orquestar/orquestar.py`, líneas 1690–1703.
-- **Evidencia:** `float(val)` acepta valores como `"inf"` y `"nan"`. El primero supera `num > 0` y se devuelve como timeout infinito; el segundo devuelve `None`. Ambos evitan el valor por defecto de 1800 segundos de `agente()`.
-- **Caso concreto:** con `ORQUESTAR_TIMEOUT_AGENTE_S=inf` y un arnés que no emite JSON final, la comparación de vencimiento nunca se cumple. Con `nan`, y sin otro timeout general, queda desactivada.
-- **Impacto:** una configuración inválida vuelve a permitir la espera indefinida que este bug pretende acotar.
-- **Corrección requerida:** comprobar que el número sea finito antes de aceptarlo y aplicar el tratamiento de configuración inválida ya existente. Definir por separado cualquier desactivación intencionada mediante valores no positivos.
+Esto también puede ocurrir si el padre sale durante la gracia posterior al JSON. La capacidad del helper de matar un grupo cuyo líder terminó no resuelve la ausencia de llamada desde este camino.
+
+**Impacto:** permanece el incumplimiento de terminación del árbol identificado en H-01. El descendiente puede seguir consumiendo recursos o modificando artefactos después del retorno.
+
+**Corrección requerida:** mantener la supervisión del cierre de los streams y del grupo tras la salida del padre, con plazo acotado y terminación del grupo cuando corresponda. Conservar respuesta y métricas.
+
+### H-02 — MEDIA — RESUELTO: rechazo de timeouts no finitos
+
+**Para:** desarrollador
+**Destino:** descartar como pendiente
+**Ubicación:** `timeout_de_rol()`.
+
+`math.isfinite(num)` rechaza `inf`, `-inf` y `nan` antes de interpretar valores no positivos como desactivación. En `agente()`, estas entradas recuperan el valor seguro de 1800 segundos.
+
+La resolución se acredita por inspección y por la evidencia de regresión aportada. No implica validación POSIX real.
+
+## Hallazgos nuevos
+
+### H-03 — MEDIA — La desactivación explícita del timeout se pierde al propagarse
+
+**Para:** desarrollador
+**Destino:** resolver
+**Ubicación:** `timeout_de_rol()`, `ejecutar()`, `agente()` y comienzo de `lanzar()`.
+
+Un cero o negativo finito del perfil produce `None`, conforme al diseño. Sin embargo, `lanzar(timeout=None)` vuelve a consultar el entorno porque interpreta ese mismo valor como ausencia de configuración.
+
+**Caso concreto:** perfil con `timeout_s: 0` y `ORQUESTAR_TIMEOUT_S=60`. El perfil solicita desactivación, pero `lanzar()` recupera 60 y termina el arnés por timeout. En `ejecutar()` además se omite el argumento cuando el resultado es `None`.
+
+**Impacto:** se incumple la precedencia del perfil y la desactivación explícita documentada, pudiendo interrumpirse trabajo válido.
+
+**Corrección requerida:** distinguir «timeout no especificado» de «timeout desactivado» y conservar esa distinción entre los consumidores.
+
+### H-04 — ALTA — La captura por líneas cancela el timeout antes de esperar al proceso
+
+**Para:** desarrollador
+**Destino:** resolver
+**Ubicación:** `lanzar()`, rama de captura por líneas, `finally` y salida del contexto `Popen`.
+
+El temporizador se cancela al terminar la lectura de stdout, antes de abandonar el contexto `Popen`, cuya salida espera al proceso.
+
+**Caso concreto:** un arnés de esta rama cierra stdout/stderr y continúa ejecutándose. La iteración recibe EOF, el `finally` cancela el temporizador y la salida del contexto espera indefinidamente. También puede alcanzarse EOF por una excepción antes de completar el proceso.
+
+**Impacto:** el timeout incorporado por B-ADV-0032 deja de proteger la espera final y permite reproducir un bloqueo indefinido.
+
+**Corrección requerida:** mantener el límite durante todo el ciclo de vida, incluida la espera posterior a EOF, y cancelar el temporizador únicamente tras confirmar la terminación o completar una finalización acotada.
 
 ## Aspectos conformes
 
-`agente()` pasa `entrada=None` a `agy` tanto en la primera invocación como en el reintento, y la captura JSON lo traduce a `stdin=subprocess.DEVNULL`. Los dos streams se leen concurrentemente y los llamantes evitan reiniciar una sesión como nueva cuando las métricas indican timeout.
+`agy` recibe `entrada=None` tanto en la invocación inicial como en el reintento. La captura JSON lee ambos streams concurrentemente, conserva métricas tras cierre forzado y los llamantes evitan reiniciar una sesión cuando se informa timeout.
 
-La implementación permanece en el motor existente y utiliza la biblioteca estándar, de acuerdo con el plan de plataforma. No se identifica una desviación arquitectónica que requiera una nueva DEC.
+La implementación mantiene el stack y las capas existentes, sin nuevas dependencias ni necesidad identificada de una decisión arquitectónica adicional.
 
-El reporte queda preparado para que Artemisa enrute los hallazgos a desarrollo y solicite su reevaluación.
+## Dictamen
+
+**RECHAZADO.** H-02 queda resuelto; H-01 persiste en el camino donde el padre termina antes que sus descendientes. H-03 y H-04 son hallazgos nuevos del delta revisado.
+
+La validación POSIX pendiente permanece registrada en B-ADV-0038. Su ausencia no es el motivo del rechazo: los defectos descritos se deducen del flujo de producción adjunto.
