@@ -5,9 +5,10 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 created_at: 2026-11-08
 updated_at: 2026-11-11
+pendiente_de: humano
 ---
 
 # B-ADV-0032: Subproceso de agy colgado tras emitir salida o escribir artefactos bloquea indefinidamente lanzar() y --agente
@@ -82,3 +83,9 @@ updated_at: 2026-11-11
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades review-test RECHAZADO 8,25. RT-01 ALTA para desarrollador: verificar start_new_session en Popen de captura por lineas. RT-02 MEDIA resolver: ampliar timeout de 0,2s de prueba real para tolerar arranque. RED: 10 tests, 4 fallos esperados y 1 skip POSIX; produccion sin corregir. El motor ordena parar por dos rechazos consecutivos. Decision: reanudar Artemisa con perfil superior; sin pregunta humana.
+
+
+## Intervención humana Q-ADV-0001
+¿Qué perfil operativo debe usar Hades: restaurar el acceso a Claude Code o seleccionar una de las reservas ya configuradas?
+C1 pendiente de review-test. La invocacion obligatoria adevv orquestar --agente hades --prompt-file fallo con codigo 1: Your organization has disabled Claude subscription access for Claude Code. No hubo veredicto nuevo y el lanzador no conmuta reservas ante este error. Se conservan RT-01 (prueba portable de sesion POSIX) y RT-02 (timeout real 2 s). RED: 11 tests, 4 fallos esperados, 1 skip POSIX. Compilacion y diff --check verdes; formato/lint omitidos por ausencia de herramientas. Produccion sin modificar; H-01/H-03/H-04 siguen pendientes. Se requiere recurso de acceso o decision de configuracion, no permiso de publicacion.
+Responder: /responder Q-ADV-0001 <respuesta>
