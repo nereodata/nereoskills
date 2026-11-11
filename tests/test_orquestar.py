@@ -2092,6 +2092,64 @@ class SubprocesoColgadoTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    @unittest.skipUnless(os.name == 'nt', 'Requiere procesos Windows reales')
+    def test_windows_descendiente_con_padre_salido_y_pipes_heredados(self):
+        """El cierre alcanza al hijo después de salir el padre, en ambos lectores."""
+        for modo in ('json_gracia', 'json_timeout', 'lineas_timeout'):
+            with self.subTest(modo=modo):
+                pid_file = self.root / 'hijo.pid'
+                resultado = self.root / 'resultado.json'
+                pid_file.unlink(missing_ok=True)
+                resultado.unlink(missing_ok=True)
+                mensaje = ('{"status":"SUCCESS","response":"ok","usage":{"input_tokens":7}}'
+                           if modo == 'json_gracia' else 'iniciado')
+                padre = (
+                    'import subprocess, sys; from pathlib import Path; '
+                    'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                    f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
+                    f'print({mensaje!r}, flush=True)'
+                )
+                cmd = [sys.executable, '-c', padre]
+                harness = 'codex' if modo == 'lineas_timeout' else 'agy'
+                if harness == 'agy':
+                    cmd += ['--output-format', 'json']
+                worker = (
+                    'import json; from pathlib import Path; from tests.test_orquestar import motor; '
+                    f'r = motor.lanzar({cmd!r}, Path({str(self.root)!r}), {harness!r}, '
+                    f'timeout=3, gracia_cierre={0.2 if modo == "json_gracia" else 10}); '
+                    f'Path({str(resultado)!r}).write_text(json.dumps(r))'
+                )
+                proceso = subprocess.Popen([sys.executable, '-c', worker],
+                                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    try:
+                        proceso.wait(timeout=12)
+                    except subprocess.TimeoutExpired:
+                        self.assertTrue(pid_file.exists(), 'El padre no llegó a crear al hijo')
+                        self.fail('lanzar sigue bloqueado 12 s después de iniciar el padre')
+                    self.assertEqual(proceso.returncode, 0)
+                    codigo, metricas, salida = json.loads(resultado.read_text())
+                    self.assertEqual(codigo, 0 if modo == 'json_gracia' else 124)
+                    self.assertTrue(metricas.get('cierre_forzado' if modo == 'json_gracia' else 'timeout'))
+                    self.assertIn(mensaje, salida)
+                    if modo == 'json_gracia':
+                        self.assertEqual(metricas['modelos']['agy']['entrada'], 7)
+                    self.assertTrue(pid_file.exists(), 'El padre no llegó a crear al hijo')
+                    consulta = subprocess.run(
+                        ['tasklist', '/FI', f'PID eq {int(pid_file.read_text())}', '/FO', 'CSV', '/NH'],
+                        capture_output=True, text=True, timeout=3)
+                    self.assertEqual(consulta.returncode, 0, consulta.stderr)
+                    self.assertNotIn(f'"{int(pid_file.read_text())}"', consulta.stdout,
+                                     'El descendiente continúa vivo tras devolver el control')
+                finally:
+                    if proceso.poll() is None:
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', str(proceso.pid)],
+                                       capture_output=True, timeout=3)
+                        proceso.wait(timeout=3)
+                    if pid_file.exists():
+                        subprocess.run(['taskkill', '/F', '/T', '/PID', pid_file.read_text()],
+                                       capture_output=True, timeout=3)
+
     def test_padre_salido_con_pipes_abiertos_agota_gracia(self):
         """El cierre del padre no abandona al descendiente que mantiene los pipes."""
         cerrado = motor.threading.Event()

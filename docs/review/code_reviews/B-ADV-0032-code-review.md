@@ -1,3 +1,141 @@
+# B-ADV-0032 — Revisión independiente de código tras H-05
+
+**Veredicto: APROBADO**
+**Revisor:** Hades
+**Árbol declarado:** `0cdd8f63744580c4d920d9897e3d7e7f5502182c`
+**Media: 8,67/10. Sin hallazgos ALTA ni CRÍTICA vigentes.**
+**Destino:** `docs/review/code_reviews/B-ADV-0032-code-review.md`
+
+## Alcance y límites
+
+Una revisión estática independiente del delta completo de producción de B-ADV-0032: creación y terminación de procesos, captura JSON y por líneas, resolución y propagación del timeout y entrada de `agy`.
+
+Se reevalúa H-05 y su interacción con H-01/H-02/H-03/H-04, contrastando el código y diff exactos adjuntos con la ficha, el diseño actualizado y la plataforma.
+
+Se aplican las instrucciones adjuntas de Hades y `/review-code`. Los materiales proporcionados se utilizan desde el principio. No se afirma lectura directa del repositorio.
+
+Se excluyen las pruebas como producción y las modificaciones de otros IDs, incluida la conmutación por acceso de suscripción. No se ejecutaron pruebas, calidad ni suite completa; tampoco se cambió código o perfiles.
+
+Se consultó documentación oficial de Microsoft para contrastar la semántica de las APIs Windows. Esta consulta no constituye ejecución ni reproducción del código.
+
+## Análisis estático y evidencia
+
+| Comprobación | Resultado y límite |
+|---|---|
+| Regresión del triaje | Coordinador `--verificar`, árbol `0cdd8f6374`: 12 pruebas en 11,285 s, OK con un skip POSIX explícito. No se repite. |
+| Compilación | `python -m py_compile skills/orquestar/orquestar.py tests/test_orquestar.py`, verde del mismo árbol. No se repite. |
+| Integridad del diff | `git diff --check`, verde del mismo árbol. No se repite. |
+| Calidad por tarea | `adevv orquestar --calidad --base 9a143486c663f2afe2bbe4e7ef3a30743c65532a`, código 0 del mismo árbol, sin escritura. Formato y lint explícitamente **OMITIDOS** por ausencia de herramientas; no se acreditan como ejecutados. |
+| Tipado y secretos | Sin herramientas configuradas. No se observan secretos en el material revisado; no equivale a un escaneo automatizado. |
+| Dependencias | Sin cambios declarados; no procede auditoría de dependencias nuevas. |
+| Review-test | H-05 APROBADO, 8,75/10, sin hallazgos nuevos, según informe aportado. No se repite esa revisión. |
+| POSIX real | No acreditado; seguimiento conservado en B-ADV-0038. |
+
+Se distingue el RED de H-05 sobre `c6acc8eeb5` —tres fallos del watchdog— del GREEN actual. El GREEN intermedio sobre `7df1c12266` no sustituye a la evidencia aportada del árbol revisado.
+
+## Puntuaciones
+
+| Criterio | Nota | Justificación |
+|---|---:|---|
+| Corrección | 9 | El job conserva la terminación Windows tras salir el padre; se mantienen supervisión, precedencia y espera protegida. |
+| Seguridad | 9 | El arnés se asigna suspendido, antes de permitir la creación de descendientes; comandos por argumentos y aislamiento POSIX conservados. |
+| Conformidad | 9 | Implementa el diseño actualizado dentro del motor existente, con biblioteca estándar y sin contradicción identificada con las DEC. |
+| Calidad | 8 | Centraliza creación y cierre; la integración Win32 añade complejidad localizada y firmas explícitas. |
+| Eficiencia | 8 | Sin nuevo sondeo durante la ejecución; snapshot de hilos al arrancar, recursos cerrados y esperas de terminación acotadas. |
+| Documentación | 9 | Diseño y changelog describen el mecanismo Windows y mantienen el alcance y las limitaciones de validación. |
+| **Media** | **8,67** | **Supera 8, sin hallazgos bloqueantes.** |
+
+## Reevaluación de hallazgos
+
+| Hallazgo | Gravedad original | Estado | Para | Destino |
+|---|---|---|---|---|
+| H-01: supervisión tras salir el padre y terminación del grupo POSIX | ALTA | **Resuelto; se mantiene cerrado** | Desarrollador | Resolver; corrección satisfecha |
+| H-02: timeout no finito | MEDIA | **Resuelto; se mantiene cerrado** | Desarrollador | Descartar como pendiente |
+| H-03: distinguir timeout omitido y desactivado | MEDIA | **Resuelto; se mantiene cerrado** | Desarrollador | Resolver; corrección satisfecha |
+| H-04: proteger la espera posterior al EOF | ALTA | **Resuelto; se mantiene cerrado** | Desarrollador | Resolver; corrección satisfecha |
+| H-05: terminación Windows después de salir el padre | ALTA | **Resuelto** | Desarrollador / Artemisa | Resolver en B-ADV-0032; corrección satisfecha |
+
+### H-05 — Resuelto: terminación independiente del PID raíz
+
+`_proceso_agrupado()` crea el Job Object antes del lanzamiento Windows, activa `KILL_ON_JOB_CLOSE` y crea el proceso con `CREATE_SUSPENDED`. Asigna el proceso al job antes de reanudar su hilo. La capacidad de terminación queda en un handle del invocador y sobrevive a la salida del padre.
+
+`_terminar_arbol_proceso()` utiliza `TerminateJobObject` cuando existe ese trabajo, antes del respaldo de terminación y la espera acotada. La operación termina los miembros asociados al job, incluidos los de sus jobs hijos; no necesita localizar nuevamente el árbol mediante el PID raíz. [Microsoft, TerminateJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject).
+
+Ambos caminos reales, JSON y líneas, usan el helper. El cierre del contexto libera el job; con `KILL_ON_JOB_CLOSE` termina los miembros residuales. Los hijos creados normalmente mediante `CreateProcess` pertenecen al job por defecto, y el código no habilita las opciones de breakaway. [Microsoft, Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects).
+
+Los fallos de asignación o reanudación abortan el lanzamiento, intentan matar y esperar al proceso suspendido y pasan por el cierre del job. No se degradan silenciosamente al mecanismo anterior. El snapshot y el handle del hilo se cierran mediante `finally`.
+
+La reanudación utiliza `OpenThread` con permiso de suspensión/reanudación y comprueba el indicador de error de `ResumeThread`. Es coherente con el proceso recién creado suspendido. [Microsoft, ResumeThread](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-resumethread).
+
+La inspección resuelve la dependencia anterior de `taskkill` sobre un padre desaparecido. La evidencia GREEN aportada complementa esta conclusión con los tres casos Windows del triaje. No se atribuye reproducción propia.
+
+### H-01 — Se mantiene resuelto
+
+La captura JSON continúa supervisando proceso y lectores conjuntamente. Conserva timeout y gracia después de salir el padre y aplica un plazo de cierre desde esa salida.
+
+Ambos consumidores conservan `start_new_session` en POSIX. El helper mantiene `killpg` aunque el líder haya terminado. La introducción del contexto compartido no elimina esa lógica.
+
+La validación POSIX real continúa pendiente; no se transforma la inspección estática ni el GREEN Windows en evidencia POSIX.
+
+### H-02 — Se mantiene resuelto
+
+`timeout_de_rol()` conserva `math.isfinite` antes de aceptar valores positivos o interpretar valores finitos no positivos como desactivación.
+
+Las entradas no finitas recuperan el valor por defecto. La corrección Windows no altera esta resolución.
+
+### H-03 — Se mantiene resuelto
+
+Se conserva `_TIMEOUT_OMITIDO`: `None` explícito no recupera el timeout del entorno.
+
+`ejecutar()` y `agente()` propagan el valor resuelto, incluida la desactivación. No se identifica una regresión de precedencia introducida por H-05.
+
+### H-04 — Se mantiene resuelto
+
+El temporizador de captura por líneas permanece activo durante `p.wait()` y se cancela después.
+
+Su callback alcanza ahora el job Windows incluso con el padre terminado. Esto resuelve la interacción que anteriormente podía mantener abiertos los pipes pese al vencimiento del temporizador.
+
+## Revisión del conjunto
+
+La captura JSON conserva la lectura concurrente de stdout/stderr, la supervisión mediante reloj monotónico y la recuperación de salida y métricas tras cierre forzado.
+
+El handle Windows permanece disponible durante la supervisión y se libera al abandonar el contexto. Ambos consumidores comparten la misma creación agrupada; no queda un segundo lanzamiento real que conserve únicamente la estrategia anterior.
+
+`agente()` sigue pasando `entrada=None` para `agy`, tanto inicialmente como en el reintento sin sesión. Los consumidores conservan la exclusión del reintento por sesión cuando las métricas indican timeout.
+
+La implementación permanece en el motor existente, usa biblioteca estándar y no introduce dependencias inversas ni un motor duplicado. El diseño actualizado documenta la agrupación Windows, sus consumidores y su limpieza. No se identifica una desviación arquitectónica que requiera una DEC adicional.
+
+El changelog describe el mecanismo implementado y no afirma validación POSIX real.
+
+## Hallazgos nuevos
+
+No se identifican hallazgos nuevos en el delta revisado.
+
+## Antecedentes conservados
+
+- **Revisión anterior: RECHAZADO, media 7,17/10.** H-01 persistía parcialmente porque la supervisión JSON terminaba al salir el padre. H-02 estaba resuelto. Se incorporaron H-03, por perder la desactivación explícita del timeout, y H-04, por cancelar el temporizador antes de esperar al proceso.
+- **Revisión inmediatamente anterior, árbol `fff2e720d2`: RECHAZADO, media 7,50/10.** Reconoció H-01/H-03/H-04 resueltos y mantuvo H-02 cerrado. Identificó H-05 ALTA: `taskkill` sobre el PID del padre terminado no garantizaba terminar descendientes con pipes heredados.
+- **Review-test de H-05: APROBADO, media 8,75/10.** Evaluó los tres modos Windows con RED específico. Posteriormente, el coordinador aportó GREEN, incluido el del árbol actual.
+- La ejecución POSIX real permanece registrada en **B-ADV-0038**, sin duplicar su seguimiento.
+
+Este dictamen debe incorporarse por delante de los informes históricos, conservando íntegramente sus textos.
+
+## Dictamen
+
+**APROBADO para el delta de producción de B-ADV-0032 revisado.**
+
+H-05 queda resuelto. Se mantienen cerrados H-01/H-02/H-03/H-04 y no se identifican regresiones nuevas en su interacción.
+
+La validación POSIX real continúa pendiente en B-ADV-0038. No se declara ejecutada ni se solicita repetir las verificaciones verdes o la suite completa.
+
+## Entrega del informe
+
+El intento de escritura en `docs/review/code_reviews/B-ADV-0032-code-review.md` falló. Se entrega aquí el contenido íntegro para su transcripción por el coordinador, conservando los informes anteriores. No se atribuye escritura satisfactoria ni lectura directa del árbol.
+
+---
+
+## Informes anteriores
+
 # B-ADV-0032 — Reevaluación de código
 
 **Veredicto: RECHAZADO**

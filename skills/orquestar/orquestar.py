@@ -27,6 +27,7 @@ import tempfile
 import threading
 import time
 import tomllib
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1661,6 +1662,7 @@ TIMEOUT_AGENTE_S = 1800
 GRACIA_CIERRE_JSON_S = 10
 _TIMEOUT_OMITIDO = object()
 _SUBPROCESS_RUN = subprocess.run
+_SUBPROCESS_POPEN = subprocess.Popen
 
 
 def _extraer_json_final(harness, texto):
@@ -1681,10 +1683,130 @@ def _extraer_json_final(harness, texto):
     return None
 
 
+class _TrabajoWindows:
+    """Conserva un Job Object que alcanza descendientes después de salir el padre."""
+
+    def __init__(self):
+        class Limites(ctypes.Structure):
+            _fields_ = [('tiempo_proceso', ctypes.c_int64), ('tiempo_job', ctypes.c_int64),
+                        ('flags', ctypes.c_ulong), ('minimo', ctypes.c_size_t),
+                        ('maximo', ctypes.c_size_t), ('procesos', ctypes.c_ulong),
+                        ('afinidad', ctypes.c_size_t), ('prioridad', ctypes.c_ulong),
+                        ('planificacion', ctypes.c_ulong)]
+
+        class LimitesExtendidos(ctypes.Structure):
+            _fields_ = [('basicos', Limites), ('io', ctypes.c_uint64 * 6),
+                        ('memoria_proceso', ctypes.c_size_t), ('memoria_job', ctypes.c_size_t),
+                        ('pico_proceso', ctypes.c_size_t), ('pico_job', ctypes.c_size_t)]
+
+        self.kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        firmas = {
+            'CreateJobObjectW': ([ctypes.c_void_p, ctypes.c_wchar_p], ctypes.c_void_p),
+            'SetInformationJobObject': ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p,
+                                         ctypes.c_ulong], ctypes.c_int),
+            'AssignProcessToJobObject': ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
+            'TerminateJobObject': ([ctypes.c_void_p, ctypes.c_uint], ctypes.c_int),
+            'CloseHandle': ([ctypes.c_void_p], ctypes.c_int),
+            'CreateToolhelp32Snapshot': ([ctypes.c_ulong, ctypes.c_ulong], ctypes.c_void_p),
+            'Thread32First': ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
+            'Thread32Next': ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
+            'OpenThread': ([ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong], ctypes.c_void_p),
+            'ResumeThread': ([ctypes.c_void_p], ctypes.c_ulong),
+        }
+        for nombre, (args, resultado) in firmas.items():
+            fn = getattr(self.kernel, nombre)
+            fn.argtypes, fn.restype = args, resultado
+        self.handle = self.kernel.CreateJobObjectW(None, None)
+        if not self.handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        limites = LimitesExtendidos()
+        limites.basicos.flags = 0x2000
+        if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limites),
+                                                  ctypes.sizeof(limites)):
+            error = ctypes.WinError(ctypes.get_last_error())
+            self.cerrar()
+            raise error
+
+    def asignar_y_reanudar(self, proceso):
+        """Asigna el proceso suspendido antes de permitir que cree descendientes."""
+        if not self.kernel.AssignProcessToJobObject(self.handle, int(proceso._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+        class EntradaHilo(ctypes.Structure):
+            _fields_ = [('tamano', ctypes.c_ulong), ('usos', ctypes.c_ulong),
+                        ('tid', ctypes.c_ulong), ('pid', ctypes.c_ulong),
+                        ('prioridad', ctypes.c_long), ('delta', ctypes.c_long),
+                        ('flags', ctypes.c_ulong)]
+
+        snapshot = self.kernel.CreateToolhelp32Snapshot(4, 0)
+        if snapshot == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entrada = EntradaHilo()
+            entrada.tamano = ctypes.sizeof(entrada)
+            existe = self.kernel.Thread32First(snapshot, ctypes.byref(entrada))
+            while existe:
+                if entrada.pid == proceso.pid:
+                    hilo = self.kernel.OpenThread(2, False, entrada.tid)
+                    if not hilo:
+                        raise ctypes.WinError(ctypes.get_last_error())
+                    try:
+                        if self.kernel.ResumeThread(hilo) == 0xffffffff:
+                            raise ctypes.WinError(ctypes.get_last_error())
+                        return
+                    finally:
+                        self.kernel.CloseHandle(hilo)
+                entrada.tamano = ctypes.sizeof(entrada)
+                existe = self.kernel.Thread32Next(snapshot, ctypes.byref(entrada))
+            raise OSError('No se encontró el hilo inicial del arnés suspendido')
+        finally:
+            self.kernel.CloseHandle(snapshot)
+
+    def terminar(self):
+        """Termina todos los miembros, aunque ya no exista el PID raíz."""
+        if not self.kernel.TerminateJobObject(self.handle, 124):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def cerrar(self):
+        """Libera el job con KILL_ON_JOB_CLOSE, también en salidas excepcionales."""
+        if self.handle:
+            self.kernel.CloseHandle(self.handle)
+            self.handle = None
+
+
+@contextmanager
+def _proceso_agrupado(cmd, **kwargs):
+    """Crea un árbol aislado y conserva su capacidad de cierre hasta el retorno."""
+    trabajo = None
+    p = None
+    if os.name == 'nt' and subprocess.Popen is _SUBPROCESS_POPEN:
+        trabajo = _TrabajoWindows()
+        kwargs['creationflags'] = kwargs.get('creationflags', 0) | 0x00000004
+    try:
+        p = subprocess.Popen(cmd, **kwargs)
+        if trabajo is not None:
+            p._orquestar_trabajo = trabajo
+            try:
+                trabajo.asignar_y_reanudar(p)
+            except BaseException:
+                p.kill()
+                p.wait(timeout=2)
+                raise
+        yield p
+    finally:
+        if trabajo is not None:
+            trabajo.cerrar()
+        if p is not None:
+            p.__exit__(None, None, None)
+
+
 def _terminar_arbol_proceso(p):
     """Termina el subproceso y su árbol de procesos hijos sin bloquear indefinidamente."""
     pid = getattr(p, 'pid', None)
-    if os.name == 'nt' and pid:
+    trabajo = getattr(p, '_orquestar_trabajo', None)
+    if isinstance(trabajo, _TrabajoWindows):
+        trabajo.terminar()
+    elif os.name == 'nt' and pid:
         try:
             _SUBPROCESS_RUN(
                 ['taskkill', '/F', '/T', '/PID', str(pid)],
@@ -1758,7 +1880,7 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
                 return 0, out, err, False, True
             return 124, out, err, True, False
 
-    p = subprocess.Popen(
+    with _proceso_agrupado(
         cmd,
         cwd=root,
         stdin=subprocess.PIPE if entrada is not None else subprocess.DEVNULL,
@@ -1766,102 +1888,102 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
         stderr=subprocess.PIPE,
         env=env,
         start_new_session=(os.name == 'posix'),
-    )
-    if entrada is not None and p.stdin is not None:
-        datos_in = entrada.encode('utf-8', errors='replace') if isinstance(entrada, str) else entrada
+    ) as p:
+        if entrada is not None and p.stdin is not None:
+            datos_in = entrada.encode('utf-8', errors='replace') if isinstance(entrada, str) else entrada
 
-        def _escribir_stdin():
-            try:
-                p.stdin.write(datos_in)
-            except Exception:
-                pass
-            finally:
+            def _escribir_stdin():
                 try:
-                    p.stdin.close()
+                    p.stdin.write(datos_in)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        p.stdin.close()
+                    except Exception:
+                        pass
+
+            threading.Thread(target=_escribir_stdin, daemon=True).start()
+
+        chunks_out, chunks_err = [], []
+        instante_json = [None]
+
+        def _leer_stream(stream, destino, detectar_json=False):
+            if stream is None:
+                return
+            try:
+                fd = stream.fileno() if hasattr(stream, 'fileno') else None
+                if not isinstance(fd, int):
+                    fd = None
+            except (OSError, ValueError, io.UnsupportedOperation):
+                fd = None
+            try:
+                while True:
+                    if fd is not None:
+                        bloque = os.read(fd, 4096)
+                    else:
+                        bloque = stream.read(4096)
+                        if isinstance(bloque, str):
+                            bloque = bloque.encode('utf-8', errors='replace')
+                    if not bloque:
+                        break
+                    destino.append(bloque)
+                    if detectar_json and instante_json[0] is None:
+                        texto_parcial = b''.join(destino).decode('utf-8', errors='replace')
+                        if _extraer_json_final(harness, texto_parcial) is not None:
+                            instante_json[0] = time.monotonic()
+            except (OSError, ValueError):
+                pass
+
+        t_out = threading.Thread(target=_leer_stream, args=(p.stdout, chunks_out, True), daemon=True)
+        t_err = threading.Thread(target=_leer_stream, args=(p.stderr, chunks_err, False), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        inicio_espera = time.monotonic()
+        por_timeout = False
+        cierre_forzado = False
+        instante_salida = None
+        while True:
+            terminado = p.poll() is not None
+            if terminado and not t_out.is_alive() and not t_err.is_alive():
+                break
+            ahora_m = time.monotonic()
+            if terminado and instante_salida is None:
+                instante_salida = ahora_m
+            if (instante_json[0] is not None and gracia_cierre is not None
+                    and (ahora_m - instante_json[0]) >= gracia_cierre):
+                cierre_forzado = True
+                _terminar_arbol_proceso(p)
+                break
+            if timeout is not None and (ahora_m - inicio_espera) >= timeout:
+                por_timeout = True
+                _terminar_arbol_proceso(p)
+                break
+            if (instante_salida is not None
+                    and ahora_m - instante_salida >= (gracia_cierre if gracia_cierre is not None else GRACIA_CIERRE_JSON_S)):
+                cierre_forzado = instante_json[0] is not None
+                _terminar_arbol_proceso(p)
+                break
+            time.sleep(0.02)
+
+        espera_hilos = 0.5 if (cierre_forzado or por_timeout) else 2.0
+        t_out.join(timeout=espera_hilos)
+        t_err.join(timeout=espera_hilos)
+        for stream in (p.stdout, p.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
                 except Exception:
                     pass
 
-        threading.Thread(target=_escribir_stdin, daemon=True).start()
-
-    chunks_out, chunks_err = [], []
-    instante_json = [None]
-
-    def _leer_stream(stream, destino, detectar_json=False):
-        if stream is None:
-            return
-        try:
-            fd = stream.fileno() if hasattr(stream, 'fileno') else None
-            if not isinstance(fd, int):
-                fd = None
-        except (OSError, ValueError, io.UnsupportedOperation):
-            fd = None
-        try:
-            while True:
-                if fd is not None:
-                    bloque = os.read(fd, 4096)
-                else:
-                    bloque = stream.read(4096)
-                    if isinstance(bloque, str):
-                        bloque = bloque.encode('utf-8', errors='replace')
-                if not bloque:
-                    break
-                destino.append(bloque)
-                if detectar_json and instante_json[0] is None:
-                    texto_parcial = b''.join(destino).decode('utf-8', errors='replace')
-                    if _extraer_json_final(harness, texto_parcial) is not None:
-                        instante_json[0] = time.monotonic()
-        except (OSError, ValueError):
-            pass
-
-    t_out = threading.Thread(target=_leer_stream, args=(p.stdout, chunks_out, True), daemon=True)
-    t_err = threading.Thread(target=_leer_stream, args=(p.stderr, chunks_err, False), daemon=True)
-    t_out.start()
-    t_err.start()
-
-    inicio_espera = time.monotonic()
-    por_timeout = False
-    cierre_forzado = False
-    instante_salida = None
-    while True:
-        terminado = p.poll() is not None
-        if terminado and not t_out.is_alive() and not t_err.is_alive():
-            break
-        ahora_m = time.monotonic()
-        if terminado and instante_salida is None:
-            instante_salida = ahora_m
-        if (instante_json[0] is not None and gracia_cierre is not None
-                and (ahora_m - instante_json[0]) >= gracia_cierre):
+        stdout_txt = b''.join(chunks_out).decode('utf-8', errors='replace')
+        stderr_txt = b''.join(chunks_err).decode('utf-8', errors='replace')
+        if por_timeout and _extraer_json_final(harness, stdout_txt) is not None:
+            por_timeout = False
             cierre_forzado = True
-            _terminar_arbol_proceso(p)
-            break
-        if timeout is not None and (ahora_m - inicio_espera) >= timeout:
-            por_timeout = True
-            _terminar_arbol_proceso(p)
-            break
-        if (instante_salida is not None
-                and ahora_m - instante_salida >= (gracia_cierre if gracia_cierre is not None else GRACIA_CIERRE_JSON_S)):
-            cierre_forzado = instante_json[0] is not None
-            _terminar_arbol_proceso(p)
-            break
-        time.sleep(0.02)
-
-    espera_hilos = 0.5 if (cierre_forzado or por_timeout) else 2.0
-    t_out.join(timeout=espera_hilos)
-    t_err.join(timeout=espera_hilos)
-    for stream in (p.stdout, p.stderr):
-        if stream is not None:
-            try:
-                stream.close()
-            except Exception:
-                pass
-
-    stdout_txt = b''.join(chunks_out).decode('utf-8', errors='replace')
-    stderr_txt = b''.join(chunks_err).decode('utf-8', errors='replace')
-    if por_timeout and _extraer_json_final(harness, stdout_txt) is not None:
-        por_timeout = False
-        cierre_forzado = True
-    codigo = 0 if cierre_forzado else (124 if por_timeout else (p.returncode if p.returncode is not None else 1))
-    return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
+        codigo = 0 if cierre_forzado else (124 if por_timeout else (p.returncode if p.returncode is not None else 1))
+        return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
 
 
 def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO, gracia_cierre=GRACIA_CIERRE_JSON_S):
@@ -1931,7 +2053,7 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
     sesion_id = None
     por_timeout = [False]
     temporizador = None
-    with subprocess.Popen(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
+    with _proceso_agrupado(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                           encoding='utf-8', errors='replace', env=env,
                           start_new_session=(os.name == 'posix')) as p:

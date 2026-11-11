@@ -1,3 +1,135 @@
+# Revisión de tests: B-ADV-0032 — H-05
+
+**Veredicto: APROBADO**
+**Revisor:** Hades
+**Árbol declarado:** `c6acc8eeb5613df7a42008528f1c3734440dd230`
+**Media: 8,75/10. Sin hallazgos ALTA ni CRÍTICA vigentes.**
+**Destino:** `docs/review/test_reviews/B-ADV-0032-test-review.md`
+
+## Alcance y límites
+
+Una única revisión de `tests.test_orquestar.SubprocesoColgadoTests`, centrada en el delta H-05 y su interacción con las regresiones previamente aprobadas.
+
+H-05 exige terminar descendientes Windows con pipes heredados después de salir el padre, en tres caminos: captura JSON por gracia, captura JSON por timeout y captura por líneas por timeout.
+
+Se aplican las instrucciones adjuntas de Hades y `/review-test`. El acceso a los archivos falló por Core launch y también falló la escritura del informe. Se revisa el material exacto proporcionado; no se atribuye comprobación independiente del árbol.
+
+No se revisa ni modifica producción. No se ejecutan pruebas ni se repiten las verificaciones aportadas.
+
+## Evidencia aceptada
+
+Sobre el árbol `c6acc8eeb5`:
+
+- `python -m unittest tests.test_orquestar.SubprocesoColgadoTests`: **12 pruebas en 41,394 s, tres fallos de aserción y un skip POSIX explícito**. Los tres fallos corresponden a los modos Windows del nuevo test; ocurren en el watchdog después de constatar la creación del hijo. Las otras diez pruebas ejecutadas no presentan fallos.
+- `python -m py_compile tests/test_orquestar.py`: verde.
+- `git diff --check`: verde.
+- Formato, lint y tipado sin herramientas configuradas; no se contabilizan como verificaciones superadas.
+
+La ejecución anterior sobre `924d343a45` terminó con tres errores `TimeoutExpired`. El árbol actual convierte esos resultados en fallos de aserción explícitos. No se confunden las dos ejecuciones.
+
+La ejecución POSIX real continúa pendiente en **B-ADV-0038**. El skip no acredita esa validación.
+
+La evidencia actual es **RED para H-05**. La aprobación evalúa la calidad de las pruebas para continuar la corrección; no declara que la funcionalidad esté corregida.
+
+## Puntuaciones
+
+| Criterio | Puntuación | Evaluación |
+|---|---:|---|
+| Cobertura | 9/10 | Añade los tres caminos Windows exigidos, con descendiente real y pipes heredados; conserva las regresiones aprobadas. |
+| Aserciones | 9/10 | Exige retorno acotado, código, métrica, salida y desaparición del PID; JSON por gracia comprueba además los tokens de entrada. |
+| Rojo correcto | 9/10 | Los tres modos alcanzan el watchdog tras crear al hijo. No fallan por sintaxis, carga o preparación. Las aserciones posteriores todavía no se alcanzan en ese RED. |
+| Estabilidad | 8/10 | Usa temporales, procesos locales, plazos y limpieza. Mantiene dependencia acotada del arranque y planificación de Windows y de sus utilidades de procesos. |
+| **Media** | **8,75/10** | **Supera el umbral estricto de 8, sin hallazgos bloqueantes.** |
+
+## Evaluación del delta H-05
+
+### Preparación del escenario
+
+`test_windows_descendiente_con_padre_salido_y_pipes_heredados` recorre `json_gracia`, `json_timeout` y `lineas_timeout`.
+
+El programa padre crea un hijo que duerme 60 s sin redirigir sus streams, registra su PID, emite la salida y termina sin esperar al hijo. La preparación representa el escenario de un descendiente que conserva los pipes tras la salida del padre, sin proveedores externos.
+
+Antes de cada subcaso se eliminan el PID y el resultado anteriores. Esto evita que datos residuales satisfagan las comprobaciones del siguiente modo.
+
+### Oráculos de comportamiento
+
+En `json_gracia`, el padre emite una respuesta JSON final válida. La gracia de 0,2 s queda por debajo del timeout de 3 s. La prueba exige:
+
+- Código 0 y métrica `cierre_forzado`.
+- Conservación del mensaje.
+- Siete tokens de entrada asociados a `agy`.
+
+En `json_timeout` y `lineas_timeout`, el padre emite una línea que no constituye una respuesta final. Ambos exigen código 124, métrica `timeout` y conservación de esa salida. Los comandos seleccionan respectivamente captura JSON con `agy` y captura por líneas con `codex`.
+
+Las aserciones distinguen el cierre por gracia del cierre por timeout y protegen la conservación de resultados.
+
+### Detección del bloqueo y del descendiente superviviente
+
+El worker separado permite detectar que `lanzar()` no devuelve el control sin bloquear indefinidamente el proceso principal de pruebas.
+
+El watchdog de 12 s comprueba primero que existe el PID registrado y luego falla expresamente. La evidencia actual alcanza ese punto en los tres modos. La creación del hijo descarta un fallo de preparación que impidiera iniciar el escenario.
+
+Cuando el worker devuelve el control, la prueba exige salida normal y lee el resultado serializado. Una caída del worker o la ausencia del archivo no se aceptan como éxito.
+
+Después consulta `tasklist`, con timeout y comprobación de código 0, y rechaza la presencia del PID exacto entrecomillado en la salida CSV. Esta comprobación sucede antes de la limpieza. Por tanto, la limpieza no puede hacer pasar la aserción de desaparición.
+
+El test discrimina también una corrección parcial que desbloquee los lectores pero deje vivo al descendiente.
+
+### Estabilidad y limpieza
+
+Los plazos de 3 y 12 s permanecen claramente por debajo de los 60 s de espera del hijo. Su terminación natural no satisface la prueba durante una ejecución ordinaria.
+
+El `finally` intenta terminar el árbol del worker si continúa vivo y el PID del hijo si llegó a registrarse. Las consultas y esperas de limpieza están acotadas.
+
+Permanece la dependencia habitual de planificación de las pruebas con procesos reales. El margen de arranque es mayor que el señalado y corregido en RT-02; no se identifica una nueva carencia que justifique reabrir ese hallazgo.
+
+El RED aportado demuestra el bloqueo observado. Todavía no acredita la ejecución satisfactoria de las aserciones posteriores sobre resultado, métricas y desaparición del descendiente. Esta limitación no invalida sus oráculos.
+
+## Reevaluación de hallazgos anteriores
+
+| Antecedente | Estado | Evaluación |
+|---|---|---|
+| RT-01 de la revisión inmediatamente anterior: falta de protección del aislamiento POSIX en captura por líneas | **Resuelto; se conserva** | El test portable exige `start_new_session=True` en ese camino. H-05 no altera esa protección. |
+| RT-02 de aquella revisión: margen de arranque de 0,2 s | **Resuelto; se conserva** | La regresión de timeout antes del JSON mantiene 2 s y sus aserciones de resultado y salida parcial. |
+| H-01: descendientes y pipes tras salir el padre | **Se conserva la aprobación de las pruebas existentes** | H-05 añade cobertura real Windows para los tres caminos indicados. No se declara corregida su implementación. |
+| H-02: configuración de timeout no finita | **Se conserva la evaluación anterior** | Permanecen los casos `inf`, `-inf`, `nan`, ambas variables de entorno, cero y positivo válido. |
+| H-03: timeout explícitamente desactivado | **Resuelto en el alcance probado; se conserva** | Se mantiene la distinción entre argumento omitido y `None`, y la propagación desde el perfil. |
+| H-04: timeout durante la espera posterior al EOF | **Resuelto en el alcance probado; se conserva** | Se mantiene la espera bloqueada y las exigencias de terminación, código 124 y métrica `timeout`. |
+| RT-01 histórico: interpretación insuficiente de errores de `ps` | **Resuelto; se conserva** | Continúan las comprobaciones de código, diagnóstico y estado antes de aceptar la desaparición. |
+| Ejecución POSIX real | **Pendiente en B-ADV-0038** | No se duplica el seguimiento ni se acredita mediante mocks o skips. |
+
+Los identificadores RT-01/RT-02 corresponden a cada informe histórico; no se equiparan hallazgos distintos por compartir identificador.
+
+## Antecedentes conservados
+
+1. **Revisión completa inicial: APROBADO, media 8,75/10.** Aprobó las pruebas de H-01/H-02. Señaló como MEDIA la interpretación de errores de `ps` y como BAJA la falta de ejecución POSIX real. Quedaron resueltas las observaciones sobre el padre ya finalizado en el mock, la comparación del grupo del invocador y la cobertura de las ramas de entorno.
+
+2. **Reevaluación del RT-01 histórico de `ps`: APROBADO, media 8,50/10.** Consideró corregido el falso positivo por salida vacía ante errores de consulta. La evidencia comunicada fue de seis pruebas, cinco correctas y un skip POSIX. La validación POSIX quedó registrada en B-ADV-0038.
+
+3. **Revisión de reanudación: RECHAZADO, media 8,25/10.** Identificó RT-01 ALTA por no proteger la creación de sesión POSIX en captura por líneas y RT-02 MEDIA por el timeout real de 0,2 s. Consideró cubiertos H-03 y H-04 en las pruebas.
+
+4. **Reevaluación inmediatamente anterior: APROBADO, media 8,75/10.** Cerró ambos hallazgos mediante el test portable de aislamiento por líneas y la ampliación del timeout a 2 s. Conservó la limitación POSIX y distinguió la aprobación de las pruebas de la corrección de producción.
+
+Esta revisión mantiene esas decisiones y evalúa únicamente el nuevo alcance H-05 dentro de la clase indicada.
+
+## Hallazgos nuevos
+
+No se identifican hallazgos nuevos.
+
+## Dictamen
+
+**APROBADO para el alcance de pruebas de B-ADV-0032, incluido H-05.**
+
+Las pruebas nuevas discriminan el bloqueo de los tres caminos Windows y comprueban la terminación del descendiente cuando se devuelve el control. Puede continuar la corrección pendiente.
+
+Este dictamen no aprueba producción, no declara GREEN de H-05 ni acredita ejecución POSIX real.
+
+**Entrega:** no se pudo escribir el archivo de destino. El intento de lectura falló por Core launch y el intento de escritura también falló. Se entrega aquí el informe completo, con los antecedentes conservados.
+
+---
+
+## Informes anteriores
+
 # Revisión de tests: B-ADV-0032
 
 **Veredicto: APROBADO**

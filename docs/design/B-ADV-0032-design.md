@@ -50,3 +50,26 @@ consumidores enumerados ni se invalida ninguna prueba; ninguna DEC contradicha.
 Los plazos siguen en segundos monotónicos y el sondeo en 20 ms. Se añaden
 regresiones dentro de SubprocesoColgadoTests, incluida la salida inmediata del
 padre en POSIX (skip explícito en Windows) y supervisión con streams controlados.
+
+## Reanudación H-05: grupo Windows duradero
+
+Ambos lanzamientos reales se centralizan en un helper: Windows crea un Job Object
+con KILL_ON_JOB_CLOSE y el arnés suspendido, lo asigna al job antes de reanudarlo.
+Así ningún hijo puede escapar durante el arranque. El handle permanece en el
+invocador y sobrevive al padre. La terminación utiliza TerminateJobObject, seguida
+de espera acotada; el cierre normal libera el handle y termina cualquier residual.
+Los fallos de creación/asignación/reanudación abortan y limpian el proceso
+suspendido; no se degrada silenciosamente a taskkill. POSIX conserva su sesión.
+
+Consumidores: _ejecutar_captura_json y lanzar por líneas usan el helper de creación
+y liberan el job; _terminar_arbol_proceso usa el job si existe y mantiene respaldo
+para procesos sin job. ejecutar/agente conservan contratos y métricas. Las pruebas
+previas no cambian de contrato; los dobles de Popen evitan APIs nativas. El nuevo
+caso Windows verifica ambos caminos y la ausencia del hijo al retornar. Ninguna
+DEC contradicha, sin dependencias nuevas. No hay sondeo adicional en el camino
+caliente; se comprueba con las regresiones locales del triaje.
+
+La reanudación usa APIs Win32 documentadas: snapshot de hilos del proceso recién
+creado suspendido, OpenThread y ResumeThread. El snapshot y el handle del hilo se
+cierran siempre. No se usan APIs NT privadas. _proceso_agrupado centraliza ambos
+Popen y el cierre del job; los errores nativos se propagan, nunca como éxito.

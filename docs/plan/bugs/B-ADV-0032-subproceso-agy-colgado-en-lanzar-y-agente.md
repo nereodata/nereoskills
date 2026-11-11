@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 created_at: 2026-11-08
 updated_at: 2026-11-11
 ---
@@ -111,3 +111,14 @@ Q-ADV-0001: Decisión humana de local:Iván Moreno: Continuar con las reservas d
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades review-code RECHAZADO 7,50/10. H-01/H-03/H-04 resueltos y H-02 cerrado. H-05 ALTA para desarrollador/Artemisa: en Windows taskkill sobre PID del padre ya salido no termina descendiente con pipes heredados; conservar capacidad de terminacion desde el lanzamiento que sobreviva al padre y proteger ese caso sin proveedores externos. Decision: reanudar desarrollo con diseno y pruebas dirigidas dentro de SubprocesoColgadoTests, sin decision ni recurso humano. Review-test actual APROBADO 8,75/10; 11 pruebas GREEN con 1 skip POSIX no cubren H-05. Conservar informes y delta, no completar el bug.
+
+### Reanudación H-05
+
+- Diseño y pruebas se amplían solo a la terminación Windows tras salir el padre. Se mantienen base_calidad y el comando de SubprocesoColgadoTests.
+- C1 añade proceso local con padre terminado e hijo real con pipes heredados en JSON/gracia, JSON/timeout y líneas/timeout, aislando la llamada en un worker con watchdog de 12 s y limpieza por PID. No usa proveedores.
+
+- RED H-05: 12 tests, tres fallos de aserción del watchdog, un skip POSIX; 41,394 s. Review-test real APROBADO 8,75/10 sobre adjuntos exactos, transcrito desde la sesión de Hades conservando los antecedentes y normalizando espacios finales. Sin hallazgos nuevos.
+
+- GREEN H-05: 12 tests en 11,151 s, un skip POSIX. Los tres subcasos Windows completan y comprueban la desaparición real del hijo antes de limpiar. Creación suspendida, Job Object con KILL_ON_JOB_CLOSE y reanudación con APIs Win32 documentadas; sin nuevas dependencias.
+
+- QA H-05: review-code real APROBADO 8,67/10. H-05 resuelto, H-01/02/03/04 cerrados, sin hallazgos nuevos. Informe transcrito desde la sesión de Hades por fallo de escritura del arnés, normalizando espacios finales y conservando íntegros los informes anteriores. Triaje completo satisfecho, sin preguntas nuevas ni cambios de perfiles. Validación POSIX real sigue B-ADV-0038.

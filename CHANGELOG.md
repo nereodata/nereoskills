@@ -10,7 +10,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 - **B-ADV-0034** — Responder preguntas del orquestador desde CLI local sin Telegram, compartiendo validación, persistencia e incorporación con el gateway y respetando dependencias.
 
-- **B-ADV-0032** — Los arneses se aíslan en una sesión POSIX para terminar también sus descendientes al vencer el timeout o la gracia tras JSON. Los timeouts no finitos recuperan el valor seguro por defecto. La supervisión continúa tras salir el padre o recibir EOF, y la desactivación explícita prevalece sobre el entorno.
+- **B-ADV-0032** — Los arneses se aíslan en una sesión POSIX para terminar también sus descendientes al vencer el timeout o la gracia tras JSON. Los timeouts no finitos recuperan el valor seguro por defecto. La supervisión continúa tras salir el padre o recibir EOF, y la desactivación explícita prevalece sobre el entorno. En Windows, un Job Object asignado antes de reanudar el arnés permite terminar los descendientes aunque el padre ya haya salido.
 - **B-ADV-0037** — El preflight, Telegram y la API de publicación bloquean el cierre con revisiones formales pendientes o rechazadas e indican cómo reanudarlas. El selector distingue parches; las métricas mantienen su agrupación histórica.
 
 ## [1.1.1] - 2026-11-10
