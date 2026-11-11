@@ -12,6 +12,8 @@ El motor registra `commit_producto` en la métrica del intento de desarrollo que
 
 El transporte entrega la respuesta de Hades para reconocer su declaración formal fuera de citas y ejemplos. La huella pertenece a la cabecera del veredicto. Al construir el mandato se omite de la huella de producto el único archivo efímero que la CLI retirará al terminar. La evidencia de pruebas conserva el árbol exacto. La salida normal sin dictamen prueba la siguiente reserva elegible. Cada ejecución exterior que propaga un fallo de revisión conserva sus tokens y la marca técnica. El diagnóstico de suite mantiene su contrato de respuesta JSON y su validador propio.
 
+El historial de la ruta canónica permite recuperar una huella desplazada o eliminada durante el seguimiento. Ante un rechazo, Git identifica por su contenido la copia de una aprobación anterior. Una reevaluación sobre el mismo producto puede mantener su huella y documentar una conclusión nueva.
+
 ## Impacto y comprobación
 
 - `bucle` es el consumidor de producción de `firma`. Sus comparaciones de progreso deben observar el paso original aun cuando cambie la selección posterior. `arbol` y la identidad de las evidencias de verificación conservan el contrato exacto de contenido.

@@ -39,6 +39,8 @@ Ante un error del arnés, desarrollo continúa al paso siguiente si la ficha est
 
 Hades incluye la línea `Producto revisado: <huella>` justo después del veredicto de código. La huella cubre los mandatos rastreados. El archivo temporal que la CLI retira al terminar queda fuera de la huella y sigue contando para la evidencia exacta de las pruebas.
 
+Si una nota desplaza o elimina la huella, Git conserva la del informe que la emitió. Restaurar una copia anterior a un rechazo mantiene la revisión pendiente, incluso sobre el mismo producto. Para levantar el rechazo, Hades emite un informe que recoge la reevaluación.
+
 Al confirmar cambios durante un paso de desarrollo, el bucle registra el último commit del intento para ese ID en las métricas. El selector y el preflight recuperan ese objetivo al relanzar, aunque el paso haya fallado después de marcar la ficha como completada. Un paso de otro ID conserva la aprobación anterior. Para informes históricos se consulta el commit que emitió el veredicto. Las citas y las notas de seguimiento conservan la acreditación original. Si la aprobación ha caducado, el selector pide `revisar-tarea`. Una reevaluación vigente cuenta como avance incluso en el último intento.
 
 ```mermaid

@@ -1,48 +1,44 @@
 **Veredicto:** APROBADO · **9,25/10**
 
-# B-ADV-0044 · Reevaluación independiente de pruebas (C1)
+# B-ADV-0044 · Reevaluación independiente de pruebas
 
-Rama `hotfix/v1.1.3`. Árbol revisado `118e5e5ed1280b019580d1df22efcd4127a576ea`. Ronda anterior `d541cedb12000f740bd29d3f9ff9bd405c579e06`.
+Paso `bug-fix` en `hotfix/v1.1.3`. Árbol revisado `17cea52d88b8d898df5bd6383189525f1e18a013`. Referencia histórica de la revisión de pruebas C1: `118e5e5ed1280b019580d1df22efcd4127a576ea`. El delta de pruebas corresponde a `skills/orquestar/test_progreso.py`, de `2774e2b` a `7a27d4c`.
 
-## Hallazgos pendientes de la ronda anterior
+## Reevaluación de H2, H3 y D3
 
-| Hallazgo | Estado | Destinatario | Destino |
-|---|---|---|---|
-| N5 🟠 · Huella del mandato rastreado | Resuelto | desarrollador | resolver |
-| N6 🟡 · Atribución del cambio posterior a otro ID | Resuelto | desarrollador | resolver |
+| Hallazgo de producto | Qué discrimina la prueba | Resultado observado |
+|---|---|---|
+| H2 · Huella desplazada o eliminada | Tras aprobar A con su huella y confirmar el cambio de código a B, un commit modifica solo el informe. Una variante intercala una nota delante de la huella de A y la otra la borra. Ambas exigen que B siga pendiente en el selector y en el preflight. El control posterior exige huellas distintas y permite el cierre al aprobar expresamente B. | **Persiste** en ambas variantes. El selector devuelve `revisar-version` cuando corresponde `revisar-tarea` para el ID. |
+| H3 · Veredicto citado y reserva | El principal devuelve código 0 y cita una aprobación histórica. Se prueban la continuación de un párrafo citado en Markdown, un bloque HTML y un cerco de tildes. Se exige que el principal quede sin veredicto y que la reserva registre el rechazo de su informe íntegro, entregado entre cercos, en la misma invocación. | **Persiste** con la continuación y con HTML. Las métricas contienen solo la fila de Claude y falta la de Codex. El control con tildes pasa y alcanza las comprobaciones del rechazo y de la invocación. |
+| D3 · Restauración tras un rechazo del mismo producto | Se confirman en orden una aprobación y un rechazo de A con la misma huella. Se restaura en el WIP el texto exacto de la primera aprobación. El selector y el preflight deben mantener la revisión pendiente. Después se confirma un informe distinto que reevalúa el hallazgo sobre A y debe permitir el cierre. | **Persiste**. Al restaurar la copia, el selector adelanta `revisar-version`. El caso aísla la precedencia del rechazo manteniendo fijo el producto. |
 
-**N5.** La prueba captura la huella que recibe el proveedor en dos llamadas a la CLI con la misma ruta rastreada. Confirma la primera redacción y cambia únicamente el contenido de ese fichero en el WIP para la segunda. Exige dos huellas distintas. Excluir globalmente la ruta produciría dos valores iguales y fallaría esa aserción, incluso si `huella_producto` compartiera el defecto. En el subcaso temporal se mantiene la comprobación de que retirar el mandato cambia el árbol exacto y de que el proveedor debe recibir la huella del producto limpio. El único fallo acreditado de esta prueba corresponde a esa última igualdad.
+Los cinco fallos reproducen decisiones de producto. Para H2, H3 y D3 corresponde al **desarrollador** resolverlas. En las cinco ramas rojas la ejecución termina en la primera aserción fallida. Los controles posteriores de cierre en H2 y D3 y las comprobaciones posteriores de métricas en las dos variantes rojas de H3 quedan pendientes de ejecución.
 
-**N6.** Tras acreditar la aprobación de `B-DEMO-0001`, el caso crea una ficha planificada para `B-DEMO-0002`. El arnés comprueba el paso y el segundo ID antes de confirmar el código, su ficha completada y su informe. La prueba exige una sola llamada a `bug-fix` para el segundo ID, que el selector pase a `revisar-version` y que el preflight quede vacío. La variante con huella anterior alcanza estas comprobaciones. La variante histórica sin huella propia se detiene antes, al aceptar la huella citada. Se conserva el caso inverso de dos commits del mismo intento e ID, que exige volver a `revisar-tarea`.
+## Seguimiento de la revisión de pruebas anterior
 
-## Seguimiento de los demás hallazgos de pruebas
+| Hallazgos de pruebas de C1 | Estado en este delta |
+|---|---|
+| H1 (perfiles), H2 (cuota), H3 (notas), H4 (informe) | **Resueltos**. Se conservan las pruebas de perfiles, espera y consumo, repetición de notas y ausencia de informe para el ID ejecutado. |
+| N1 (aprobación caducada), N2 (diagnóstico), N3 (índice Git), N4 (cierre por ambas entradas) | **Resueltos**. Se conservan sus aserciones y datos de prueba. |
+| N5 (mandato rastreado), N6 (cambio atribuido a otro ID) | **Resueltos**. Siguen presentes la comparación de las huellas recibidas por el proveedor y la ejecución atribuida al segundo ID. |
 
-| Hallazgo | Estado | Destinatario | Destino | Comprobación conservada |
-|---|---|---|---|---|
-| H1 · Perfiles | Resuelto | desarrollador | resolver | Modelo estricto y secuencia principal–reserva en la recarga y el arranque manual. |
-| H2 · Cuota | Resuelto | desarrollador | resolver | Llamada a la espera con la demora registrada y consumo de ambos intentos. |
-| H3 · Notas | Resuelto | desarrollador | resolver | Dos commits limpios reformulan el impedimento con fechas fijas. El bucle para en la segunda llamada e identifica el paso y el ID. |
-| H4 · Informe | Resuelto | desarrollador | resolver | La ausencia del informe se comprueba con el ID del paso ejecutado. |
-| N1 · Aprobación caducada | Resuelto | desarrollador | resolver | La huella del producto anterior mantiene pendiente el actual. Declarar la huella vigente permite el cierre. |
-| N2 · Diagnóstico | Resuelto | desarrollador | resolver | El lector consume la salida de `agente` y debe recuperar los cinco campos con sus valores. |
-| N3 · Índice Git | Resuelto | desarrollador | resolver | HEAD, índice y WIP contienen versiones distintas. Se exige conservar las entradas preparadas. |
-| N4 · Cierre por ambas entradas | Resuelto | desarrollador | resolver | La misma aprobación vigente debe permitir el cierre por `bug-fix` y por `revisar-tarea`. |
+## Cobertura de los seis escenarios
 
-## Hallazgos nuevos de pruebas
-
-Ninguno.
+Los cuatro primeros conservan sus casos de C1: parada tras dos commits de impedimento en los tres pasos, agotamiento de `work-plan` tras un commit vacío y otro administrativo, recuperación del presupuesto de una ficha antigua por cada una de las cinco aportaciones y aislamiento de intentos entre IDs durante la recarga y el arranque manual. En el quinto, H2 y D3 refuerzan la condición de aprobación vigente que usa el cierre. Se conservan los casos del bucle con retorno 1. En el sexto, H3 distingue la cita técnica del dictamen propio de la reserva. Las pruebas del bucle siguen comprobando el consumo de ambos intentos y la espera por cuota.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 9/10 | Se conservan los seis escenarios de B-ADV-0044. Los controles añadidos distinguen el mandato temporal del rastreado y el cambio del mismo intento del atribuido a un segundo ID. |
-| Aserciones | 9/10 | Las diferencias se observan en el mandato recibido por el proveedor, el ID ejecutado, el siguiente paso seleccionado y los pendientes de release. |
-| Rojo correcto | 10/10 | Los seis fallos llegan a aserciones sobre el comportamiento previsto. La ejecución dirigida registra cero errores de preparación. |
-| Estabilidad | 9/10 | Los casos usan Git en repositorios temporales con configuración aislada, contenidos fijos y proveedores simulados. |
+| Cobertura | 9/10 | Las dos ediciones de huella, las dos formas de cita y la restauración sobre el mismo producto reproducen las variantes pendientes. |
+| Aserciones | 9/10 | Se observa el siguiente paso e ID, la lista de pendientes y la secuencia de proveedores con el veredicto de cada uno. Los controles positivos exigen admitir una reevaluación y el informe íntegro de la reserva. |
+| Rojo correcto | 10/10 | Las cinco reproducciones fallan por el siguiente paso elegido o por la ausencia de la reserva. El sexto caso pasa con la misma preparación de H3. |
+| Estabilidad | 9/10 | Cada caso usa un repositorio Git temporal aislado, textos fijos y proveedores simulados. Las expectativas dependen del orden explícito de los hechos. |
 
-## Evidencia y límites
+## Hallazgos nuevos de pruebas
 
-La verificación dirigida aportada para este árbol ejecutó 124 pruebas en 139,650 s. Persisten seis fallos de producto reproducidos por aserción. En H1 y D3 el selector adelanta la revisión de versión. En H2 se acepta una huella citada y en H3 falta la llamada a la reserva tras un veredicto citado. En D1 la reevaluación registra `progreso=False`. En D2 el mandato temporal altera la huella entregada. Los seis corresponden al desarrollador, con destino `resolver` en la corrección de producto. Las aserciones posteriores al primer fallo de cada caso quedan pendientes de ejecución en esa rama.
+Ninguno.
 
-Se contrastó el delta de B-ADV-0044 entre ambos árboles y se reutilizó la evidencia aportada de unittest, Ruff selectivo y `git diff --check`. El proyecto carece de verificador de tipos configurado. La revisión se limita a C1. Se excluyeron B-ADV-0045, B-ADV-0046 y B-ADV-0047. No se inspeccionó la implementación ni se repitieron comprobaciones o la suite completa.
+## Evidencia
+
+La ejecución dirigida aportada para el árbol revisado registra **6 pruebas en 6,235 s, con 5 fallos de aserción, 1 caso en verde y 0 errores**. Se reutilizaron los resultados en verde de Ruff selectivo y `git diff --check`. El resultado de las 124 pruebas de C1 pertenece a su árbol histórico.

@@ -99,3 +99,13 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades D rechazó el árbol c311964fe4ef788c496c2f459de194ebbab85075 (7,00/10). H1, H4-H7, D1 y D2 resueltos. Artemisa reanuda H2, H3 y D3 para conservar la huella cuando una nota la desplace o suprima, distinguir citas con continuación Markdown o bloque HTML de un dictamen propio y conservar la precedencia del rechazo ante la restauración WIP de una aprobación del mismo producto. Las 144 pruebas dirigidas pasaron. Véase el informe canónico de código.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobado por Hades (9,25/10). Cinco regresiones rojas reproducen H2, H3 y D3 y el control de informe íntegro pasa. Artemisa continúa C2, comprueba el selector, el preflight y las reservas y somete el delta a revisión de código.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades D, árbol 45f708880b084d9ebddbf88a5a092b9a06c41c98, RECHAZADO 7,00/10. H2 resuelto. D3 exige mantener pendiente una aprobación revocada incluso con cambios de presentación o seguimiento. H3 exige respetar la apertura HTML de blockquote multilínea. D4 exige reconocer el rechazo propio inmediatamente después de un encabezado Markdown citado. Reanudar desarrollo con esas tres reproducciones y reevaluar C1/D. Las 149 pruebas del triaje pasaron en 170,668 s. Detalles en docs/review/code_reviews/B-ADV-0044-code-review.md.

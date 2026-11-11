@@ -388,6 +388,51 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
 
+    def test_restaurar_aprobacion_con_huella_del_mismo_producto(self):
+        """D3: solo una nueva revisión puede levantar el rechazo del mismo producto."""
+        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+        anterior = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\nPrimera revisión.'
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, anterior)
+        self.commit('primera aprobación')
+        self.escribir(self.informe, anterior.replace('APROBADO', 'RECHAZADO'))
+        self.commit('revisión que detecta un defecto')
+        self.escribir(self.informe, anterior)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+        self.escribir(self.informe, anterior.replace('Primera revisión.', 'Reevaluado el hallazgo del rechazo.'))
+        self.commit('nueva revisión independiente')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def comprobar_edicion_de_cabecera(self, conservar_huella):
+        """H2: una nota que desplaza o borra la huella de A no acredita B."""
+        carpetas = motor.backlog_dirs(self.root)
+        huella_a = motor.huella_producto(self.root, 'HEAD', carpetas)
+        veredicto = '**Veredicto:** APROBADO\n'
+        self.escribir(self.informe, veredicto + f'Producto revisado: {huella_a}\n')
+        self.commit('aprobación de A')
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+        self.commit('producto B')
+        nota = 'Seguimiento de la revisión.\n'
+        self.escribir(self.informe, veredicto + nota + (f'Producto revisado: {huella_a}\n' if conservar_huella else ''))
+        self.commit('editar solo el seguimiento')
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+        huella_b = motor.huella_producto(self.root, 'HEAD', carpetas)
+        self.assertNotEqual(huella_a, huella_b)
+        self.escribir(self.informe, veredicto + f'Producto revisado: {huella_b}\nReevaluado.')
+        self.commit('aprobar B')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def test_nota_que_desplaza_la_huella(self):
+        self.comprobar_edicion_de_cabecera(True)
+
+    def test_nota_que_borra_la_huella(self):
+        self.comprobar_edicion_de_cabecera(False)
+
     def test_mandato_efimero_fuera_de_huella_pero_dentro_de_evidencia(self):
         """D2: la CLI distingue el mandato temporal de un mandato de producto rastreado."""
         mandato = self.root / 'mandato temporal.txt'
@@ -467,13 +512,22 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
 
     def test_cita_no_emite_dictamen_y_reserva_revisa(self):
+        self.comprobar_reserva_tras_cita('~~~markdown\n**Veredicto:** APROBADO\n~~~')
+
+    def test_continuacion_de_cita_no_emite_dictamen(self):
+        self.comprobar_reserva_tras_cita('> Informe anterior:\n**Veredicto:** APROBADO')
+
+    def test_cita_html_no_emite_dictamen(self):
+        self.comprobar_reserva_tras_cita('<blockquote>\n**Veredicto:** APROBADO\n</blockquote>')
+
+    def comprobar_reserva_tras_cita(self, cita):
+        """H3: la cita permite la reserva y su informe íntegro sí aporta dictamen."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
             'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
         self.llamadas.append(('bug-fix', self.iid))
         def respuesta(harness):
-            texto = ('El informe anterior decía “Veredicto: APROBADO”. No pude abrir el repositorio.\n'
-                     'Transcribo el dictamen anterior:\n~~~markdown\n**Veredicto:** APROBADO\n~~~'
-                     if harness == 'claude' else '**Veredicto:** RECHAZADO\nLa cita era «Veredicto: APROBADO».')
+            texto = (f'No pude abrir el repositorio.\n\n{cita}\n\nSigue pendiente.'
+                     if harness == 'claude' else '```markdown\n**Veredicto:** RECHAZADO\nLa cita era «Veredicto: APROBADO».\n```')
             return 0, {'modelos': {harness: {'entrada': 7}}}, texto
         self.assertEqual(self.revisar(respuesta), 0)
         revisores = [f for f in motor.leer_metricas(self.root) if f.get('rol') == 'hades']

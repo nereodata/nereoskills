@@ -54,15 +54,29 @@ def lineas_del_informe(texto):
         if cierra(lineas[-1], inicio[1]) and not any(cierra(l, inicio[1]) for l in lineas[1:-1]):
             lineas = lineas[1:-1]
     abierto = ''
+    parrafo_citado = False
+    citas_html = 0
     for linea in lineas:
         marca = re.match(cerco, linea)
+        contenido = linea.strip()
         if abierto:
             if cierra(linea, abierto):
                 abierto = ''
+        elif citas_html or (contenido.startswith('<') and re.search(r'<blockquote\b', contenido, re.I)):
+            for etiqueta in re.finditer(r'<(/?)blockquote\b[^>]*>', linea, re.I):
+                citas_html = max(0, citas_html + (-1 if etiqueta[1] else 1))
+            parrafo_citado = False
         elif marca:
             abierto = marca[1]
-        elif not linea.startswith(('    ', '\t')) and not linea.lstrip().startswith('>'):
-            yield linea.strip().replace('**', '')
+            parrafo_citado = False
+        elif contenido.startswith('>'):
+            parrafo_citado = bool(contenido.lstrip('> ').strip())
+        elif parrafo_citado and contenido and not re.match(r' {0,3}(?:#{1,6}|[-+*]|\d+[.)])\s', linea):
+            yield None
+            continue
+        else:
+            parrafo_citado = False
+            yield None if linea.startswith(('    ', '\t')) else contenido.replace('**', '')
             continue
         yield None
 
@@ -111,6 +125,31 @@ def commit_del_intento(root, iid):
     return None
 
 
+def acreditacion_anterior(root, ruta, historial, actual):
+    """Recupera la emisión y su huella a través de ediciones de seguimiento."""
+    veredicto, huella = actual
+    emision = None
+    misma_emision = True
+    for sha in historial:
+        commit = sha.decode('ascii')
+        blob = subprocess.run(['git', 'show', f'{commit}:{ruta}'], cwd=root, capture_output=True)
+        if blob.returncode:
+            misma_emision = False
+            continue
+        previo, anterior = declaracion(blob.stdout.decode('utf-8'))
+        if previo == 'RECHAZADO':
+            origen = (['rev-parse', f'{emision}:{ruta}'] if emision else ['hash-object', '--', ruta])
+            objeto = subprocess.check_output(['git', *origen], cwd=root, text=True).strip()
+            restaurado = subprocess.check_output(
+                ['git', 'log', '-1', '--format=%H', f'--find-object={objeto}', commit, '--', ruta], cwd=root)
+            return emision, huella, bool(restaurado.strip())
+        misma_emision = misma_emision and previo == veredicto and (huella is None or anterior == huella)
+        if misma_emision:
+            emision = commit
+            huella = anterior
+    return emision, huella, False
+
+
 def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
     """Contrasta la aprobación con el producto del cierre del ID, también tras relanzar."""
     root = Path(root)
@@ -127,16 +166,9 @@ def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
     confirmar = objetivo is not None
     try:
         historial = subprocess.check_output(['git', 'log', '--format=%H', '--', ruta], cwd=root).splitlines()
-        emision = None
-        for sha in historial:
-            commit = sha.decode('ascii')
-            blob = subprocess.run(['git', 'show', f'{commit}:{ruta}'], cwd=root, capture_output=True)
-            if blob.returncode:
-                break
-            previo = declaracion(blob.stdout.decode('utf-8'))
-            if previo != actual:
-                break
-            emision = commit
+        emision, huella, restaurado = acreditacion_anterior(root, ruta, historial, actual)
+        if restaurado:
+            return 'aprobación restaurada anterior al rechazo'
         if objetivo is None:
             cierre = subprocess.check_output(['git', 'log', '-1', '--format=%H', '-G',
                 """^status:[[:space:]]*['"]?completed['"]?([[:space:]]|$)""", '--', ficha.relative_to(root).as_posix()],
@@ -147,8 +179,8 @@ def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
                 if posterior and subprocess.run(['git', 'merge-base', '--is-ancestor', objetivo, posterior],
                                                cwd=root).returncode == 0:
                     objetivo = posterior
-        if actual[1] is not None:
-            vigente = actual[1] == huella_producto(root, objetivo, carpetas)
+        if huella is not None:
+            vigente = huella == huella_producto(root, objetivo, carpetas)
         elif emision:
             vigente = (emision == objetivo or
                        huella_producto(root, emision, carpetas) == huella_producto(root, objetivo, carpetas))
