@@ -5,7 +5,7 @@ type: bug
 weight: 100
 dificultad: sencilla
 version: "v1.1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
