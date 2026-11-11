@@ -5,11 +5,12 @@ type: bug
 weight: 70
 dificultad: media
 version: "v1.2.0"
-status: in_progress
+status: blocked
 depende_de: []
 origen: "T-ADV-0032; revisar-version v1.1 (docs/review/versions/v1.1-arquitectura.md), H-01 🟡"
 created_at: 2026-11-07
 updated_at: 2026-11-11
+pendiente_de: especificador
 ---
 
 # B-ADV-0031: Duplicación del circuito de lectura/escritura de evidencias y huella de árbol entre orquestar.py y chequeos.py
@@ -246,3 +247,8 @@ updated_at: 2026-11-11
 ## Recuperación del acceso del revisor
 
 Los reintentos con registered Core launch requires an installed app carecen de dictamen. Para la siguiente revisión, usar el procedimiento acreditado en B-ADV-0040 de v1.1.2 y sus informes canónicos. Incluir desde la primera llamada a --agente hades --prompt-file las instrucciones completas del agente y la skill de revisión, los criterios, todos los escenarios del alcance, el contexto de las funciones pertinentes y la evidencia aplicable. Entregar material exacto y completo, excluyendo credenciales y datos operativos privados. Solicitar el dictamen independiente sobre esos adjuntos y transcribirlo con su alcance y limitaciones si el revisor no puede escribir al disco. Si pide material adicional, completar el mandato. La aprobación y las verificaciones siguen siendo exigibles. Evitar repetir llamadas basadas solo en rutas tras confirmar este fallo.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades /review-spec RECHAZADO, informe docs/review/spec_reviews/B-ADV-0031-spec-review.md, invocación d2d356c2ce0543ab9b75122dce2f0eff. H-01 alta para especificador: concretar cuándo esperar y los diagnósticos de ejecutar/reutilizar, o ajustar justificadamente el criterio. H-02 media resolver: cubrir cambio relevante de entradas previo a consulta con entorno estable. H-03 baja resolver: delimitar ausencia de reintento automático en preflight frente a nueva invocación solicitada. Decisión: ejecutar especificar; conservar trabajo sin avanzar a implementación ni marcar completed. Revisión realizada sobre adjuntos exactos por fallo técnico de acceso al disco; transcripción íntegra del dictamen independiente.
