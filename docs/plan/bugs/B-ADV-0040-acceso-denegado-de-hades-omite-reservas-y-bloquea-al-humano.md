@@ -5,12 +5,11 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
-pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -62,3 +61,13 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades /review-spec RECHAZADO (media 7,5): RS-0040-01 exige escenario propio con perfil estricto y reserva disponible; RS-0040-02 concretar rechazo real y tratamiento de su destino; RS-0040-03 registrar arnés revisor final; RS-0040-04 declarar Codex autorizado/elegible y omisión de agy agotado. Todos para especificador, destino resolver. Decisión: ejecutar especificar; conservar escenarios, diseño y pruebas en borrador, sin implementación ni cierre, y repetir revisiones desde cero. Informe docs/review/spec_reviews/B-ADV-0040-spec-review.md.
+
+## Resolución del especificador · 2026-11-11
+
+- DEC-ESP-0040-01: recuperar únicamente el contrato BDD del intento `b7b42e1` y resolver RS-0040-01/02/03/04 en `skills/orquestar/features/orquestacion.feature`. Se descarta restaurar diseño o pruebas en este paso: siguen en `wip/B-ADV-0040` como borradores que Artemisa debe revisar desde cero. El código actual retorna tras el error de acceso sin intentar reservas; el hueco sigue vigente.
+- RS-0040-01: escenario propio con perfil fijado de Hades explícitamente estricto y reserva operativa; solo Claude se lanza y la revisión queda pendiente con diagnóstico.
+- RS-0040-02: rechazo auténtico de agy, hallazgo alto para especificador y destino resolver; se exige `blocked`, `pendiente_de: especificador` y registro del hallazgo, sin pregunta humana ni confusión con fallo técnico.
+- RS-0040-03/04: las dos filas exigen registro del arnés revisor final, Codex autorizado/disponible/sin cuota y secuencia exacta de lanzamientos; agy agotado se omite sin ejecución.
+- DEC-ESP-0040-02: el paso documental verifica solo `git diff --check` mediante `adevv orquestar --verificar`. Las pruebas funcionales del triaje permanecen para bug-fix: no se recuperan ni ejecutan borradores defectuosos para aprobar especificación. No hay Python nuevo que compilar. Se descarta ejecutar la suite completa o usar el rojo del WIP como evidencia del árbol actual.
+- Se conserva el informe rechazado como antecedente y se solicita nueva revisión aislada del contrato; no se modifican preguntas reales, perfiles, tareas dependientes ni B-ADV-0032/0033.
+- Cierre de especificar: Hades `/review-spec` APROBADO, 9/10, cuatro hallazgos resueltos sin nuevos hallazgos. Informe actualizado con antecedente íntegro. Se devuelve a `planned` sin `pendiente_de`; siguiente paso bug-fix, sin acreditar diseño, pruebas ni implementación. La copia WIP conserva el intento antiguo y no debe sustituir este contrato aprobado.

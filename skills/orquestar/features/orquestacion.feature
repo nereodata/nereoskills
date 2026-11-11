@@ -398,6 +398,59 @@ Característica: Continuidad con arneses ausentes
     Y los usuarios 111 y 222 reciben un único aviso del evento respuesta con T-ADV-0101, la referencia Q-ADV-0001, la pregunta y la instrucción "/responder Q-ADV-0001 <respuesta>"
     Y en la siguiente vuelta del bucle se ejecuta T-ADV-0102 con árbol y base_calidad limpios sin incluir src/modulo_a.py, mientras T-ADV-0103 permanece en espera por depender de T-ADV-0101
 
+  @B-ADV-0040
+  Esquema del escenario: Continuar la revisión con una reserva tras acceso por suscripción deshabilitado
+    Dado que Hades tiene Claude principal y reservas autorizadas agy y Codex en ese orden sin perfil estricto
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Y la disponibilidad de agy es <disponibilidad> y Codex está disponible, autorizado y sin cuota vigente
+    Y la reserva que revise emitirá un dictamen APROBADO válido
+    Cuando se solicita la revisión pendiente
+    Entonces el dictamen real APROBADO de <revisor> llega al paso sin abrir preguntas
+    Y los arneses lanzados son exactamente <lanzamientos> en ese orden
+    Y el historial identifica el fallo de acceso de Claude y el arnés <revisor> que completó la revisión sin inventar cuota ni veredicto
+    Ejemplos:
+      | disponibilidad | revisor | lanzamientos |
+      | disponible y sin cuota vigente | agy | Claude, agy |
+      | cuota vigente | Codex | Claude, Codex |
+
+  @B-ADV-0040
+  Escenario: Aplicar el destino de un rechazo auténtico emitido por la reserva
+    Dado que Hades tiene Claude principal y agy como reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Y agy emite un dictamen RECHAZADO con un hallazgo alto para especificador y destino resolver
+    Cuando se solicita la revisión pendiente y el paso recibe el dictamen
+    Entonces el registro identifica a agy como revisor y conserva su RECHAZADO y su hallazgo
+    Y la tarea queda blocked con pendiente_de especificador y el hallazgo registrado para ejecutar especificar
+    Y no se abre una pregunta humana ni se trata el rechazo como indisponibilidad técnica
+
+  @B-ADV-0040
+  Escenario: Respetar el perfil fijado estricto aunque exista una reserva operativa
+    Dado que la tarea fija explícitamente para Hades el perfil Claude con estricto true
+    Y la configuración por dificultad ofrece agy como reserva autorizada, disponible y sin cuota vigente
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Cuando se solicita la revisión pendiente
+    Entonces solo se lanza Claude y no se ejecuta agy ni otra reserva
+    Y la revisión permanece pendiente sin dictamen con diagnóstico de acceso deshabilitado y restricción del perfil estricto
+    Y se conserva el trabajo y no se pregunta por una reserva ni se cambia el perfil fijado
+
+  @B-ADV-0040
+  Escenario: Conservar la revisión cuando ningún perfil autorizado puede revisar
+    Dado que Hades tiene Claude principal y una reserva Claude de otro modelo autorizada y elegible sin perfil estricto
+    Y ambos perfiles devuelven código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Cuando se solicita dos veces la misma revisión
+    Entonces se informa el impedimento técnico y la revisión sigue pendiente sin dictamen
+    Y se conservan el trabajo y las preguntas sin duplicarlas ni acreditar progreso de revisión
+    Y los errores genéricos de autenticación o red conservan su tratamiento anterior
+
+  @B-ADV-0040
+  Escenario: Retomar dos revisiones tras respuestas ya recibidas sin perder WIP ni trabajo ajeno
+    Dado una copia aislada de Q-ADV-0001 de B-ADV-0032 y Q-ADV-0002 de B-ADV-0033 con respuestas recibidas y WIP guardado
+    Y ambas tareas tienen una reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Cuando se incorporan entre pasos y se restauran sus cambios mientras existe trabajo local ajeno
+    Y Claude devuelve código 1 y "Your organization has disabled Claude subscription access for Claude Code." y una reserva completa cada revisión
+    Entonces ambas revisiones reciben el dictamen real y conservan WIP, historial y respuestas
+    Y el trabajo ajeno permanece intacto y no se exige responder otra vez
+
   @B-ADV-0033 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5
   Esquema del escenario: Enrutar un hallazgo de Hades según su destino sin escalarlo al humano
     Dado una tarea bloqueada con un hallazgo de Hades que declara destino <destino>
