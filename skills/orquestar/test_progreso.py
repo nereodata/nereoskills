@@ -259,6 +259,39 @@ class ProgresoTests(unittest.TestCase):
         pregunta, = motor.listar_preguntas(self.root)
         self.assertEqual((pregunta['estado'], pregunta['respuesta']), ('incorporada', 'Sí, para todo entero.'))
 
+    def test_respuesta_durante_la_espera_renueva_solo_su_id(self):
+        """D8: la cola de la espera renueva los dos intentos solo de la tarea respondida."""
+        otro = 'B-DEMO-0002'
+        ficha_b = self.crear_ficha(otro, 'planned')
+        ficha_b.write_text(ficha_b.read_text(encoding='utf-8').replace('depende_de: []',
+                           f'depende_de: [{self.iid}]'), encoding='utf-8')
+        self.commit('el segundo bug depende del primero')
+        self.args.recarga = {'intentos_revision': [['bug-fix', otro, 1]]}
+        self.args.espera_max = 60
+        pregunta = {}
+        presupuestos = []
+        def entre_pasos(script, root, pid, estado, etiqueta):
+            presupuestos.append(estado.get('intentos_revision', []))
+            if len(self.llamadas) == 1 and not pregunta:
+                pregunta.update(motor.solicitar_intervencion(root, self.iid, '¿Se incluyen negativos?'))
+            return False
+        def responder(segundos):
+            self.assertTrue(pregunta)
+            espera.assert_called_once()
+            with patch.object(motor, 'pid_vivo', return_value=42):
+                motor.responder_pregunta_local(self.root, pregunta['id'], 'Sí, todo entero.')
+        def intento(n):
+            self.hades(n)
+            return 0, 'sin acceso al disco para revisar'
+        self.accion = intento
+        with (patch.object(motor, 'recargar_version', side_effect=entre_pasos),
+              patch.object(motor.time, 'sleep', side_effect=responder) as espera):
+            self.assertEqual(motor.bucle(self.args, self.root), 2)
+        registrada, = motor.listar_preguntas(self.root)
+        self.assertEqual((registrada['estado'], registrada['respuesta']), ('incorporada', 'Sí, todo entero.'))
+        self.assertEqual(self.llamadas, [('bug-fix', self.iid)] * 3)
+        self.assertIn(['bug-fix', otro, 1], presupuestos[-1])
+
     def test_alternancia_recarga_proveedor_y_reinicio_manual(self):
         b = 'B-DEMO-0002'
         self.crear_ficha(b)
@@ -397,6 +430,9 @@ class ProgresoTests(unittest.TestCase):
     def test_restaurar_aprobacion_con_nota_de_seguimiento(self):
         self.comprobar_restauracion('\n\n11 de noviembre: se archiva el expediente.', confirmar=True)
 
+    def test_restaurar_aprobacion_sin_cerco_exterior_sigue_revocada(self):
+        self.comprobar_restauracion('', envolver=True)
+
     def test_restaurar_aprobacion_con_cuerpo_sangrado(self):
         self.comprobar_restauracion('', sangria='\n    ')
 
@@ -437,7 +473,14 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
 
+    def test_aprobacion_historica_de_b_se_acredita_por_su_commit(self):
+        self.comprobar_aprobacion_de_b(historica=True)
+
     def test_aprobacion_escueta_de_a_no_invalida_revision_de_b(self):
+        self.comprobar_aprobacion_de_b(historica=False)
+
+    def comprobar_aprobacion_de_b(self, historica):
+        """D6: una aprobación escueta revocada en A no invalida la emisión propia de B."""
         carp = motor.backlog_dirs(self.root)
         huella_a = motor.huella_producto(self.root, 'HEAD', carp)
         self.crear_ficha(self.iid, 'completed')
@@ -449,7 +492,8 @@ class ProgresoTests(unittest.TestCase):
         self.commit('corregir el doble en B')
         huella_b = motor.huella_producto(self.root, 'HEAD', carp)
         self.assertNotEqual(huella_a, huella_b)
-        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_b}\nEl doble es correcto.')
+        producto = '' if historica else f'Producto revisado: {huella_b}\n'
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\n{producto}El doble es correcto.')
         self.commit('aprobar la corrección de B')
         self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
@@ -507,13 +551,14 @@ class ProgresoTests(unittest.TestCase):
                     self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
                     self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
 
-    def comprobar_restauracion(self, seguimiento, confirmar=False, sangria=''):
+    def comprobar_restauracion(self, seguimiento, confirmar=False, sangria='', envolver=False):
         """D3: solo una nueva revisión puede levantar el rechazo del mismo producto."""
         huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
         anterior = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\nPrimera revisión.'
         self.crear_ficha(self.iid, 'completed')
-        self.escribir(self.informe, anterior)
+        self.escribir(self.informe, f'~~~markdown\n{anterior}\n~~~' if envolver else anterior)
         self.commit('primera aprobación')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
         self.escribir(self.informe, anterior.replace('APROBADO', 'RECHAZADO'))
         self.commit('revisión que detecta un defecto')
         self.escribir(self.informe, anterior.replace('Primera revisión.', sangria + 'Primera revisión.') + seguimiento)
