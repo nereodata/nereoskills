@@ -6,6 +6,10 @@ Las métricas de Hades permiten distinguir una revisión sin dictamen de una res
 
 Ante un error del arnés, desarrollo exige estado completado, commit nuevo, árbol limpio y aprobación canónica vigente sobre el último cambio de producto. En análisis se comprueba la transición que satisface el paso. Un cambio parcial sigue la recuperación de errores de B-ADV-0011.
 
+Selección, recuperación y preflight contrastan el dictamen con el producto al completar el ID o al emitir una revisión posterior. Hades recibe una huella SHA-256 de las entradas Git de producto y la declara en el informe de código. Para informes históricos se toma el producto del primer commit de la secuencia que mantiene el mismo veredicto. Así, una nota en el informe conserva la acreditación anterior y el cierre de otra tarea conserva las revisiones ya válidas.
+
+El transporte entrega la respuesta de Hades para reconocer su declaración formal. La salida normal sin dictamen prueba la siguiente reserva elegible. Cada ejecución exterior que propaga un fallo de revisión conserva sus tokens y la marca técnica. El diagnóstico de suite mantiene su contrato de respuesta JSON y su validador propio.
+
 ## Impacto y comprobación
 
 - `bucle` es el consumidor de producción de `firma`. Sus comparaciones de progreso deben observar el paso original aun cuando cambie la selección posterior. `arbol` y la identidad de las evidencias de verificación conservan el contrato exacto de contenido.

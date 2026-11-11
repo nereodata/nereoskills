@@ -35,7 +35,8 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from adevv import diagnostico_suite
-from adevv.revisiones import clave_version as vkey, nombre_version, motivo_informe, motivo_revision, diagnostico_revision
+from adevv.revisiones import (carpetas_maestras, clave_version as vkey, declaracion, diagnostico_revision,
+                              huella_producto, motivo_informe, motivo_revision, nombre_version)
 from adevv.store import write_json_atomic
 
 try:
@@ -545,6 +546,11 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False):
                              f'{", ".join(f"`{c}`" for c in cmds)}. No los relances.\n\n')
         except Exception:
             pass
+    if (rol == 'hades' and paso in DESARROLLO and (root / '.git').exists()
+            and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'):
+        producto = huella_producto(root, arbol(root), backlog_dirs(root))
+        cabecera += (f'En /review-code incluye en el informe la línea «Producto revisado: {producto}» '
+                     'si has revisado el producto de este árbol. Declara el veredicto formal en tu respuesta final.\n\n')
     return cabecera + prompt
 
 
@@ -703,21 +709,15 @@ def lista(valor):
 
 
 def backlog_dirs(root):
-    base, tareas, bugs = 'docs/plan/', 'tasks/', 'bugs/'
+    cfg = {}
     try:
         if yaml and hasattr(yaml, 'safe_load'):
-            m = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))['levels']['master']
+            cfg = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))
         elif yaml and hasattr(yaml, 'load_yaml'):
-            m = yaml.load_yaml((root / 'task_config.yaml'))['levels']['master']
-        else:
-            m = {}
-        folders = m.get('folders', {})
-        base = m.get('path', 'docs/plan/')
-        tareas = folders.get('tasks', m.get('tasks', 'tasks/'))
-        bugs = folders.get('bugs', m.get('bugs', 'bugs/'))
+            cfg = yaml.load_yaml(root / 'task_config.yaml')
+        return carpetas_maestras(root, cfg or {})
     except Exception:
-        pass
-    return root / base / tareas, root / base / bugs
+        return carpetas_maestras(root, {})
 
 
 def backlog(root):
@@ -1238,9 +1238,9 @@ def primera_linea(path):
     return lineas[0] if lineas else ''
 
 
-def revisada(root, iid):
+def revisada(root, iid, objetivo=None):
     """Exige aprobación formal o N/A justificado en el informe canónico."""
-    return not motivo_revision(root, iid)
+    return not motivo_revision(root, iid, fichero_de(root, iid), backlog_dirs(root), objetivo)
 
 
 def producto_activa(root, v):
@@ -1261,6 +1261,12 @@ def ramas_abiertas():
     """Devuelve las ramas de versión en el orden operativo del selector."""
     ramas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
     return sorted(ramas, key=lambda b: vkey(b.split('/')[1]) or (0, 0, 0))
+
+
+def faltan_dependencias(items):
+    """Las tareas abiertas con versión requieren declaración, los bugs pueden omitirla."""
+    return any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None
+               and vkey(i['version']) for i in items) or bool(errores_dependencias(items))
 
 
 def estado(root, docs):
@@ -1293,11 +1299,7 @@ def estado(root, docs):
         return ('PARAR', 'Bloqueo global: intervención humana pendiente de persistir con seguridad; ' + '; '.join(
             f'{q["tarea_id"]} {q["id"]}: {q.get("impedimento_incorporacion", "recuperación pendiente")}'
             for q in incompletas))
-    if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None and vkey(i['version'])
-           for i in items):
-        return ('PASO', 'calcular-dependencias', '', None)
-    errores = errores_dependencias(items)
-    if errores:
+    if faltan_dependencias(items):
         return ('PASO', 'calcular-dependencias', '', None)
 
     por_id = {i['id']: i for i in items}
@@ -1560,11 +1562,10 @@ def reintentos_acumulados(root, iid):
             pasos = 0
             rech = 0
             continue
-        if (f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota')
-                and not f.get('revision_pendiente') and not f.get('bloqueo_agente')):
+        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota') and not f.get('bloqueo_agente'):
             if f.get('progreso'):
                 pasos = 0
-            else:
+            elif not f.get('revision_pendiente'):
                 pasos += 1
         elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('veredicto'):
             if f['veredicto'] == 'RECHAZADO':
@@ -2044,7 +2045,8 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
         return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
 
 
-def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO, gracia_cierre=GRACIA_CIERRE_JSON_S):
+def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
+           gracia_cierre=GRACIA_CIERRE_JSON_S, solo_respuesta=False):
     """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
     inicio = time.monotonic()
     if timeout is _TIMEOUT_OMITIDO:
@@ -2065,7 +2067,7 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return rc, m, salida
+            return rc, m, '' if solo_respuesta and not rc else salida
         print(d.get('response', ''), flush=True)
         u = d.get('usage') or {}
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
@@ -2078,6 +2080,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                                    'razonamiento': u.get('thinking_tokens')}})
         if sesion_id:
             m['sesion'] = sesion_id
+        if solo_respuesta and not (rc or m['error']):
+            salida = d.get('response') or ''
         return (1 if m['error'] and not rc else rc), m, salida
     if harness == 'claude' and '--output-format' in cmd:
         rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
@@ -2095,7 +2099,7 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return rc, m, salida
+            return rc, m, '' if solo_respuesta and not rc else salida
         print(d.get('result', ''), flush=True)
         sesion_id = d.get('session_id') or d.get('sessionId')
         m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
@@ -2106,9 +2110,12 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                           for k, u in (d.get('modelUsage') or {}).items()})
         if sesion_id:
             m['sesion'] = sesion_id
+        if solo_respuesta and not (rc or m['error']):
+            salida = d.get('result') or ''
         return (1 if d.get('is_error') and not rc else rc), m, salida
     lineas, uso, turnos = [], {}, 0
     sesion_id = None
+    respuesta_codex = ''
     por_timeout = [False]
     temporizador = None
     with _proceso_agrupado(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
@@ -2140,7 +2147,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                 elif evento.get('type') == 'thread.started':
                     sesion_id = evento.get('thread_id') or (evento.get('thread', {}).get('id') if isinstance(evento.get('thread'), dict) else None)
                 elif evento.get('type') == 'item.completed' and evento.get('item', {}).get('type') == 'agent_message':
-                    print(evento['item'].get('text', ''), flush=True)
+                    respuesta_codex = evento['item'].get('text', '')
+                    print(respuesta_codex, flush=True)
                 elif evento.get('type') == 'turn.completed':
                     turnos += 1
                     for k, v in (evento.get('usage') or {}).items():
@@ -2167,6 +2175,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             'cache_leida': uso.get('cached_input_tokens'), 'cache_escrita': uso.get('cache_write_input_tokens'),
             'razonamiento': uso.get('reasoning_output_tokens')}})
     codigo = 124 if por_timeout[0] else p.returncode
+    if solo_respuesta and not codigo and harness == 'codex':
+        return codigo, m, respuesta_codex
     return codigo, m, ''.join(lineas[-200:])
 
 
@@ -2271,9 +2281,12 @@ def agente(root, rol, prompt):
 
     def registrar_intento(fila):
         """Relaciona reservas de una llamada sin mezclar revisiones independientes."""
+        if os.environ.get('ORQUESTAR_DICTAMEN') == 'diagnostico-suite':
+            fila['tipo_dictamen'] = 'diagnostico-suite'
         registrar(root, {**fila, 'invocacion': invocacion})
 
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
+    revision_formal = rol == 'hades' and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'
     dif = dificultad_de(root, iid) if iid else None
     cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
     if 'instructions' in cfg:
@@ -2311,6 +2324,8 @@ def agente(root, rol, prompt):
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         timeout_rol = timeout_de_rol(cfg_actual, por_defecto=TIMEOUT_AGENTE_S)
         kwargs_lanzar = {'timeout': timeout_rol} if _acepta_kwarg(lanzar, 'timeout') else {}
+        if revision_formal and _acepta_kwarg(lanzar, 'solo_respuesta'):
+            kwargs_lanzar['solo_respuesta'] = True
         entrada_arnes = None if harness == 'agy' else prompt_texto
         codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada_arnes, **kwargs_lanzar)
         if cede and cfg_actual is not cfg:
@@ -2357,14 +2372,22 @@ def agente(root, rol, prompt):
 
         if not codigo:
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
-        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' and not codigo else []
+        veredicto = declaracion(salida)[0] if revision_formal and not codigo else ''
+        sin_dictamen = revision_formal and not codigo and not veredicto
         registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                          'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
-                         **({'veredicto': veredicto[-1]} if veredicto else {}),
-                         **({'diagnostico': salida[-1200:]} if codigo else {}),
+                         **({'veredicto': veredicto} if veredicto else {}),
+                         **({'diagnostico': salida[-1200:]} if codigo or sin_dictamen else {}),
                          **({'escalado': True} if escalado else {}), **m})
-        if veredicto and veredicto[-1] == 'RECHAZADO':
+        if veredicto == 'RECHAZADO':
             print(tope_de_rechazos(root, iid), flush=True)
+        if sin_dictamen:
+            print('[orquestar] revisión pendiente de Hades: falta el dictamen formal.'
+                  + (' Probando reserva autorizada.' if hay_mas_reservas else ''), flush=True)
+            if hay_mas_reservas:
+                continue
+            if intentos_cuota or cuota_descartada(root, configs_originales, configs_a_probar)[0] is not None:
+                break
         return codigo
 
     if intentos_cuota:
@@ -2427,7 +2450,7 @@ def revision_sin_dictamen(filas, paso, iid):
     """La última reserva de cada revisión determina si quedó sin dictamen."""
     revisiones = {}
     for n, fila in enumerate(filas):
-        if (fila.get('tipo') == 'agente' and fila.get('rol') == 'hades'
+        if (fila.get('tipo') == 'agente' and fila.get('rol') == 'hades' and not fila.get('tipo_dictamen')
                 and fila.get('paso', paso) == paso and fila.get('id', iid) == iid):
             revisiones[fila.get('invocacion') or n] = fila
     return any(not f.get('veredicto') and not f.get('sin_cuota') for f in revisiones.values())
@@ -2439,16 +2462,7 @@ def cierre_revisado(root, paso, iid, base):
     if paso not in DESARROLLO or head == base or git('status', '--porcelain'):
         return False
     fichero = fichero_de(root, iid)
-    if not fichero or frontmatter(fichero).get('status') != 'completed' or not revisada(root, iid):
-        return False
-    informe = f'docs/review/code_reviews/{iid}-code-review.md'
-    revisado = git('log', '-1', '--format=%H', '--', informe)
-    if not revisado:
-        return False
-    if revisado == head:
-        return True
-    return subprocess.run(['git', 'diff', '--quiet', revisado, head, '--', *rutas_producto(root)],
-                          cwd=root).returncode == 0
+    return bool(fichero and frontmatter(fichero).get('status') == 'completed' and revisada(root, iid, head))
 
 
 def cierre_tras_error(root, docs, paso, arg, base, antes):
@@ -2462,9 +2476,7 @@ def cierre_tras_error(root, docs, paso, arg, base, antes):
         fm = frontmatter(f) if f else {}
         return fm.get('status') == 'planned' or (fm.get('status'), fm.get('pendiente_de')) == ('blocked', 'humano')
     if paso == 'calcular-dependencias':
-        items = backlog(root)
-        abiertas = (i for i in items if i['status'] not in CERRADO and vkey(i['version']))
-        return all(i['depende_de'] is not None for i in abiertas) and not errores_dependencias(items)
+        return not faltan_dependencias(backlog(root))
     if paso == 'start-version':
         return git('branch', '--show-current') == f'release/{arg}'
     if paso == 'work-plan':
@@ -2814,6 +2826,10 @@ def indice_de_trabajo(root):
     """Captura el contenido rastreable del árbol sin modificar el índice del usuario."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
+        entradas = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=root)
+        if entradas:
+            subprocess.run(['git', 'update-index', '-z', '--index-info'], cwd=root, env=env,
+                           input=entradas, capture_output=True, check=True)
         subprocess.run(['git', 'add', '-A', '.'], cwd=root, env=env, capture_output=True, check=True)
         yield env
 
@@ -3348,7 +3364,7 @@ def parte(root, docs='docs/requirements'):
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
     if e[0] == 'PASO' and e[1] == 'revisar-tarea':
-        lineas.append(diagnostico_revision(root, e[2]))
+        lineas.append(diagnostico_revision(root, e[2], fichero_de(root, e[2]), backlog_dirs(root)))
     items = backlog(root)
     abiertas = sorted({vkey(i['version']) for i in items if vkey(i['version']) and i['status'] not in CERRADO})
     for vk in abiertas[:1]:
@@ -3833,9 +3849,12 @@ def bucle(a, root):
                 cfg_usada = cfg_actual
                 cuota = espera_cuota(salida) if codigo else None
                 cuota_agente = None
+                revision_pendiente = False
                 if cuota is None and f_met.exists():
                     nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
                     revision_pendiente = revision_sin_dictamen(nuevas, paso, arg)
+                    if revision_pendiente:
+                        m['revision_pendiente'] = True
                     cuota_agente = cuota_agente_pendiente(nuevas)
                     if cuota_agente is not None:
                         if cierre_revisado(root, paso, arg, env['ORQUESTAR_BASE']):
@@ -3964,7 +3983,6 @@ def bucle(a, root):
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
                              **({'dificultad': dif} if dif else {}),
                              'progreso': hubo_progreso,
-                             **({'revision_pendiente': True} if revision_pendiente and not hubo_progreso else {}),
                              **marca_fijado(cfg_usada),
                              **({'escalado': True} if escalado else {}),
                              **({'sin_cuota': True, 'espera_s': cuota} if cuota and cuota_agente is None else {}),
@@ -3998,6 +4016,8 @@ def bucle(a, root):
         if codigo or cuota is not None:
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
+            if cuota is None and revision_pendiente:
+                motivo = f'{paso} {arg}: revisión técnica pendiente de Hades'
             if cuota_agente is not None:
                 motivo += (f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
                            f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"

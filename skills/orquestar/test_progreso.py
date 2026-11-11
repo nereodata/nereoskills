@@ -9,6 +9,7 @@ from contextlib import chdir
 from pathlib import Path
 from unittest.mock import patch
 
+from adevv.revisiones import pendientes_cierre
 from skills.orquestar.test_fallos_arnes import motor
 
 
@@ -249,12 +250,11 @@ class ProgresoTests(unittest.TestCase):
             self.args.recarga, = transferido
             self.assertEqual(motor.bucle(self.args, self.root), 2)
             self.assertEqual(self.llamadas, [('bug-fix', iid) for iid in (self.iid, b, self.iid)])
-            self.assertEqual(self.revisores, [('claude', 'primario'), ('claude', 'primario'),
-                                              ('codex', 'autorizado')])
+            self.assertEqual(self.revisores, [('claude', 'primario'), ('codex', 'autorizado')] * 2)
             self.args.recarga = None
             self.assertEqual(motor.bucle(self.args, self.root), 2)
         self.assertEqual([f['progreso'] for f in self.filas()], [False, True, False, False, False])
-        self.assertEqual(self.revisores[3:], [('claude', 'primario'), ('codex', 'autorizado')] * 2)
+        self.assertEqual(self.revisores[4:], [('claude', 'primario'), ('codex', 'autorizado')] * 2)
         self.assertIn('b.py', self.git('status', '--porcelain'))
         self.assertFalse(motor.listar_preguntas(self.root))
 
@@ -288,6 +288,95 @@ class ProgresoTests(unittest.TestCase):
 
     def test_retorno_erroneo_aprobacion_anterior(self):
         self.retorno_erroneo('completed', 'anterior')
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+
+    def test_nota_no_renueva_aprobacion_pero_dictamen_del_producto_si(self):
+        anterior = '**Veredicto:** APROBADO\nRevisión inicial.\n'
+        self.escribir(self.informe, anterior)
+        self.commit('aprobación anterior')
+        base = self.git('rev-parse', 'HEAD')
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+        self.escribir(self.informe, anterior + 'Pendiente de revisar este cambio.\n')
+        self.commit('cambio con nota')
+        self.assertFalse(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
+        self.assertTrue(pendientes_cierre(self.root, 'v1.1.3'))
+        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella}\n')
+        self.commit('reevaluación independiente')
+        self.assertTrue(motor.cierre_revisado(self.root, 'revisar-tarea', self.iid, base))
+        self.escribir('otro.py', 'otro = True\n')
+        self.commit('otra tarea')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def test_cita_no_emite_dictamen_y_reserva_revisa(self):
+        self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
+            'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
+        self.llamadas.append(('bug-fix', self.iid))
+        def respuesta(harness):
+            texto = ('El informe anterior decía “Veredicto: APROBADO”. No pude abrir el repositorio.'
+                     if harness == 'claude' else '**Veredicto:** RECHAZADO\nLa cita era «Veredicto: APROBADO».')
+            return 0, {'modelos': {harness: {'entrada': 7}}}, texto
+        self.assertEqual(self.revisar(respuesta), 0)
+        revisores = [f for f in motor.leer_metricas(self.root) if f.get('rol') == 'hades']
+        self.assertEqual([f['arnes'] for f in revisores], ['claude', 'codex'])
+        a, b = revisores
+        self.assertNotIn('veredicto', a)
+        self.assertEqual(b['veredicto'], 'RECHAZADO')
+        self.assertEqual(a['invocacion'], b['invocacion'])
+
+    def test_reintentos_del_arnes_por_revision_conservan_consumo_sin_promocion(self):
+        self.ficha.write_text(self.ficha.read_text(encoding='utf-8').replace(
+            'perfil: {harness: codex, model: potente, estricto: true}\n', ''), encoding='utf-8')
+        self.escribir('orchestration.json', json.dumps({'artemisa': {'harness': 'codex', 'model': 'principal',
+            'reserva': {'harness': 'claude', 'model': 'reserva'}}}))
+        self.commit('autorizar reserva')
+        def intentar(n):
+            self.hades(n)
+            return 1, 'revisión pendiente'
+        self.accion = intentar
+        self.assertEqual(motor.bucle(self.args, self.root), 2)
+        self.assertEqual(self.perfiles, ['principal', 'principal', 'reserva', 'reserva'])
+        self.assertEqual([f['modelos']['dev']['entrada'] for f in self.filas()], [11] * 4)
+        self.assertTrue(all(f.get('revision_pendiente') for f in self.filas()))
+        self.assertEqual(motor.reintentos_acumulados(self.root, self.iid), (0, 0))
+
+    def test_diagnostico_estructurado_de_suite_se_entrega_al_consumidor(self):
+        self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
+            'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
+        self.llamadas.append(('bug-fix', self.iid))
+        dato = {'causa': 'Disco lleno', 'decision': 'Liberar espacio', 'destino': 'tecnico',
+                'responsable': 'operaciones', 'intervencion': 'Ampliar disco'}
+        with patch.dict(os.environ, ORQUESTAR_DICTAMEN='diagnostico-suite'):
+            self.assertEqual(self.revisar(lambda h: (0, {}, json.dumps(dato))), 0)
+        self.assertEqual(self.revisores, [('claude', 'principal')])
+        self.assertFalse(motor.revision_sin_dictamen(motor.leer_metricas(self.root), 'bug-fix', self.iid))
+
+    def test_wip_rastreado_aunque_ignorado(self):
+        self.escribir('.gitignore', 'producto.py\n')
+        self.commit('producto ya rastreado')
+        indice = self.git('ls-files', '--stage')
+        antes = motor.firma(self.root, 'docs', 'bug-fix', self.iid)
+        arbol = motor.arbol(self.root)
+        self.escribir('producto.py', 'def doble(n):\n    return 2*n\n')
+        self.assertNotEqual(motor.firma(self.root, 'docs', 'bug-fix', self.iid), antes)
+        self.assertNotEqual(motor.arbol(self.root), arbol)
+        self.assertEqual(self.git('ls-files', '--stage'), indice)
+
+    def test_recupera_dependencias_con_bug_antiguo(self):
+        tarea = self.crear_ficha('T-DEMO-0002', 'planned')
+        for ficha in (tarea, self.ficha):
+            ficha.write_text(ficha.read_text(encoding='utf-8').replace('depende_de: []\n', ''), encoding='utf-8')
+        self.commit('dependencias sin declarar')
+        paso = motor.estado(self.root, 'docs')[1]
+        self.assertEqual(paso, 'calcular-dependencias')
+        base = self.git('rev-parse', 'HEAD')
+        antes = motor.firma(self.root, 'docs', paso)
+        self.crear_ficha('T-DEMO-0002', 'planned')
+        self.commit('dependencias de la tarea')
+        self.assertNotEqual(motor.estado(self.root, 'docs')[1], paso)
+        self.assertTrue(motor.cierre_tras_error(self.root, 'docs', paso, '', base, antes))
 
     def test_retorno_erroneo_aprobacion_vigente(self):
         self.retorno_erroneo('completed', 'vigente')

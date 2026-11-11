@@ -51,7 +51,7 @@ Construir el hotfix sobre v1.1.2, ejecutar las regresiones y la suite completa a
 - D [EXEC] Revisión independiente de código sobre todo el delta.
 - E [EXEC] Documentar el límite y la persistencia en la guía del orquestador.
 - F [EXEC] Registrar validación de versión y cerrar mediante commit cuando las revisiones estén aprobadas.
-- Verificación dirigida: `python -m unittest skills.orquestar.test_progreso skills.orquestar.test_fallos_arnes skills.orquestar.test_recarga skills.orquestar.test_perfil_fijado.BucleTests tests.test_orquestar.RecuperacionAnalisisTests tests.test_orquestar.DificultadTests tests.test_orquestar.OrquestarRegressionTests`. Cubre avance, cierre revisado, cuota, perfiles y recarga. Higiene mediante `git diff --check` y calidad del delta.
+- Verificación dirigida: `python -m unittest skills.orquestar.test_progreso skills.orquestar.test_fallos_arnes skills.orquestar.test_recarga skills.orquestar.test_perfil_fijado.BucleTests tests.test_orquestar.RecuperacionAnalisisTests tests.test_orquestar.DificultadTests tests.test_orquestar.OrquestarRegressionTests tests.test_revision_release skills.orquestar.test_acceso_agente`. La reevaluación incorpora los dos consumidores afectados por H1–H4 (preflight de release y salida de Hades). Cubre avance, cierre revisado, cuota, perfiles y recarga. Higiene mediante `git diff --check` y calidad del delta.
 
 ## Hallazgo de Hades enrutado
 - Destino: `artemisa`
@@ -64,3 +64,8 @@ Construir el hotfix sobre v1.1.2, ejecutar las regresiones y la suite completa a
 - Evidencia: Hades rechazó el árbol 91f914f09742192e33b51d33c60799bf50e3c67e (6,83/10). H1-H2: conservar para selección y release la revisión pendiente y vincular el dictamen al producto. H3-H5: descartar citas, probar reservas permitidas tras salida normal sin dictamen y excluir los intentos técnicos internos de la promoción. H6: observar fuentes rastreadas ignoradas. H7: compartir el criterio de dependencias con el selector. Artemisa retoma el desarrollo. Informe literal en docs/review/code_reviews/B-ADV-0044-code-review.md.
 
 En esta misma revisión se reprodujo H3: la primera línea del dictamen literal es RECHAZADO, pero el motor 1.1.2 registró APROBADO al encontrar la cita de H3 más adelante. Para reevaluar, usar el informe literal y el delta desde el árbol 91f914f09742192e33b51d33c60799bf50e3c67e. La última ejecución dirigida de ese árbol pasó las 84 pruebas en 70,832 s.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Reevaluación de pruebas del árbol b0dce90fafcf6d0d435126211f9dd7baf0ca5d40, RECHAZADO (8,00/10). N1 exige rechazar la huella del producto A frente al producto B y liberar B solo con la huella vigente. N2 exige recuperar los cinco campos de diagnóstico por el consumidor real. N3 exige observar el índice preparado distinto de HEAD y del WIP. Artemisa reanuda desarrollo y someterá estos cambios a Hades. Informe literal en docs/review/test_reviews/B-ADV-0044-test-review.md.

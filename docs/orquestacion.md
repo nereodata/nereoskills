@@ -37,6 +37,8 @@ Si Hades agota los perfiles autorizados sin emitir dictamen, cada intento sin av
 
 Ante un error del arnés, desarrollo continúa al paso siguiente si la ficha está completada, hay un commit nuevo, el árbol está limpio y la aprobación canónica cubre el producto confirmado. El trabajo parcial se conserva durante la recuperación del arnés.
 
+Hades incluye en la revisión de código la línea `Producto revisado: <huella>` que recibe en el mandato. El selector y el preflight comprueban el producto del ID al completarlo. Para informes históricos usan el producto que había al emitirse el veredicto. Añadir una nota conserva la fecha de esa aprobación. Si quedó caducada, al relanzar se selecciona `revisar-tarea`.
+
 ```mermaid
 flowchart TD
   idea(["requirements.md (idea)"]) --> req["ciclo-requisitos"]
