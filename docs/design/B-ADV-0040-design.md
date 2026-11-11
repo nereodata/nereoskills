@@ -1,6 +1,6 @@
 # Diseño técnico: B-ADV-0040
 
-`agente()` reconocerá exclusivamente el diagnóstico de Claude `Your organization has disabled Claude subscription access for Claude Code.` cuando el proceso falle. La clasificación se hará antes del reintento de una sesión antigua y antes de interpretar cuotas. No es un dictamen ni una cuota: se registra `acceso_denegado`, modelo, diagnóstico y código real, sin `veredicto` ni espera inventada. Se continúa por la lista ya filtrada por cuotas; `aplicar_perfil()` ya elimina reservas para perfiles estrictos. No se cambian perfiles ni se reintenta una sesión bloqueada por suscripción.
+`agente()` reconocerá exclusivamente el diagnóstico de Claude `Your organization has disabled Claude subscription access for Claude Code` cuando el proceso falle. La clasificación se hará antes del reintento de una sesión antigua y antes de interpretar cuotas. No es un dictamen ni una cuota: se registra `acceso_denegado`, modelo, diagnóstico y código real, sin `veredicto` ni espera inventada. Se continúa por la lista ya filtrada por cuotas; `aplicar_perfil()` ya elimina reservas para perfiles estrictos. No se cambian perfiles ni se reintenta una sesión bloqueada por suscripción.
 
 Si no queda perfil operativo, el resultado es fallo técnico con instrucción de conservar la revisión pendiente y terminar sin completar ni abrir preguntas para elegir perfiles. El mandato del paso y la skill explicitan esta regla. Los errores genéricos de autenticación/red y los rechazos reales conservan su comportamiento. El caso mixto acceso/cuota conserva la espera real existente. El éxito sigue registrando el arnés y veredicto reales.
 
@@ -31,3 +31,9 @@ Impacto mecánico adicional: `intervencion.git` es helper privado de bloqueo, pr
 ## RC-01 de QA
 
 La restauración no debe heredar la tolerancia de `asegurar_destino` a escrituras propias preparadas: una pregunta incorporada ya concluyó esa transacción. Se antepone una barrera estricta con `git status --porcelain` antes de llamar al helper. Cualquier cambio de índice, worktree o archivo sin seguimiento impide restaurar; incluye índice AJENO y worktree vuelto a HEAD que se cancelan en diff HEAD. Se conserva la recuperación previa de incorporación sin modificar ese helper ni su contrato. El caso adicional del triaje vive en test_acceso_agente.py, con Git real y la instantánea incorporada, y debe fallar antes de la corrección. Sin nueva arquitectura ni dependencias.
+
+## Reapertura: diagnóstico sin punto final
+
+Se reconoce la frase específica completa hasta `Claude Code`, independientemente del punto o del sufijo explicativo. Solo en Claude y con código distinto de cero. No se amplía a autenticación/red genéricas ni al código 403 por sí solo. [MODIFY] clasificador y pruebas de acceso existentes; sin nuevas capas ni firmas.
+
+Mapa de impacto: los dos consumidores en `agente()` (exclusión del reintento de sesión y clasificación previa a cuotas) necesitan reconocer esta variante. La búsqueda del helper no encuentra otros consumidores de producción. Los tests previos no se modifican ni invalidan; se añaden reserva con sesión previa, estricto con sesión previa y exclusión de otro proveedor. La primera descripción de este documento exigía un punto literal y se precisa aquí conforme al diagnóstico real, sin contradecir decisiones arquitectónicas. El clasificador conserva una sola búsqueda de subcadena sobre la salida capturada, sin nueva E/S; las pruebas dirigidas validan la secuencia de lanzamientos.

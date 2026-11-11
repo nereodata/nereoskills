@@ -2204,7 +2204,7 @@ def base_comando_agente(harness, prompt, sesion=None):
 
 def acceso_suscripcion_denegado(harness, salida):
     """Reconoce el diagnóstico específico de Claude sin reclasificar autenticación genérica."""
-    return harness == 'claude' and 'Your organization has disabled Claude subscription access for Claude Code.' in salida
+    return harness == 'claude' and 'Your organization has disabled Claude subscription access for Claude Code' in salida
 
 
 def agente(root, rol, prompt):

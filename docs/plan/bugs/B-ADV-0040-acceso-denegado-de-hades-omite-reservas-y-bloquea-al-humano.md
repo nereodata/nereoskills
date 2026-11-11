@@ -5,7 +5,7 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -115,3 +115,21 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - QA: Hades `/review-code` RECHAZADO (8,5/10), RC-01 alto para desarrollador: asegurar_destino toleraba un índice ajeno AJENO cancelado por worktree=HEAD. Se añade regresión al mismo comando del triaje: rojo de 11 tests con un fallo por restauración indebida. Hades `/review-test` aprueba el delta de prueba con 9/10 sin nuevos hallazgos. Corrección: barrera estricta de `git status --porcelain` antes del helper en restauración de respuestas incorporadas; no cambia la recuperación de escrituras preparadas de incorporar. Reevaluación de código pendiente.
 
 - Cierre: Hades review-code APROBADO 9/10, RC-01 resuelto sin nuevos hallazgos; review-test APROBADO 9/10 conserva RT-01/02 resueltos. Informes transcritos con límite de acceso a disco. Verificación dirigida final: 55 pruebas, compilación y diff-check; calidad omite formato/lint por ausencia de herramientas. Sin deuda ni intervenciones nuevas; validación funcional y decisiones trasladadas a v1.1.2-revision.md.
+
+## Triaje de reapertura · Variante real sin punto · 2026-11-11
+
+- Se conserva `base_calidad` original; base del delta de reapertura: `9d3e81e`.
+- Causa acotada: el detector exige puntuación final que no forma parte estable del diagnóstico de Claude.
+- A [SKIP]: contrato de reservas, estricto y errores genéricos ya aprobado; no cambia requisito.
+- B [EXEC]: precisar el detector existente sin nueva arquitectura.
+- C1 [EXEC]: regresión del mensaje real sin punto con reserva y sesión previa/perfil estricto, y frontera exclusiva de Claude.
+- C2 [EXEC]: retirar la dependencia del punto en la frase específica completa.
+- D [EXEC]: Hades review-test y review-code sobre el delta de reapertura; informes anteriores son antecedentes.
+- E [EXEC]: diseño, contrato operativo y changelog.
+- F [EXEC]: cierre y commit solo tras aprobación.
+- Verificación: mismos cuatro módulos del triaje original, compilación Python del delta, diff-check y calidad; sin suite completa ni preguntas/perfiles reales modificados.
+
+- Reapertura C1: rojo válido de 14 tests con dos fallos por reintentar Claude, sin errores de fixture; Hades review-test APROBADO 9/10 sin hallazgos, transcrito sobre adjuntos exactos por acceso a disco no disponible.
+- Reapertura C2: detector sin dependencia de puntuación final; 58 pruebas dirigidas verdes (14 acceso, 9 arnés ausente, 8 cuotas, 27 perfil fijado), compilación y diff-check mediante coordinador. Calidad omite formato/lint por ausencia de herramientas. Review-code pendiente, sin cierre ni modificación de perfiles/preguntas reales.
+
+- Reapertura QA: Hades review-code APROBADO 9/10 en seis dimensiones, sin hallazgos ni deuda nueva. Dictamen independiente sobre adjuntos exactos por acceso al disco no disponible, transcrito conservando antecedentes. Validación funcional y decisiones en v1.1.2-revision.md. No se ejecutó suite completa.

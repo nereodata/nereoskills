@@ -1,5 +1,21 @@
 **Veredicto:** APROBADO
 
+# B-ADV-0040 · Reapertura: diagnóstico real sin punto · 2026-11-11
+
+Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`. Corrección, seguridad, conformidad, calidad, eficiencia y documentación: 9/10 cada una, media 9/10. Sin hallazgos nuevos; RC-01 permanece resuelto conforme al antecedente aprobado. No reabre especificación ni implementación anterior.
+
+Eliminar el punto literal reconoce el diagnóstico real conservando la frase completa y la restricción a Claude. Ambos consumidores requieren código distinto de cero y evitan el reintento de sesión y clasifican antes de cuotas. Reutiliza reservas elegibles y perfil estricto, sin ampliar a errores genéricos ni añadir E/S, dependencias o arquitectura. Diseño, contrato operativo y changelog coherentes.
+
+Análisis estático: acepta evidencia del árbol `34dfd31de0`, 58 pruebas dirigidas, compilación y diff-check verdes. Formato/lint omitidos por ausencia de herramientas; tipado no configurado. Sin dependencias ni credenciales nuevas. Las omisiones no se acreditan en verde.
+
+Dictamen independiente transcrito: el acceso a disco falló con `registered Core launch requires an installed app`. Revisó adjuntos exactos sin contrastar con disco, ejecutar comprobaciones ni modificar código/estado. Informe entregado por salida.
+
+---
+
+## Antecedentes íntegros
+
+**Veredicto:** APROBADO
+
 # B-ADV-0040 · Reevaluación RC-01 · 2026-11-11
 
 Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`. Dictamen independiente transcrito sobre adjuntos exactos; el arnés no pudo acceder al disco ni guardar informe. No ejecutó comandos ni contrastó adjuntos con disco. Conserva la evaluación anterior del resto del delta, sin reabrir especificación ni pruebas.

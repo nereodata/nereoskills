@@ -1,5 +1,19 @@
 **Veredicto:** APROBADO
 
+# B-ADV-0040 · Reapertura: diagnóstico real sin punto · 2026-11-11
+
+Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`: cobertura, aserciones, rojo correcto y estabilidad 9/10; media 9/10. Sin hallazgos nuevos; RT-01/02 permanecen resueltos. No reabre especificación ni evalúa producción.
+
+Las tres pruebas nuevas cubren reserva sin reintentar Claude, perfil estricto y exclusividad del proveedor. Comprueban diagnóstico y ausencia de veredicto/cuota ficticios. Rojo dirigido: 14 pruebas, dos fallos funcionales por relanzamiento de Claude, sin errores de preparación. Fixtures temporales y lanzadores simulados deterministas.
+
+Dictamen independiente transcrito de su salida: el acceso al disco falló con `registered Core launch requires an installed app`. Revisó adjuntos exactos, no ejecutó pruebas ni repitió verificaciones; no guardó el informe.
+
+---
+
+## Antecedentes íntegros
+
+**Veredicto:** APROBADO
+
 # B-ADV-0040 · Regresión de RC-01 · 2026-11-11
 
 Hades mantiene APROBADO, 9/10 en cobertura, aserciones, rojo y estabilidad; sin hallazgos nuevos. Dictamen independiente transcrito de --agente sobre adjuntos exactos por fallo de disco, sin ejecutar pruebas.

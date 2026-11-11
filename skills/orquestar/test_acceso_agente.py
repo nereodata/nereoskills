@@ -19,6 +19,8 @@ SPEC.loader.exec_module(motor)
 LANZAR_REAL = motor.lanzar
 POPEN_REAL = subprocess.Popen
 ERROR = 'Your organization has disabled Claude subscription access for Claude Code.'
+ERROR_REAL = ('Your organization has disabled Claude subscription access for Claude Code · '
+              'Use an Anthropic API key instead, or ask your admin to enable access')
 
 
 class AccesoAgenteTests(unittest.TestCase):
@@ -39,6 +41,51 @@ class AccesoAgenteTests(unittest.TestCase):
         self.aviso = self.enterContext(patch.object(motor, 'avisar'))
         self.consola = self.enterContext(patch('builtins.print'))
         self.lanzar = self.enterContext(patch.object(motor, 'lanzar'))
+
+    def test_diagnostico_real_sin_punto_alcanza_reserva(self):
+        """El error real 403 conserva diagnóstico y alcanza una reserva elegible."""
+        self.lanzar.side_effect = [(1, {}, ERROR_REAL), (0, {}, 'Veredicto: APROBADO')]
+        with patch.object(motor, 'buscar_sesion_agente', return_value='anterior'):
+            self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 0)
+        self.assertEqual([c.args[2] for c in self.lanzar.call_args_list], ['claude', 'agy'])
+        filas = motor.leer_metricas(self.root)
+        self.assertTrue(filas[0]['acceso_denegado'])
+        self.assertEqual(filas[0]['diagnostico'], ERROR_REAL)
+        self.assertEqual(filas[0]['codigo'], 1)
+        self.assertFalse(filas[0].get('veredicto') or filas[0].get('sin_cuota'))
+        self.assertEqual((filas[-1]['arnes'], filas[-1]['veredicto']), ('agy', 'APROBADO'))
+        self.assertFalse((self.root / motor.intervencion.PREGUNTAS).exists())
+
+    def test_diagnostico_real_sin_punto_respeta_estricto(self):
+        """No reintenta sesión ni usa reservas bajo el perfil estricto."""
+        tareas = self.root / 'docs/plan/bugs'
+        tareas.mkdir(parents=True)
+        (tareas / 'B-ADV-0040.md').write_text(
+            '---\nid: B-ADV-0040\nstatus: in_progress\n'
+            'perfil: {hades: {harness: claude, model: principal}, estricto: true}\n---\n',
+            encoding='utf-8')
+        self.enterContext(patch.dict(motor.os.environ, {'ORQUESTAR_ID': 'B-ADV-0040'}))
+        self.lanzar.return_value = (1, {}, ERROR_REAL)
+        with patch.object(motor, 'buscar_sesion_agente', return_value='anterior'):
+            self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
+        self.lanzar.assert_called_once()
+        fila = motor.leer_metricas(self.root)[-1]
+        self.assertTrue(fila['acceso_denegado'])
+        self.assertEqual(fila['diagnostico'], ERROR_REAL)
+        self.assertFalse(fila.get('veredicto') or fila.get('sin_cuota'))
+        self.assertTrue(any('revisión pendiente' in str(c) and 'estricto' in str(c)
+                            for c in self.consola.call_args_list))
+        self.assertFalse((self.root / motor.intervencion.PREGUNTAS).exists())
+
+    def test_diagnostico_de_otro_proveedor_no_activa_reservas(self):
+        """La frase no autoriza conmutación fuera de Claude."""
+        self.cfg['harness'] = 'agy'
+        self.lanzar.return_value = (1, {}, ERROR_REAL)
+        self.assertEqual(motor.agente(self.root, 'hades', 'revisa'), 1)
+        self.lanzar.assert_called_once()
+        fila = motor.leer_metricas(self.root)[-1]
+        self.assertEqual(fila['diagnostico'], ERROR_REAL)
+        self.assertFalse(fila.get('acceso_denegado') or fila.get('sin_cuota') or fila.get('veredicto'))
 
     def test_reserva_recibe_dictamen_real_y_no_inventa_cuota(self):
         """Conserva el rechazo auténtico y su destino tras el fallo técnico."""

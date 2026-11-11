@@ -8,7 +8,7 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 - **B-ADV-0033** — El detector conserva el destino antes de recortar la evidencia, admite etiquetas Markdown y prioriza la última declaración de salida sobre la última de la tarea.
 
-- **B-ADV-0040** — Hades continúa por sus reservas autorizadas ante suscripción de Claude deshabilitada, respeta perfiles estrictos y conserva la revisión pendiente sin preguntas nuevas. La recuperación del WIP espera al trabajo ajeno y preserva los bytes del parche en Windows.
+- **B-ADV-0040** — Hades continúa por sus reservas autorizadas ante suscripción de Claude deshabilitada, incluido el diagnóstico sin punto final y con sufijo explicativo, respeta perfiles estrictos y conserva la revisión pendiente sin preguntas nuevas. La recuperación del WIP espera al trabajo ajeno y preserva los bytes del parche en Windows.
 
 - **B-ADV-0034** — Responder preguntas del orquestador desde CLI local sin Telegram, compartiendo validación, persistencia e incorporación con el gateway y respetando dependencias.
 
