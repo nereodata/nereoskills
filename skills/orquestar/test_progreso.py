@@ -443,6 +443,30 @@ class ProgresoTests(unittest.TestCase):
     def test_restaurar_aprobacion_con_huella_del_mismo_producto(self):
         self.comprobar_restauracion('')
 
+    def test_nota_posterior_a_copia_escueta_confirmada_no_cierra_b(self):
+        """D10: la edición administrativa posterior conserva el origen de la copia."""
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
+        self.escribir(self.informe, '**Veredicto:** APROBADO')
+        self.commit('aprobar A sin cuerpo ni huella')
+        aprobado = self.git('rev-parse', 'HEAD')
+        self.escribir('producto.py', 'def doble(n):\n    return n\n')
+        self.escribir(self.informe, '**Veredicto:** RECHAZADO\nEn B doble(3) devuelve 3.')
+        self.commit('rechazar B')
+        rechazado = self.git('rev-parse', 'HEAD')
+        self.git('restore', '--source', aprobado, '--', self.informe)
+        self.commit('copiar el informe escueto de A')
+        for etapa in ('copia', 'seguimiento'):
+            if etapa == 'seguimiento':
+                self.escribir(self.informe, '**Veredicto:** APROBADO\nSe archiva el expediente el 11 de noviembre.')
+                self.commit('añadir al informe la fecha de archivo')
+            with self.subTest(etapa=etapa, consumidor='selector'):
+                self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+            with self.subTest(etapa=etapa, consumidor='preflight'):
+                self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+            with self.subTest(etapa=etapa, consumidor='cierre tras error'):
+                self.assertFalse(motor.cierre_revisado(self.root, 'bug-fix', self.iid, rechazado))
+
     def test_restaurar_aprobacion_con_linea_vacia(self):
         self.comprobar_restauracion('\n\n')
 
@@ -722,6 +746,14 @@ class ProgresoTests(unittest.TestCase):
 
     def test_rechazo_propio_despues_de_encabezado_citado(self):
         self.comprobar_rechazo_del_principal('> # Informe anterior\n**Veredicto:** RECHAZADO')
+
+    def test_ejemplo_de_codigo_html_activa_reserva(self):
+        self.comprobar_reserva_tras_cita('<pre><code>\nVeredicto: APROBADO\n</code></pre>')
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
+
+    def test_rechazo_propio_despues_de_ejemplo_de_codigo_html(self):
+        self.comprobar_rechazo_del_principal('<pre><code>\nVeredicto: APROBADO\n</code></pre>\n'
+                                             '**Veredicto:** RECHAZADO')
 
     def test_rechazo_propio_antes_de_cita_html_en_la_misma_linea(self):
         self.comprobar_rechazo_del_principal(

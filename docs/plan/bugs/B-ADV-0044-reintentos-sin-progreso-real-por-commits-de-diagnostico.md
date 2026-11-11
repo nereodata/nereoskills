@@ -169,3 +169,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: D9 resuelto en los tres consumidores. Hades rechazó el árbol e40be2b764ee04736af04642d760d44a5c0b056d (7,33/10). D10 crítico: confirmar la copia escueta de A y añadir en otro commit una nota de archivo libera B. D11 alto: un veredicto de ejemplo en HTML pre/code se interpreta como propio y omite la reserva de Hades. Ambos para Artemisa en C2; añadir las reproducciones y conservar los controles positivos antes de reevaluar el código. Las 166 pruebas dirigidas pasaron. Informe canónico en docs/review/code_reviews/B-ADV-0044-code-review.md.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobada por Hades (9,50/10) sobre 51f8328d7e41b1b45975db7554557807dd3fe4af. N10 medio, resolver en C2: guardar el ejemplo HTML pre/code en el informe canónico y comprobar que el preflight mantiene pendiente el ID. Corregir D10 (procedencia de una aprobación escueta copiada tras añadir una nota posterior) y D11 (ejemplo HTML interpretado como dictamen propio), conservar el control de aprobación legítima de B y solicitar revisión D. Las cuatro pruebas focalizadas produjeron cinco fallos de aserción y el control positivo pasó.
