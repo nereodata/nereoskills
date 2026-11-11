@@ -8,11 +8,11 @@ Revisor: Hades. Modo orquestado, paso `revisar-tarea`, `/review-code`. Reevaluac
 
 - Rama: `hotfix/v1.1.3`.
 - `base_calidad`: `ea1ebfc524d471f723fc4e926b12b738717f8998`.
-- HEAD revisado: `a8835f1fdd668e704d6f997cd2f91437724d4474`.
-- Árbol de HEAD, confirmado mediante Git: `c843e193a1ebeafd32b885de93d30fb4280fcd4f`.
-- Commit del ID: `a8835f1` — `fix(B-ADV-0047): reparar fixtures de la verificación de cierre`.
+- HEAD revisado: `4f75ebf33a1be4046fdb94e98f5ef1af537eb414`.
+- Árbol de HEAD, confirmado mediante Git: `124f7b68ff0717f0111ad3be6bb245fdefab4261`.
+- Commit de corrección del ID: `a8835f1` — `fix(B-ADV-0047): reparar fixtures de la verificación de cierre`.
 
-Se han contrastado la lista completa de archivos y el contenido del delta entre la base y HEAD. El commit del ID modifica únicamente:
+Se han contrastado independientemente los commits del ID y el delta completo entre la base y HEAD. `ea1ebfc` registra el fallo y constituye el límite inferior; `a8835f1` contiene la corrección y `4f75ebf` actualiza exclusivamente este informe N/A. Desde la revisión anterior (`a8835f1`) hasta el HEAD actual solo cambia este informe; no aparecen cambios de producción. El commit de corrección modifica únicamente:
 
 - `tests/test_control_intervenciones.py`: fixture Git con repositorio temporal y decodificación UTF-8.
 - `tests/test_orquestar.py`: decodificación UTF-8 del helper de `SuiteRecoveryTests`.
@@ -27,17 +27,17 @@ Las pruebas corresponden a la [revisión de pruebas](../test_reviews/B-ADV-0047-
 
 ## Análisis estático y evidencia reutilizada
 
-Se reutilizan las entradas de `orquestar_evidencias.jsonl` del mismo árbol `c843e193a1ebeafd32b885de93d30fb4280fcd4f`, coincidente con HEAD antes de actualizar este informe:
+Las evidencias de pruebas y `git diff --check` se reutilizan de `orquestar_evidencias.jsonl`, del mismo árbol `124f7b68ff0717f0111ad3be6bb245fdefab4261`, coincidente con HEAD antes de actualizar este informe:
 
 | Comprobación | Evidencia del 2026-11-11 | Resultado |
 | --- | --- | --- |
-| `adevv orquestar --calidad --base ea1ebfc524d471f723fc4e926b12b738717f8998` | 20:20:22, código 0 | Formato y lint omitidos por ausencia de herramientas. |
-| `git diff --check` | 20:20:23, código 0 | Verde reutilizado. |
-| `python -m unittest tests.test_control_intervenciones tests.test_orquestar.SuiteRecoveryTests tests.test_revision_release` | 20:22:47, código 0 | 50 pruebas, OK, 104.842 s. |
+| `adevv orquestar --calidad --base ea1ebfc524d471f723fc4e926b12b738717f8998` | Ejecutado en esta revisión sobre HEAD, código 0 | Formato y lint omitidos por ausencia de herramientas. |
+| `git diff --check` | 20:24:50, código 0 | Verde reutilizado. |
+| `python -m unittest tests.test_control_intervenciones tests.test_orquestar.SuiteRecoveryTests tests.test_revision_release` | 20:27:06, código 0 | 50 pruebas, OK, 104.125 s. |
 
 El resultado de `--calidad` satisface la comprobación del comando y base exigidos por la skill; sus omisiones quedan justificadas por la ausencia de herramientas/configuración declarada en el triaje. **Formato y lint no se ejecutaron en verde.** Tipado: no configurado. Auditoría de dependencias: N/A porque no cambian dependencias ni manifiestos. La lectura del delta no identifica secretos expuestos ni cambios de producción que requieran chequeos adicionales de seguridad.
 
-No se relanza ningún comando de verificación o calidad ni la suite completa. La evidencia citada acredita el árbol previo a esta actualización documental; no se presenta como una ejecución posterior sobre el informe modificado.
+No se relanzan las pruebas ni `git diff --check`; tampoco se ejecuta la suite completa. Solo se ejecuta `--calidad --base` sin escritura ni `--aplicar`, según exige la skill: devuelve código 0 y las dos omisiones indicadas, sin añadir una entrada nueva al JSONL. La evidencia citada acredita el árbol previo a esta actualización documental; no se presenta como una ejecución posterior sobre el informe modificado.
 
 ## Puntuaciones y hallazgos
 
