@@ -451,6 +451,49 @@ Característica: Continuidad con arneses ausentes
     Entonces ambas revisiones reciben el dictamen real y conservan WIP, historial y respuestas
     Y el trabajo ajeno permanece intacto y no se exige responder otra vez
 
+  @B-ADV-0040
+  Esquema del escenario: Conservar el tratamiento de errores genéricos al revisar con Hades
+    Dado que Hades tiene Claude principal y Codex como reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y no existe sesión anterior de Hades y todos los ejecutables están disponibles
+    Y el lanzador simulado de Claude devuelve código 1 y "<error>" sin diagnóstico de suscripción deshabilitada ni cuota
+    Cuando se solicita la revisión pendiente
+    Entonces se devuelve código 1 y el diagnóstico conserva "<error>"
+    Y solo se lanza Claude una vez y Codex no recibe ninguna petición
+    Y la revisión queda pendiente sin dictamen ni progreso de revisión
+    Y el intento registra el fallo sin agotamiento de cuota ni ausencia de ejecutable
+    Ejemplos:
+      | error |
+      | authentication failed |
+      | network connection failed |
+
+  @B-ADV-0040
+  Esquema del escenario: Recuperar una revisión respondida desde una instantánea identificada
+    Dado un repositorio temporal independiente por fila con la instantánea sintética <pregunta> de <tarea> sin modificar las preguntas reales
+    Y la revisión pendiente es review-test sin dictamen y su historial contiene el rechazo anterior "RT-PREVIO" y el fallo de acceso de Claude
+    Y la pregunta conserva ese historial, la referencia a wip/<tarea>, wip_restaurado false y la respuesta literal "Usar la reserva Codex ya configurada; pruebas con mocks"
+    Y su estado inicial es <estado_pregunta> con <recepcion> y la tarea está <estado_tarea>
+    Y wip/<tarea> contiene el archivo exclusivo borrador.txt con bytes UTF-8 "WIP-<tarea>\n" y su commit se registra como W0
+    Y el árbol de destino tiene un cambio ajeno sin confirmar en ajeno.txt con bytes UTF-8 "AJENO\n" cuyo contenido e índice se guardan como A0
+    Y Hades tiene Claude principal y Codex como única reserva autorizada, disponible y sin cuota vigente, sin perfil estricto
+    Y los lanzadores simulados devuelven código 1 y "Your organization has disabled Claude subscription access for Claude Code." para Claude y código 0 con dictamen APROBADO sin hallazgos para Codex
+    Cuando el bucle intenta incorporar la respuesta y preparar la revisión entre pasos con ese cambio ajeno presente
+    Entonces conserva A0 sin confirmar, sobrescribir ni apartar el cambio ajeno y no lanza la revisión en ese árbol
+    Y conserva W0, el historial y la respuesta sin crear preguntas ni avisar de reanudación efectiva
+    Cuando el propietario guarda el cambio ajeno en un commit y el bucle reintenta entre pasos en el árbol limpio
+    Entonces la pregunta queda incorporada una sola vez y la tarea queda planned sin pendiente_de antes de iniciar bug-fix
+    Y al preparar bug-fix se restaura borrador.txt con los bytes originales y wip_restaurado pasa a true sin modificar el commit W0
+    Y ajeno.txt conserva los bytes de A0 y no forma parte del delta restaurado de la tarea
+    Cuando el paso solicita la revisión review-test pendiente con la respuesta ya incorporada
+    Entonces se lanzan exactamente Claude y Codex en ese orden y el paso recibe APROBADO de Codex sin hallazgos que enrutar
+    Y el registro identifica el fallo de Claude y a Codex como revisor final sin inventar cuota
+    Y la revisión review-test queda aprobada y permite continuar bug-fix sin acreditar implementación ni cierre de la tarea
+    Y se conserva RT-PREVIO y se añade el nuevo dictamen sin borrar el historial ni duplicar la respuesta
+    Y otra incorporación no restaura WIP por segunda vez ni exige nueva respuesta ni crea preguntas
+    Ejemplos:
+      | pregunta | tarea | estado_pregunta | recepcion | estado_tarea |
+      | Q-ADV-0001 | B-ADV-0032 | pendiente | una recepción en cola con la respuesta indicada aún no incorporada | blocked con pendiente_de humano |
+      | Q-ADV-0002 | B-ADV-0033 | incorporada | respuesta indicada ya incorporada y cola vacía | planned sin pendiente_de |
+
   @B-ADV-0033 @CA-1 @CA-2 @CA-3 @CA-4 @CA-5
   Esquema del escenario: Enrutar un hallazgo de Hades según su destino sin escalarlo al humano
     Dado una tarea bloqueada con un hallazgo de Hades que declara destino <destino>

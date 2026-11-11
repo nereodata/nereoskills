@@ -1,3 +1,61 @@
+**Veredicto:** APROBADO
+
+# B-ADV-0040 · Reevaluación aislada de H1/H2 · 2026-11-11
+
+- Revisor: Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`, salida 0, media 9/10.
+- Transcripción del dictamen independiente por Atenea: el arnés no pudo leer ni escribir disco (`registered Core launch requires an installed app`). No se atribuye a Hades comprobación del árbol ni ejecución de verificaciones.
+
+## Alcance y evidencia
+
+Se revisan exclusivamente los dos bloques añadidos desde `38f3136`:
+
+- «Conservar el tratamiento de errores genéricos al revisar con Hades».
+- «Recuperar una revisión respondida desde una instantánea identificada».
+
+Los cinco bloques previamente aprobados se utilizan como contexto, sin reauditarse. Se contrastan el diff, los criterios de aceptación, el contexto BDD y el informe anterior íntegro suministrados.
+
+**Límite:** no fue posible leer el repositorio, las instrucciones instaladas ni las evidencias de verificación, o escribir este reporte. El dictamen se basa exclusivamente en los adjuntos exactos. Las conclusiones sobre conservación del contrato y ubicación corresponden al diff y las rutas adjuntos, sin comprobación independiente del árbol.
+
+## Comprobaciones obligatorias
+
+| Comprobación | Resultado | Evidencia |
+|---|---|---|
+| No regresión | Conforme sobre el diff adjunto | Solo se añaden dos bloques; no se eliminan ni modifican los cinco aprobados ni el contrato anterior de autenticación. |
+| Coherencia | Conforme | Los errores genéricos conservan su fallo sin activar reservas. La recuperación respeta la incorporación entre pasos, la idempotencia y el trabajo ajeno. No contradice el tratamiento diferenciado del paso del bucle y del agente Hades. |
+| Trazabilidad | Conforme | Ambos bloques llevan `@B-ADV-0040`, existente en el bug. El primero concreta H1 y el límite de la conmutación; el segundo concreta H2 y el cuarto criterio de aceptación. No añaden etiquetas `@CA-*`. |
+| Delta real | Conforme | Se incorporan casos observables que faltaban en las afirmaciones generales: dos errores literales y dos estados iniciales de recuperación. La precisión complementa los bloques anteriores sin duplicarlos íntegramente. |
+
+## Puntuaciones
+
+| Dimensión | Puntuación | Motivo |
+|---|---:|---|
+| Claridad | 9/10 | Entradas literales, estados iniciales y transiciones determinadas. |
+| Completitud | 9/10 | Cubre autenticación y red, recepción pendiente y respuesta incorporada, espera por trabajo ajeno y recuperación posterior. |
+| Testeabilidad | 9/10 | Fija códigos, lanzamientos, dictamen, estados, bytes, referencias de comparación e idempotencia. |
+| Estructura | 9/10 | Ambos esquemas se ubican en la feature funcional de orquestación; las filas distinguen variantes del mismo comportamiento. |
+| **Media** | **9/10** | Supera el umbral de aprobación. |
+
+## Hallazgos anteriores
+
+| Hallazgo | Severidad anterior | Para | Destino | Resultado |
+|---|---|---|---|---|
+| H1 | Alta | especificador | resolver | **Resuelto.** Las filas provocan `authentication failed` y `network connection failed`, con código 1, sin sesión previa ni señales de cuota o suscripción deshabilitada. Exigen conservar el diagnóstico, lanzar únicamente Claude una vez y mantener la revisión pendiente sin progreso ficticio. |
+| H2 | Alta | especificador | resolver | **Resuelto.** Cada fila identifica pregunta, tarea, respuesta y estado inicial. La revisión pendiente es `review-test`; se fijan historial RT-PREVIO, WIP W0 y trabajo ajeno A0. Se observa la espera ante árbol sucio, la recuperación tras guardarlo, la restauración exacta y el dictamen APROBADO de Codex sin hallazgos que enrutar. La continuación conserva historial y respuesta, evita restauraciones repetidas y no acredita cierre. |
+
+## Hallazgos nuevos
+
+No se identifican hallazgos críticos, altos, medios ni bajos en los dos bloques añadidos.
+
+## Dictamen
+
+**H1 y H2 quedan resueltos. APROBADO exclusivamente para especificación.**
+
+No se revisaron diseño, pruebas ni código; no se ejecutaron verificaciones, no se modificaron estados y no se hicieron commits por Hades. La aprobación no acredita funcionamiento, implementación ni cierre de B-ADV-0040.
+
+---
+
+## Antecedente íntegro · Revisión anterior
+
 **Veredicto:** RECHAZADO
 
 # B-ADV-0040 · Revisión de Artemisa al reanudar · 2026-11-11

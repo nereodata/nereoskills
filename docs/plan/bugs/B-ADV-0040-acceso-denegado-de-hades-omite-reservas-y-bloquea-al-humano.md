@@ -5,12 +5,11 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
-pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -91,3 +90,14 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades review-spec RECHAZADO 7,75/10: H1 alto para especificador pide casos observables de autenticación/red; H2 alto para especificador pide fixtures y estados observables de recuperación de ambas preguntas. Decisión: ejecutar especificar conforme al destino explícito. Advertencia de alcance: Artemisa reenvió por error el contrato ya aprobado sin modificaciones ni el informe anterior; resolver este contexto sin duplicar requisitos. Informe docs/review/spec_reviews/B-ADV-0040-spec-review.md conserva antecedentes. Borradores sin implementación ni review-test en wip/B-ADV-0040 db71195; WIP previo preservado en wip/B-ADV-0040-previo-0949. Último rojo dirigido: 8 pruebas, 7 fallos sin errores; restauración Git LF falla en Windows. Sin pregunta humana ni suite completa.
+
+## Resolución del especificador · H1/H2 · 2026-11-11
+
+- H1: se añade un esquema de regresión con entradas literales `authentication failed` y `network connection failed`, sin sesión previa, y resultados observables: código 1, diagnóstico conservado, solo Claude, revisión pendiente y sin cuota ni ausencia ficticias. Precisa el límite ya declarado; no amplía la conmutación a errores genéricos. El contrato anterior de autenticación en la misma feature permanece intacto.
+- H2: se añade un esquema complementario con dos instantáneas sintéticas identificadas por pregunta/tarea, respuesta literal, revisión review-test pendiente, historial RT-PREVIO, WIP W0 y cambio ajeno A0. Q-ADV-0001 parte con recepción en cola; Q-ADV-0002 ya incorporada. Se fija la espera ante árbol ajeno sucio, el reintento tras guardarlo, la incorporación idempotente, restauración exacta, dictamen APROBADO de Codex sin hallazgos y continuación de bug-fix sin cerrar las tareas.
+- DEC-ESP-0040-05: añadir precisión mediante escenarios complementarios sin eliminar ni alterar los cinco bloques aprobados. Los casos genéricos son regresión del límite preexistente; el delta funcional que debe discriminar sigue siendo conmutación por suscripción deshabilitada y recuperación con WIP. Se descarta extender las reservas a cualquier fallo de autenticación o red.
+- DEC-ESP-0040-06: las instantáneas de recuperación son datos sintéticos reproducibles, no una afirmación de que Q-ADV-0001 haya recibido respuesta real. No se edita el registro real, los perfiles, las tareas B-ADV-0032/0033 ni sus WIP. El trabajo ajeno se conserva y se espera a que su propietario lo guarde; no se autoriza al motor a confirmarlo automáticamente.
+- DEC-ESP-0040-07: se conserva el alcance documental y `git diff --check` mediante `--verificar`, conforme al triaje y DEC-ESP-0040-02/04. No hay código ni tests nuevos; el siguiente bug-fix debe ejecutar las regresiones dirigidas del triaje y corregir la fixture Git en Windows. No se restaura el borrador `db71195` ni se usa su rojo como evidencia del árbol actual.
+- La reevaluación de Hades recibe el informe anterior íntegro, el diff nuevo y el contexto BDD completo; revisará H1/H2 y los dos bloques añadidos, sin reabrir los cinco bloques aprobados.
+
+- Cierre de especificar H1/H2: Hades `/review-spec` APROBADO, media 9/10, ambos hallazgos resueltos sin nuevos hallazgos. Dictamen sobre adjuntos exactos por fallo de acceso a disco, transcrito con antecedentes íntegros. Se devuelve a planned sin pendiente_de para continuar bug-fix; no acredita diseño, pruebas, implementación ni cierre funcional.
