@@ -70,3 +70,10 @@ El motor ordenó detener las correcciones tras dos rechazos seguidos de Hades y 
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades asignó T2, C1 y C2 al desarrollador. Artemisa retoma la prueba de vencimiento y las correcciones de cierre efectivo y espera restante.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades rechaza review-test (8/10): falta verificar que el paso principal registra solo sus 11 tokens y no duplica el consumo de Opus, Gemini ni GPT. Artemisa reanuda la corrección de las aserciones.
+
+Al reanudar, comparar también los vencimientos del contraste temporal con la fecha y la duración registradas en cada intento original. Las duraciones incluyen el margen de 120 segundos del analizador. Las aserciones posteriores al primer fallo aún no llegaron a ejecutarse. C1 y C2 siguen pendientes en producción.

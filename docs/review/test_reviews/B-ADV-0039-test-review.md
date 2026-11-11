@@ -1,27 +1,19 @@
 **Veredicto:** RECHAZADO
 
-Hades por `adevv orquestar --agente hades --prompt-file`, referencia de árbol comunicada 13e01c00ff. Informe transcrito de su salida porque falló la herramienta al guardar el archivo. Alcance: pruebas del delta, helpers, corrección de T1, regresión temporal de C2 y actualización histórica de ReservaCuotaTests. Sin revisión de producción ni ejecución de comprobaciones.
+Hades revisó el delta completo de pruebas de B-ADV-0039 mediante `--agente hades --prompt-file`. Informe transcrito de stdout. La reserva autorizada emitió el dictamen sobre el delta y los fixtures adjuntos. El error local `registered Core launch requires an installed app` impidió leer los archivos directamente y escribir el informe. El revisor contrastó los criterios textuales de la incidencia.
 
 | Criterio | Puntuación |
 |---|---:|
-| Cobertura | 8/10 |
-| Aserciones | 7/10 |
+| Cobertura | 7/10 |
+| Aserciones | 8/10 |
 | Rojo correcto | 8/10 |
 | Estabilidad | 9/10 |
 | Media | 8/10 |
 
-T1 resuelto en pruebas: el contraste combina revisión A pendiente, B aprobada, progreso parcial y árbol limpio; exige código 2, agy/gemini y bloqueo_agente sin cuota al principal. El helper persiste estado y revisión canónica y simula HEAD y limpieza por separado. Firma y selección de estado siguen simuladas; no constituye prueba integral de Git/backlog.
+**Alta · Destino `artemisa`.** En `test_reserva_recuperada_no_propaga_cuota` se comprueban las entradas de Opus (2), Gemini (3) y GPT (5). Las filas de paso podrían duplicar esos consumos sin que falle la prueba. Comprobar que el conjunto de filas del principal conserva exactamente sus 11 tokens y excluye los consumos de los tres proveedores.
 
-## T2 · ALTA
+**Alcance.** Seis pruebas nuevas de FallosArnesTests, sus helpers y fixtures y el cambio en ReservaCuotaTests. Hades consideró cubierta la distinción de T2 entre conservar el vencimiento histórico y excluir la cuota vencida de las vigentes. Reconoció la cobertura de recuperaciones, correlación de invocaciones, revisión pendiente y commit parcial limpio.
 
-- para: desarrollador
-- destino: resolver
-- Archivo: skills/orquestar/test_fallos_arnes.py, test_resumen_no_renueva_recuperacion_original.
-- La prueba exige ausencia de ('agy', 'primero') en marcas_cuota al vencer. Las marcas conservan el vencimiento histórico; consumo_cuotas filtra vigencia. Vencer no equivale a registrar recuperación explícita.
-- Corregir la prueba para exigir vencimiento original sin desplazar, anterior o igual al instante actual, y ausencia del par entre cuotas vigentes de consumo_cuotas. Mantener selección del primer proveedor, espera cero y vigencia del segundo.
+**Evidencia.** 20 pruebas dirigidas, 18 verdes y dos fallos funcionales esperados. El resumen selecciona segundo cuando debe seleccionar primero y el bucle devuelve 0 cuando debe devolver 2. Diff-check limpio. Sin lint ni tipado configurados. Hades no ejecutó pruebas ni examinó producción.
 
-La regresión histórica distingue tres intentos de un resumen sin consumo y verifica su proveedor/modelo. El RED comunicado demuestra continuidad indebida con commit parcial y selección temporal incorrecta. Disco temporal, reloj y proveedores controlados. Diff-check acreditado; lint/tipado no disponibles. Sin suite completa.
-
-## Parada ordenada por el motor
-
-Tras este dictamen: «Hades ha rechazado B-ADV-0039 2 veces seguidas: no sigas corrigiendo. Commitea lo que tengas en la rama [...] termina el paso sin cambiar estados». T2 queda pendiente; no se aplicaron más correcciones.
+El motor enrutó el hallazgo a Artemisa e indicó terminar el paso. La revisión de código anterior conserva C1 y C2 pendientes.
