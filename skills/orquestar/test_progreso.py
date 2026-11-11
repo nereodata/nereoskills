@@ -752,8 +752,12 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
 
     def test_preflight_exige_dictamen_fuera_del_ejemplo_html(self):
+        self.comprobar_informe_sin_dictamen('<pre><code>\nVeredicto: APROBADO\n</code></pre>')
+
+    def comprobar_informe_sin_dictamen(self, texto):
+        """El preflight conserva el ID pendiente cuando el informe solo cita una aprobación."""
         self.crear_ficha(self.iid, 'completed')
-        self.escribir(self.informe, '<pre><code>\nVeredicto: APROBADO\n</code></pre>')
+        self.escribir(self.informe, texto)
         self.commit('archivar un ejemplo sin dictamen propio')
         pendientes = pendientes_cierre(self.root, 'v1.1.3')
         self.assertTrue(any(self.iid in p and 'sin veredicto formal' in p for p in pendientes), pendientes)
@@ -765,6 +769,30 @@ class ProgresoTests(unittest.TestCase):
     def test_rechazo_propio_antes_de_cita_html_en_la_misma_linea(self):
         self.comprobar_rechazo_del_principal(
             '**Veredicto:** RECHAZADO. El informe anterior decía <blockquote>APROBADO</blockquote>.')
+
+    ejemplo_en_details = ('<details>\n<summary>Salida anterior</summary>\n'
+                          '    <pre><code>\nVeredicto: APROBADO\n    </code></pre>\n</details>')
+    cita_con_codigo = '> El informe anterior de\n<code>bug-fix</code>\nVeredicto: APROBADO'
+
+    def test_ejemplo_sangrado_en_details_activa_reserva(self):
+        self.comprobar_reserva_tras_cita(self.ejemplo_en_details)
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
+
+    def test_rechazo_propio_despues_de_details(self):
+        self.comprobar_rechazo_del_principal(self.ejemplo_en_details + '\n**Veredicto:** RECHAZADO')
+
+    def test_preflight_con_ejemplo_sangrado_en_details(self):
+        self.comprobar_informe_sin_dictamen(self.ejemplo_en_details)
+
+    def test_codigo_en_parrafo_citado_activa_reserva(self):
+        self.comprobar_reserva_tras_cita(self.cita_con_codigo)
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
+
+    def test_rechazo_propio_despues_de_cita_con_codigo(self):
+        self.comprobar_rechazo_del_principal(self.cita_con_codigo + '\n\n**Veredicto:** RECHAZADO')
+
+    def test_preflight_con_codigo_en_parrafo_citado(self):
+        self.comprobar_informe_sin_dictamen(self.cita_con_codigo)
 
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""

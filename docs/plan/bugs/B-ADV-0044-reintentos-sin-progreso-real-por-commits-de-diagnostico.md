@@ -179,3 +179,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades D rechazó el árbol cba87a86f9fd1ded147ddf0a341e648f521b9710 (7,67/10). D10 y N10 resueltos. Reanudar C2: D11, una apertura pre/code sangrada dentro de details expone el dictamen del ejemplo; D12, ocultar code en línea interrumpe una cita Markdown y expone su aprobación. Conservar el rechazo propio posterior y la reserva si falta dictamen. Reproducciones e impacto en proveedor e informe canónico en docs/review/code_reviews/B-ADV-0044-code-review.md. Las 170 pruebas del triaje pasaron en 211,847 s.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 APROBADO por Hades (9,75/10). N10 resuelto. Las seis pruebas rojas del árbol 309d88d17a8364db18f1309b92cc72d9bb90cd09 reproducen D11 y D12 en la reserva, el rechazo propio y el preflight. Reanudar C2 para corregir los dos casos y reevaluar el código.
