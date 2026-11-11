@@ -5,11 +5,10 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 created_at: 2026-11-10
 updated_at: 2026-11-11
 origen: "Incidencia comunicada por el usuario: el único canal de desbloqueo es Telegram (2026-11-10)"
-pendiente_de: especificador
 ---
 
 # B-ADV-0034: El desbloqueo de tareas del orquestador solo es accesible por Telegram
@@ -49,18 +48,24 @@ veces una tarea.
   operación documentada para listar preguntas pendientes y otra para registrar
   una respuesta vinculada a `Q-ID` (o a un ID de tarea inequívoco), sin requerir
   Telegram.
-- [ ] **CA-2 — Nuevo endpoint de control:** la operación se publica como un
-  endpoint local autenticado del orquestador, con contrato versionado que
-  devuelve pregunta, estado de recepción e información de reanudación. Debe
-  restringirse al propietario local o a credenciales explícitamente
-  configuradas; no se expondrá por defecto en una interfaz de red pública.
-- [ ] **CA-3 — CLI como cliente de referencia:** `adevv orquestar` proporciona
-  una orden equivalente para consultar y responder, de modo que el desbloqueo
-  siga disponible en instalaciones sin servidor HTTP ni Telegram.
-- [ ] **CA-4 — Un único dominio:** el endpoint, la CLI y Telegram delegan en la
-  misma operación de dominio. Conservan autorización, aislamiento por proyecto,
-  resolución de ambigüedades, idempotencia, persistencia atómica y el protocolo
-  existente de incorporación entre pasos.
+- [ ] **CA-2 — Control local sin servidor:** esta entrega publica la respuesta
+  mediante CLI local. No requiere endpoint HTTP, socket, pipe, proceso de escucha,
+  token de API ni contrato de red versionado. La autoridad local procede de los
+  permisos del sistema operativo del usuario que ejecuta la orden sobre el
+  proyecto; no se requieren identidad ni credenciales de Telegram. No se añade
+  elevación de privilegios ni acceso remoto.
+- [ ] **CA-3 — Contrato CLI:** `adevv orquestar --preguntas` conserva su consulta
+  existente y `adevv orquestar --responder <Q-ID> "<respuesta>"` registra una
+  respuesta no vacía. Admite un ID de tarea en lugar de Q-ID solo si identifica
+  una única pregunta pendiente. Las referencias inexistentes, ajenas al proyecto,
+  ambiguas y cerradas, y el texto vacío se rechazan con diagnóstico sin modificar
+  preguntas ni tareas. La respuesta se trata como dato, sin ejecutarla.
+- [ ] **CA-4 — Un único dominio:** CLI y Telegram delegan en la misma operación
+  de dominio. Conservan aislamiento por raíz de proyecto, resolución de
+  ambigüedades, idempotencia, persistencia atómica y el protocolo existente de
+  incorporación entre pasos. La CLI identifica al operador local sin suplantar
+  un usuario Telegram ni añadirlo a la lista de autorizados del gateway; Telegram
+  mantiene su validación de remitentes autorizados.
 - [ ] **CA-5 — Reanudación observable:** la respuesta distingue entre recibida,
   incorporada y tarea efectivamente reanudada. Respeta la parada manual, otra
   pregunta pendiente y las dependencias; un texto `PENDIENTE:` o
@@ -68,25 +73,52 @@ veces una tarea.
 - [ ] **CA-6 — Compatibilidad:** `/preguntas` y `/responder` continúan
   funcionando como adaptadores compatibles, sin cambios de formato que rompan
   los flujos existentes ni reenvíos duplicados.
-- [ ] **CA-7 — Verificación:** pruebas controladas cubren el endpoint y la CLI
-  sin Telegram, autorización local, preguntas ambiguas o cerradas, entregas
-  repetidas, respuesta mientras otro paso está activo, reinicio y coexistencia
-  con la orden Telegram.
+- [ ] **CA-7 — Verificación:** pruebas controladas cubren CLI sin Telegram,
+  rechazos de CA-3, aislamiento entre dos raíces de proyecto, entregas repetidas
+  por ambos canales y concurrencia entre CLI y Telegram, recepción mientras otro
+  paso está activo, reinicio antes de incorporación, parada manual, respuestas
+  insuficientes, otra pregunta pendiente y dependencias no satisfechas. Se conserva
+  la regresión del rechazo de remitentes Telegram no autorizados. Los escenarios
+  y tests ejecutables se elaboran en la subfase A/C1 del siguiente bug-fix.
 
-## 💡 Alternativa de diseño
+## DEC-ESP-0034-01 · Alcance local del control (2026-11-11)
 
-La alternativa más simple y probablemente suficiente es **no crear un servidor
-HTTP**: añadir `adevv orquestar --preguntas` y `adevv orquestar --responder
-<Q-ID> <respuesta>` como interfaz pública local sobre `responder_pregunta()`.
-Después, si una integración externa lo justifica, un pequeño endpoint local
-(por ejemplo, socket/pipe autenticado) puede reutilizar exactamente ese mismo
-servicio. Esta opción evita abrir puertos, gestionar tokens HTTP y ampliar la
-superficie de ataque, y resuelve ya el bloqueo fuera de Telegram.
-
-La decisión de triaje debe determinar si existe un consumidor no local que
-realmente requiera HTTP. Si lo hay, el endpoint debe mantenerse local por
-defecto y la CLI debe ser su cliente de referencia; si no, la CLI cubre el
-requisito funcional sin introducir un servidor.
+- **Decisión:** el control propio del orquestador en v1.1.2 es la CLI local,
+  con consulta existente y nueva orden de respuesta. Se sustituye la obligación
+  original de endpoint de CA-2 y se alinean CA-3/CA-4/CA-7. El endpoint queda fuera
+  de esta entrega; no es un entregable opcional ni una condición de cierre.
+- **Motivo:** el problema demostrado es responder sin Telegram desde la máquina
+  del operador. No consta consumidor remoto; la CLI resuelve ese valor y respeta
+  `docs/requirements/platform_plan.md:11` (sin servidores propios). No se modifica
+  esa restricción ni se presupone que un socket o pipe quede exceptuado.
+- **Alternativa descartada:** servidor HTTP o escucha local autenticada con contrato
+  versionado; añade servicio, transporte y credenciales sin consumidor justificado.
+  Requeriría una ampliación separada con revisión arquitectónica cuando exista ese
+  consumidor. No se crea ahora tarea ni versión adicional para ello.
+- **Contrato y autenticación:** el contrato público de esta entrega es la sintaxis
+  CLI de CA-3 y los estados de CA-5. No se promete JSON ni protocolo versionado.
+  El usuario local actúa con sus permisos de archivos existentes; la autorización
+  del gateway sigue siendo independiente. No se abre ninguna interfaz de red.
+- **Estados:** recepción durable no significa incorporación ni arranque. Con paso
+  activo se confirma recepción en cola; la incorporación ocurre entre pasos y
+  sobre la rama de destino. Una respuesta concreta permite `planned` únicamente
+  tras resolver todas las preguntas; la elegibilidad respeta las dependencias.
+  La parada manual impide relanzar. Solo se anuncia reanudación si se ha lanzado
+  efectivamente el bucle; de lo contrario se informa incorporación o impedimento.
+  `PENDIENTE:`/`INSUFICIENTE:` conservan bloqueo y motivo. No se exige nuevo
+  estado persistido ni consulta adicional para observar estos resultados.
+- **Idempotencia:** repetir el mismo texto para una pregunta pendiente no agrega
+  otra recepción; responder una cerrada se rechaza. Tras reinicio se conserva la
+  respuesta recibida y se incorpora una sola vez. CLI y Telegram comparten estas
+  garantías sin producir reanudaciones duplicadas ni reenviar avisos de consulta.
+- **Delta e historial:** `git log` identifica `80a482d` como introducción de la
+  intervención durable y el triaje reconoce `--preguntas` existente. La corrección
+  añade el acceso de respuesta CLI y solo los huecos del dominio demostrados por
+  pruebas; no reimplementa la consulta ni la persistencia. No hay escenarios de
+  este bug aprobados que deban modificarse o retirarse.
+- **Validación de este paso:** exclusivamente documental, sin código ni tests;
+  `adevv orquestar --verificar "git diff --check"`, conforme al triaje. El próximo
+  bug-fix concretará su comando de pruebas dirigidas antes de implementar.
 
 ## 📋 Evidencias
 
@@ -112,7 +144,8 @@ requisito funcional sin introducir un servidor.
   No existe aquí decisión que determine transporte, autenticación o consumidor.
   No se elimina CA-2 ni se introduce una arquitectura nueva desde desarrollo.
 - Subfase A: [EXEC] definir el alcance de control independiente del canal y
-  sus escenarios; primero Hades /review-spec sobre el conflicto de requisitos.
+  sus escenarios; conflicto de requisitos resuelto por DEC-ESP-0034-01;
+  Hades revisa esa resolución antes de continuar a escenarios.
 - Subfase B: [EXEC] diseño de adaptadores y contrato compartido, una vez resuelto
   el impedimento de definición.
 - Subfase C1: [EXEC] regresiones dirigidas de CLI y del control que se acuerde,
@@ -134,3 +167,10 @@ requisito funcional sin introducir un servidor.
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades review-spec: NO APROBADO; H-01 ALTA para especificador. CA-2/CA-4/CA-7 exigen endpoint autenticado versionado; alternativa permite CLI suficiente y platform_plan.md:11 descarta servidores propios. Decision: ejecutar especificar para reconciliar alcance obligatorio, compatibilidad de arquitectura, transporte, autenticacion y contrato antes de escenarios/diseno/codigo. No falta recurso externo ni se necesita pregunta humana. Informe docs/review/spec_reviews/B-ADV-0034-spec-review.md; revision sobre adjuntos por fallo de acceso local del arnes.
+
+## Cierre del paso especificar · 2026-11-11
+
+H-01 resuelto por DEC-ESP-0034-01 y aprobado por Hades (9/10, solo definición).
+Se devuelve el bug a `planned` sin `pendiente_de`. Continúa bug-fix desde subfase A;
+no hay código, tests ni escenarios aprobados en este paso. El hallazgo enrutado
+anterior y el triaje se conservan como historial, sin bloqueo vigente.
