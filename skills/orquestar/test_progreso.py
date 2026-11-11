@@ -833,6 +833,36 @@ class ProgresoTests(unittest.TestCase):
     def test_preflight_rechazado_tras_atributo_multilinea(self):
         self.comprobar_informe_pendiente(self.rechazo_tras_atributo, 'informe rechazado')
 
+    cita_en_lista = '- Antecedente\n  > Resultado del informe anterior:\nVeredicto: APROBADO'
+    rechazo_exterior = '\n\n**Veredicto:** RECHAZADO'
+    comparacion_en_prosa = 'El caso x<y queda pendiente.'
+    guion_en_html = '<div>\n- Ejemplo del informe\n    <code>\nVeredicto: APROBADO\n    </code>\n</div>'
+
+    def test_continuacion_citada_en_lista_activa_reserva(self):
+        self.comprobar_reserva_tras_cita(self.cita_en_lista)
+        self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
+
+    def test_preflight_continuacion_citada_en_lista_sin_dictamen(self):
+        self.comprobar_informe_pendiente(self.cita_en_lista)
+
+    def test_rechazo_tras_continuacion_citada_en_lista(self):
+        self.comprobar_rechazo_del_principal(self.cita_en_lista + self.rechazo_exterior)
+
+    def test_preflight_rechazado_tras_continuacion_citada_en_lista(self):
+        self.comprobar_informe_pendiente(self.cita_en_lista + self.rechazo_exterior, 'informe rechazado')
+
+    def test_rechazo_tras_comparacion_en_prosa(self):
+        self.comprobar_rechazo_del_principal(self.comparacion_en_prosa + self.rechazo_exterior)
+
+    def test_preflight_rechazado_tras_comparacion_en_prosa(self):
+        self.comprobar_informe_pendiente(self.comparacion_en_prosa + self.rechazo_exterior, 'informe rechazado')
+
+    def test_rechazo_tras_guion_en_html(self):
+        self.comprobar_rechazo_del_principal(self.guion_en_html + self.rechazo_exterior)
+
+    def test_preflight_rechazado_tras_guion_en_html(self):
+        self.comprobar_informe_pendiente(self.guion_en_html + self.rechazo_exterior, 'informe rechazado')
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
