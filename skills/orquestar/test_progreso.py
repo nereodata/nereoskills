@@ -331,6 +331,86 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
 
+    def test_relanzar_recupera_el_ultimo_commit_del_intento_y_acredita_la_reevaluacion(self):
+        """H1 y D1: el objetivo sobrevive al relanzamiento y su reevaluación agota el paso."""
+        self.args.reintentos_arnes = 0
+        self.args.reintentos = 1
+        self.args.max_pasos = 1
+        def fallo(n):
+            self.crear_ficha(self.iid, 'completed')
+            self.escribir(self.informe, '**Veredicto:** APROBADO\n')
+            self.commit('cierre de A')
+            self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+            self.commit('corrección B del mismo intento')
+            return 1, 'red'
+        self.accion = fallo
+        motor.bucle(self.args, self.root)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+        self.comprobar_reevaluacion_en_el_bucle()
+
+    def test_reevaluacion_en_el_ultimo_intento_conserva_completed(self):
+        """D1: la aprobación de B constituye avance aun si A tenía el mismo veredicto."""
+        self.args.max_pasos = self.args.reintentos = 1
+        self.escribir(self.informe, '**Veredicto:** APROBADO\n')
+        self.commit('aprobación de A')
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+        self.commit('producto B pendiente')
+        self.comprobar_reevaluacion_en_el_bucle()
+
+    def comprobar_reevaluacion_en_el_bucle(self):
+        anteriores = list(self.llamadas)
+        def reevaluar(n):
+            huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+            self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella}')
+            self.commit('reevaluación de B')
+            return 0, 'revisado'
+        self.accion = reevaluar
+        motor.bucle(self.args, self.root)
+        self.assertEqual(self.llamadas, anteriores + [('revisar-tarea', self.iid)])
+        self.assertTrue(self.filas()[-1]['progreso'])
+        self.assertEqual(motor.frontmatter(self.ficha)['status'], 'completed')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def test_restaurar_informe_historico_en_wip_no_libera_el_rechazo(self):
+        """D3: conservar la aprobación histórica legítima sin revalidar una copia restaurada."""
+        anterior = '**Veredicto:** APROBADO\nRevisión inicial.'
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, anterior)
+        self.commit('producto A aprobado')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+        self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+        self.escribir(self.informe, '**Veredicto:** RECHAZADO')
+        self.commit('rechazo del producto B')
+        self.escribir(self.informe, anterior)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+
+    def test_mandato_efimero_fuera_de_huella_pero_dentro_de_evidencia(self):
+        """D2: la CLI distingue el mandato temporal de un mandato de producto rastreado."""
+        mandato = self.root / 'mandato temporal.txt'
+        for temporal in (True, False):
+            with self.subTest(temporal=temporal):
+                mandato.write_text('Revisar el producto', encoding='utf-8')
+                if not temporal:
+                    self.commit('mandato versionado')
+                exacto = motor.arbol(self.root)
+                respuestas = []
+                def proveedor(cmd, root, harness, entrada, **kwargs):
+                    respuestas.append(entrada)
+                    return 0, {}, 'Veredicto: APROBADO'
+                with (patch.dict(os.environ, ORQUESTAR_ID=self.iid, ORQUESTAR_PASO='bug-fix'),
+                      patch.object(self.salida, 'reconfigure', create=True),
+                      patch.object(motor.sys, 'argv', ['orquestar', '--agente', 'hades', '--prompt-file', mandato.name]),
+                      patch.object(motor, 'buscar_ejecutable', return_value='codex'),
+                      patch.object(motor, 'lanzar', side_effect=proveedor)):
+                    self.assertEqual(motor.main(), 0)
+                posterior = motor.arbol(self.root)
+                self.assertEqual(exacto != posterior, temporal)
+                huella = motor.huella_producto(self.root, posterior, motor.backlog_dirs(self.root))
+                self.assertIn(f'Producto revisado: {huella}', respuestas[0])
+
     def test_nota_no_renueva_aprobacion_pero_dictamen_del_producto_si(self):
         self.comprobar_reevaluacion(con_huella=False)
 
@@ -348,6 +428,8 @@ class ProgresoTests(unittest.TestCase):
         base = self.git('rev-parse', 'HEAD')
         self.crear_ficha(self.iid, 'completed')
         self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
+        producto_b = motor.huella_producto(self.root, motor.arbol(self.root), carpetas)
+        nota += f'\nMandato citado:\n~~~markdown\nProducto revisado: {producto_b}\n~~~\n'
         self.escribir(self.informe, anterior + nota)
         self.commit('cambio con nota')
         self.assertFalse(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
@@ -369,7 +451,8 @@ class ProgresoTests(unittest.TestCase):
             'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
         self.llamadas.append(('bug-fix', self.iid))
         def respuesta(harness):
-            texto = ('El informe anterior decía “Veredicto: APROBADO”. No pude abrir el repositorio.'
+            texto = ('El informe anterior decía “Veredicto: APROBADO”. No pude abrir el repositorio.\n'
+                     'Transcribo el dictamen anterior:\n~~~markdown\n**Veredicto:** APROBADO\n~~~'
                      if harness == 'claude' else '**Veredicto:** RECHAZADO\nLa cita era «Veredicto: APROBADO».')
             return 0, {'modelos': {harness: {'entrada': 7}}}, texto
         self.assertEqual(self.revisar(respuesta), 0)
