@@ -241,3 +241,8 @@ updated_at: 2026-11-11
 - Hades declara que ejecución de comandos y entorno Node fallan al arrancar con `registered Core launch requires an installed app`. Se confirma la ausencia del informe canónico; código cero sin dictamen no acredita aprobación.
 - Se conserva la revisión independiente pendiente y `in_progress`. Sin hallazgos asignados que enrutar ni decisión humana requerida; no se cambian perfiles o reservas ni se avanza a diseño, pruebas o implementación.
 - Verificación limitada a higiene documental mediante `--verificar "git diff --check"` y calidad desde la base original. Las pruebas funcionales del triaje siguen pendientes; no se ejecuta la suite completa.
+
+
+## Recuperación del acceso del revisor
+
+Los reintentos con registered Core launch requires an installed app carecen de dictamen. Para la siguiente revisión, usar el procedimiento acreditado en B-ADV-0040 de v1.1.2 y sus informes canónicos. Incluir desde la primera llamada a --agente hades --prompt-file las instrucciones completas del agente y la skill de revisión, los criterios, todos los escenarios del alcance, el contexto de las funciones pertinentes y la evidencia aplicable. Entregar material exacto y completo, excluyendo credenciales y datos operativos privados. Solicitar el dictamen independiente sobre esos adjuntos y transcribirlo con su alcance y limitaciones si el revisor no puede escribir al disco. Si pide material adicional, completar el mandato. La aprobación y las verificaciones siguen siendo exigibles. Evitar repetir llamadas basadas solo en rutas tras confirmar este fallo.
