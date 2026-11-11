@@ -2,7 +2,7 @@
 id: B-ADV-0044
 title: "Los commits que repiten un impedimento técnico reinician la detección de estancamiento"
 type: bug
-weight: 0
+weight: 1
 dificultad: dificil
 version: "v1.1.3"
 status: planned

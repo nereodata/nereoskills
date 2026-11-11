@@ -2,7 +2,7 @@
 id: B-ADV-0045
 title: "El ejecutor de Codex no inicia las herramientas de lectura y escritura de Hades"
 type: bug
-weight: 1
+weight: 0
 dificultad: dificil
 version: "v1.1.3"
 status: planned
