@@ -5,7 +5,8 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import chdir
+from contextlib import chdir, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -46,7 +47,7 @@ class ProgresoTests(unittest.TestCase):
         self.enterContext(patch.object(motor, 'ejecutar', side_effect=self.ejecutar))
         self.esperar = self.enterContext(patch.object(motor, 'esperar', return_value=True))
         self.aviso = self.enterContext(patch.object(motor, 'avisar'))
-        self.enterContext(patch('builtins.print'))
+        self.salida = self.enterContext(redirect_stdout(StringIO()))
 
     def git(self, *args):
         return subprocess.run(['git', *args], cwd=self.root, capture_output=True, check=True,
@@ -292,20 +293,33 @@ class ProgresoTests(unittest.TestCase):
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
 
     def test_nota_no_renueva_aprobacion_pero_dictamen_del_producto_si(self):
-        anterior = '**Veredicto:** APROBADO\nRevisión inicial.\n'
+        self.comprobar_reevaluacion(con_huella=False)
+
+    def test_huella_anterior_no_libera_el_producto_actual(self):
+        self.comprobar_reevaluacion(con_huella=True)
+
+    def comprobar_reevaluacion(self, con_huella):
+        carpetas = motor.backlog_dirs(self.root)
+        huella_a = motor.huella_producto(self.root, 'HEAD', carpetas)
+        veredicto = '**Veredicto:** APROBADO\n'
+        anterior = veredicto + (f'Producto revisado: {huella_a}\n' if con_huella else '')
+        nota = 'Anotación administrativa.\n'
         self.escribir(self.informe, anterior)
         self.commit('aprobación anterior')
         base = self.git('rev-parse', 'HEAD')
         self.crear_ficha(self.iid, 'completed')
         self.escribir('producto.py', 'def doble(n):\n    return n * 2\n')
-        self.escribir(self.informe, anterior + 'Pendiente de revisar este cambio.\n')
+        self.escribir(self.informe, anterior + nota)
         self.commit('cambio con nota')
         self.assertFalse(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
-        self.assertTrue(pendientes_cierre(self.root, 'v1.1.3'))
-        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
-        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella}\n')
+        pendiente, = pendientes_cierre(self.root, 'v1.1.3')
+        self.assertIn(self.iid, pendiente)
+        huella_b = motor.huella_producto(self.root, 'HEAD', carpetas)
+        self.assertNotEqual(huella_a, huella_b)
+        self.escribir(self.informe, veredicto + f'Producto revisado: {huella_b}\n' + nota)
         self.commit('reevaluación independiente')
-        self.assertTrue(motor.cierre_revisado(self.root, 'revisar-tarea', self.iid, base))
+        self.assertTrue(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
         self.escribir('otro.py', 'otro = True\n')
         self.commit('otra tarea')
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
@@ -345,17 +359,25 @@ class ProgresoTests(unittest.TestCase):
     def test_diagnostico_estructurado_de_suite_se_entrega_al_consumidor(self):
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
             'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
-        self.llamadas.append(('bug-fix', self.iid))
         dato = {'causa': 'Disco lleno', 'decision': 'Liberar espacio', 'destino': 'tecnico',
                 'responsable': 'operaciones', 'intervencion': 'Ampliar disco'}
-        with patch.dict(os.environ, ORQUESTAR_DICTAMEN='diagnostico-suite'):
-            self.assertEqual(self.revisar(lambda h: (0, {}, json.dumps(dato))), 0)
-        self.assertEqual(self.revisores, [('claude', 'principal')])
+        respuesta = json.dumps({'result': json.dumps(dato), 'is_error': False})
+        with (patch.dict(os.environ, ORQUESTAR_DICTAMEN='diagnostico-suite',
+                         ORQUESTAR_ID=self.iid, ORQUESTAR_PASO='bug-fix'),
+              patch.object(motor, 'buscar_ejecutable', side_effect=lambda exe: exe),
+              patch.object(motor, '_ejecutar_captura_json', return_value=(0, respuesta, '', False, False)) as proveedor):
+            self.assertEqual(motor.agente(self.root, 'hades', 'diagnosticar la suite'), 0)
+        proveedor.assert_called_once()
+        comando, _, arnes = proveedor.call_args.args
+        self.assertEqual((arnes, comando[comando.index('--model') + 1]), ('claude', 'principal'))
+        self.assertEqual(motor.diagnostico_suite.leer_dictamen(self.salida.getvalue()), dato)
         self.assertFalse(motor.revision_sin_dictamen(motor.leer_metricas(self.root), 'bug-fix', self.iid))
 
     def test_wip_rastreado_aunque_ignorado(self):
         self.escribir('.gitignore', 'producto.py\n')
         self.commit('producto ya rastreado')
+        self.escribir('producto.py', 'def doble(n):\n    return n + n\n')
+        self.git('add', '-u', '--', 'producto.py')
         indice = self.git('ls-files', '--stage')
         antes = motor.firma(self.root, 'docs', 'bug-fix', self.iid)
         arbol = motor.arbol(self.root)

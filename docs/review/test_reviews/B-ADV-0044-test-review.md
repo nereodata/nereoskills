@@ -1,57 +1,47 @@
-**Veredicto:** RECHAZADO · **8,00/10**
+**Veredicto:** APROBADO
 
 # B-ADV-0044 · Reevaluación independiente de pruebas
 
-Árbol `b0dce90fafcf6d0d435126211f9dd7baf0ca5d40` · Rama `hotfix/v1.1.3` · Base de calidad `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` · Perfil estricto.
+**Puntuación media: 9,25/10.** Rama `hotfix/v1.1.3`, perfil estricto. Árbol `5ff63caabd43347c22539f87f87c8c827a72db6e`, ronda anterior `b0dce90fafcf6d0d435126211f9dd7baf0ca5d40`, base de calidad `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5`.
 
-Las regresiones reproducen los fallos de selección, recuperación y reconocimiento del WIP observados en D. Quedan dos carencias de cobertura que impiden aprobar esta ampliación. Una aprobación con una huella caducada podría superar las pruebas. También podría perderse el diagnóstico de suite antes de llegar al consumidor sin que fallara la prueba que declara comprobar su entrega.
+Los tres hallazgos de la ronda anterior quedan **resueltos**. Para cada uno hay un contraste que introduce el defecto concreto y muestra dónde lo detecta la prueba. Las tres pruebas pasan sobre el árbol dictaminado. Queda una observación menor sobre una aserción que se perdió al reforzar N1.
 
-## Hallazgos anteriores de C1
+## Hallazgos de la ronda anterior
 
 | Hallazgo | Estado | Evidencia |
 |---|---|---|
-| H1 🟠 · Perfiles autorizados de Hades | **resuelto** | Los casos estrictos siguen exigiendo el modelo fijado. La alternancia exige la secuencia `claude/primario`, `codex/autorizado` tanto antes como después de la recarga y comprueba de nuevo los perfiles tras el arranque manual. |
-| H2 🟠 · Espera por cuota | **resuelto** | Se conserva la aserción sobre la llamada efectiva a `esperar`, la demora de la reserva y el consumo de ambos intentos. |
-| H3 🟡 · Reformulación del impedimento | **resuelto** | Los dos commits mantienen fechas fijas y redacciones distintas en la ficha y en el resumen de versión. |
-| H4 🟡 · Informe del ID correcto | **resuelto** | La ruta del informe que se exige ausente sigue construyéndose con el ID del caso, incluida la fila de `task-dev`. |
+| N1 🟠 · Una huella caducada podía acreditar el producto actual | **Resuelto** | `test_huella_anterior_no_libera_el_producto_actual` obtiene la huella de A, cambia `producto.py` para producir B y conserva la aprobación de A con una nota administrativa. Exige que `cierre_revisado` deniegue el cierre y que el único pendiente de release identifique el bug. Comprueba que las huellas difieren. Sobre el mismo B, con la misma nota, el mismo ID, la misma base y el mismo paso `bug-fix`, sustituir la huella por la de B permite cerrar y deja vacía la lista de pendientes. La variante `vigente = bool(actual[1])` falló al aceptar la huella de A. El caso del informe antiguo sin huella se conserva por separado. |
+| N2 🟠 · La prueba no observaba la entrega del diagnóstico | **Resuelto** | La prueba simula la respuesta JSON del proveedor, invoca `motor.agente` y entrega la salida capturada a `diagnostico_suite.leer_dictamen`. Compara el resultado completo con los valores esperados de `causa`, `decision`, `destino`, `responsable` e `intervencion`. También exige retorno 0, una única llamada al perfil principal y ausencia de revisión pendiente. Al sustituir la emisión por una línea vacía, el lector real lanzó `DiagnosticoPendiente` en la comprobación de entrega. Esa excepción acredita la pérdida del contenido en el punto que debía detectarla. |
+| N3 🟡 · Restaurar el índice a `HEAD` podía pasar inadvertido | **Resuelto** | `test_wip_rastreado_aunque_ignorado` parte de `return n` en `HEAD`, prepara `return n + n` en el índice y después deja `return 2*n` en el directorio de trabajo. Exige que cambien `firma` y `arbol` y que `git ls-files --stage` conserve la instantánea preparada. La variante que ejecuta `git read-tree HEAD` falló en esa última comparación. |
 
-## Regresiones solicitadas en D
+## Hallazgos anteriores de C1 y regresiones de D
 
-| Hallazgo de D | Evaluación de la prueba |
-|---|---|
-| H1 · Revisión pendiente al relanzar | **Cubierto.** Tras el retorno erróneo, se consulta el selector sobre el disco que dejó el bucle. Se exige `revisar-tarea` para el ID exacto y que ese ID aparezca entre los pendientes de release. El rojo seleccionó `revisar-version`. |
-| H2 · Vigencia de una aprobación editada | **Cobertura parcial.** El rojo muestra que añadir una nota al informe antiguo permitió cerrar. El caso positivo introduce una huella vigente. Falta discriminar una huella formal que pertenece al producto anterior. Véase N1. |
-| H3 · Cita confundida con dictamen | **Cubierto.** Se exige que la cita del principal deje su fila sin veredicto y que el `RECHAZADO` formal de la reserva prevalezca sobre una cita posterior de `APROBADO`. El rojo se detuvo antes de esas aserciones al faltar el lanzamiento de la reserva. |
-| H4 · Reserva tras una salida normal sin dictamen | **Cubierto.** La prueba exige ambos arneses en la misma invocación. La alternancia aporta un control independiente con una salida de código 0 sin cita ni dictamen. En el rojo faltó la primera reserva, antes de la recarga. |
-| H5 · Reintentos técnicos atribuidos al desarrollador | **Cubierto.** Se exigen cuatro lanzamientos concretos, cuatro consumos de 11, la marca `revision_pendiente` en todas las filas y el acumulado ordinario `(0, 0)`. El rojo alcanzó la aserción de la marca después de comprobar perfiles y consumo. |
-| H6 · WIP rastreado que coincide con `.gitignore` | **Cubierto para la detección del WIP.** El archivo se confirma antes de añadir la exclusión. Su modificación posterior debe alterar tanto `firma` como `arbol`. En el rojo, `firma` permaneció idéntica. La comprobación del índice tiene la limitación de N3. |
-| H7 · Dependencias de una ficha antigua | **Cubierto.** La tarea y el bug empiezan sin `depende_de`. Se completa únicamente la tarea y se exige que coincidan selector y recuperación. En el rojo, el selector abandonó el paso y `cierre_tras_error` lo mantuvo pendiente. |
+| Hallazgo de C1 | Estado | Comprobación conservada |
+|---|---|---|
+| H1 🟠 · Perfiles autorizados | **Resuelto** | Se exige el modelo fijado en el caso estricto y la secuencia principal–reserva antes y después de la recarga y tras el arranque manual. |
+| H2 🟠 · Espera por cuota | **Resuelto** | Se observa la llamada a `esperar` con la demora registrada para la reserva agotada y se comprueba el consumo de ambos intentos. |
+| H3 🟡 · Reformulación del impedimento | **Resuelto** | Dos invocaciones confirman redacciones y fechas fijas distintas en la ficha y el resumen. Tras el segundo commit se exige la parada con el paso y el ID correctos. |
+| H4 🟡 · Informe del ID correcto | **Resuelto** | La aserción de ausencia del informe usa el ID del caso, también para `task-dev`. |
 
-## Hallazgos nuevos
+En las regresiones solicitadas por D, H1 conserva la consulta al selector y al preflight de release sobre el disco que dejó el retorno erróneo. H2 queda cubierto por el contraste de huellas de N1. H3 y H4 conservan la distinción entre cita y dictamen y el uso de la reserva en la misma invocación. H5 conserva las cuatro filas de consumo y la exclusión de los reintentos técnicos del acumulado ordinario. H6 queda reforzado por N3. H7 conserva el contraste entre selección y recuperación para una ficha antigua sin `depende_de`. Esta valoración corresponde a la cobertura de pruebas. El dictamen de código de D sigue su propia revisión.
 
-**N1 🟠 ALTA · Una huella caducada puede satisfacer la cobertura de H2.** **Para:** `desarrollador` (Artemisa). En `test_nota_no_renueva_aprobacion_pero_dictamen_del_producto_si`, el informe que debe rechazarse carece de `Producto revisado`. El único informe que lleva ese campo contiene el valor devuelto por `motor.huella_producto` para el producto vigente. Una implementación que acepte cualquier valor presente en esa línea superaría ambos casos. El rojo aportado acredita el defecto de la nota añadida al informe antiguo, pero no discrimina esa implementación.
+## Hallazgo nuevo
 
-**Corrección requerida.** Obtener la huella del producto A, cambiar el mismo archivo para producir B y conservar en el informe del ID la aprobación con la huella de A. Una edición administrativa de ese informe debe dejar el ID pendiente tanto para el cierre como para release. Sobre el mismo producto B, por la misma vía de cierre, sustituir la acreditación antigua por la de B y exigir que el ID quede liberado. Las dos huellas pueden obtenerse mediante la API existente.
-
-**N2 🟠 ALTA · La prueba de diagnóstico estructurado no observa la entrega al consumidor.** **Para:** `desarrollador` (Artemisa). `test_diagnostico_estructurado_de_suite_se_entrega_al_consumidor` introduce un JSON con cinco campos y comprueba el código de salida, la ausencia de reserva y el resultado de `revision_sin_dictamen`. Ninguna aserción recupera el diagnóstico emitido. Si el agente reconociera el modo `diagnostico-suite`, marcara la invocación como atendida y descartara el JSON, las tres comprobaciones podrían seguir pasando. El rojo aportado demuestra el error de clasificación en las métricas.
-
-**Corrección requerida.** Hacer pasar la salida del agente simulado por el punto de entrada que consume el diagnóstico, o capturar la salida que ese consumidor recibe y procesarla con su lector real. Comprobar que se recuperan la causa, la decisión, el destino, el responsable y la intervención del ejemplo. Conservar las aserciones actuales sobre reserva y revisión pendiente. La prueba debe fallar si el agente devuelve 0 y pierde el contenido.
-
-**N3 🟡 MEDIA · La preservación del índice se comprueba con el índice igual a `HEAD`.** **Destino:** `resolver`. **Responsable:** `desarrollador` (Artemisa). En `test_wip_rastreado_aunque_ignorado`, la instantánea de `ls-files --stage` se toma inmediatamente después del commit. Una restauración indebida del índice a `HEAD` dejaría esa misma instantánea y podría borrar cambios preparados por el usuario en un repositorio real. Preparar una versión del archivo en el índice, dejar otra en el directorio de trabajo y conservar la comparación del índice antes y después de `firma` y `arbol`.
+**N4 🔵 BAJA · Se pierde una comprobación positiva de `revisar-tarea`. Destino `resolver`, responsable `desarrollador`.** En la ronda anterior, el caso de reevaluación comprobaba que `cierre_revisado` aceptaba la aprobación vigente al entrar por `revisar-tarea`. El cambio a `bug-fix` permite comparar A y B por la misma vía, como exigía N1. El caso ya no detectaría un rechazo específico de `revisar-tarea` sobre ese mismo estado de disco. Basta conservar la nueva pareja de aserciones de `bug-fix` y añadir, tras confirmar la huella de B, la aserción positiva anterior para `revisar-tarea`. La observación afecta a esa entrada adicional y no reabre N1.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 7/10 | Las regresiones recorren los siete hallazgos de D. Quedan sin discriminar la huella caducada y la pérdida del diagnóstico en la entrega. |
-| Aserciones | 7/10 | Se observan decisiones del selector, perfiles, esperas, métricas y estado Git. Los controles de N1 y N2 admiten los falsos positivos descritos. |
-| Rojo correcto | 9/10 | Las dos ejecuciones contra `e797552` suman ocho fallos de aserción, sin errores de importación, sintaxis ni preparación. Las aserciones posteriores al primer fallo de cada caso se evaluaron por lectura. |
-| Estabilidad | 9/10 | Las pruebas usan repositorios temporales, identidad Git local y configuración aislada. Los proveedores y las esperas están simulados. |
+| Cobertura | 9/10 | Se cubren los seis escenarios del triaje y los tres defectos de cobertura de la última ronda. N4 identifica la comprobación puntual que se ha perdido. |
+| Aserciones | 10/10 | Los contrastes observan la decisión de cierre y release, los cinco valores recuperados por el consumidor y el contenido preparado en el índice. Cada defecto introducido infringe una comprobación concreta. |
+| Rojo correcto | 9/10 | Las variantes de N1 y N3 producen fallos de aserción en el cierre y el índice. La de N2 alcanza el lector y falla porque el diagnóstico se perdió. Los rojos históricos aportan evidencia adicional para las regresiones de D. |
+| Estabilidad | 9/10 | Los casos usan repositorios temporales, configuración Git aislada, datos fijos y proveedores y esperas simulados. Los resultados dependen de estados y salidas observables. |
 
-## Evidencia, alcance y destino
+## Evidencia y límites
 
-Se contrastaron los escenarios, el delta desde la ronda aprobada, el informe de D y los dos rojos adjuntos. Para `b0dce90fafcf6d0d435126211f9dd7baf0ca5d40` se aceptaron las tres verificaciones acreditadas en verde: `git diff --check`, el escaneo de patrones de secretos y Ruff con `E9,F63,F7,F82`. No se repitieron. El proyecto declara Python mínimo 3.11 y carece de comprobador de tipos configurado. La ejecución dirigida de 84 pruebas corresponde a una ronda anterior. La suite completa queda para el cierre de versión.
+Para `5ff63caabd43347c22539f87f87c8c827a72db6e` se reutilizaron las cuatro verificaciones aportadas en verde: `git diff --check`, el escaneo de patrones de secretos sobre el delta, Ruff con `E9,F63,F7,F82` y las tres pruebas de N1–N3, ejecutadas en 6,143 s. Los contrastes en rojo corresponden a sus respectivas variantes. Las 119 pruebas dirigidas pasaron en 194,650 s sobre `c79c4254e742a8b1996a8145f38445430989cb2d`. Durante esa ejecución cambió la ficha independiente B-ADV-0045, por lo que el resultado se atribuye únicamente a esa identidad. La suite completa corresponde al cierre de versión.
 
-PowerShell falló con `registered Core launch requires an installed app` y el proceso de Node terminó antes de devolver los archivos. El dictamen se emitió sobre el mandato de Hades, la skill `/review-test` y los artefactos adjuntos. Se evaluó la suficiencia de las pruebas. La corrección del código de producción corresponde a `/review-code`.
+La lectura directa del agente, la skill y el fichero de pruebas falló al iniciar el proceso con `registered Core launch requires an installed app`. Las copias literales de Hades y `/review-test`, los informes previos, los escenarios, ambos deltas y las evidencias adjuntas fueron suficientes para dictaminar. No se repitieron comandos de verificación ni se modificaron ficheros.
 
-**Destino del dictamen:** devolver a `desarrollador` (Artemisa) para completar N1 y N2 y resolver N3. **Ruta de transcripción literal:** `docs/review/test_reviews/B-ADV-0044-test-review.md`. El informe se entrega íntegro en esta respuesta. No se escribió ni modificó ningún archivo.
+**Destino del informe:** `docs/review/test_reviews/B-ADV-0044-test-review.md`, para transcripción literal.

@@ -69,3 +69,8 @@ En esta misma revisión se reprodujo H3: la primera línea del dictamen literal 
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Reevaluación de pruebas del árbol b0dce90fafcf6d0d435126211f9dd7baf0ca5d40, RECHAZADO (8,00/10). N1 exige rechazar la huella del producto A frente al producto B y liberar B solo con la huella vigente. N2 exige recuperar los cinco campos de diagnóstico por el consumidor real. N3 exige observar el índice preparado distinto de HEAD y del WIP. Artemisa reanuda desarrollo y someterá estos cambios a Hades. Informe literal en docs/review/test_reviews/B-ADV-0044-test-review.md.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 APROBADO, 9,25/10. N1–N3 resueltos. N4 (baja, resolver, desarrollador): conservar la pareja de comprobaciones por bug-fix y recuperar la comprobación positiva de revisar-tarea con la misma aprobación vigente. Artemisa incorpora esta aserción y continúa hacia la reevaluación de código.
