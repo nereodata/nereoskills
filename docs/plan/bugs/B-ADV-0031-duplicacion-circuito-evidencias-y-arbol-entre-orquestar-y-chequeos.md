@@ -67,3 +67,10 @@ updated_at: 2026-11-11
 - El lanzador seleccionó Codex conforme a los perfiles autorizados. Hades volvió a informar que no pudo acceder a archivos: tanto ejecución de comandos como Node fallaron con `registered Core launch requires an installed app`.
 - Aunque el proceso devolvió código cero, no existe dictamen ni informe canónico: no acredita revisión aprobada. Se conserva `/review-spec` pendiente y el estado `in_progress`.
 - Sin hallazgos asignados que enrutar, preguntas humanas, implementación ni nuevas pruebas. La siguiente acción sigue siendo obtener la revisión independiente antes de diseño y fase roja.
+
+## Reintento · 2026-11-11 16:40 (Europe/Madrid)
+
+- Revisión `/review-spec` del alcance completo invocada con `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`; invocación `00fb3410004340e185732865d98dabd9`, perfil efectivo Codex seleccionado por el lanzador.
+- Consola y Node del revisor fallaron con `registered Core launch requires an installed app`. Hades declara que no pudo leer los archivos ni crear el informe; código cero sin dictamen no acredita aprobación.
+- Se conserva la revisión independiente pendiente y el estado `in_progress`. No hay hallazgos asignados que enrutar ni decisión humana requerida. No se cambian perfiles o reservas ni se avanza a diseño, pruebas o implementación.
+- Se verifica únicamente la higiene del delta documental mediante `--verificar` y la calidad desde la base original; las pruebas funcionales del triaje siguen pendientes hasta implementar la corrección.
