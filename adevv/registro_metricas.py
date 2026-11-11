@@ -10,7 +10,22 @@ from contextlib import contextmanager
 from pathlib import Path
 
 if os.name == 'nt':
+    import ctypes
     import msvcrt
+    from ctypes import wintypes
+
+    class OVERLAPPED(ctypes.Structure):
+        """Estructura Win32 con el desplazamiento inicial del intervalo."""
+
+        _fields_ = [('Internal', ctypes.c_size_t), ('InternalHigh', ctypes.c_size_t),
+                    ('Offset', wintypes.DWORD), ('OffsetHigh', wintypes.DWORD),
+                    ('hEvent', wintypes.HANDLE)]
+
+    LOCKFILE_EXCLUSIVE_LOCK = 0x02
+    LockFileEx = ctypes.WinDLL('kernel32', use_last_error=True).LockFileEx
+    LockFileEx.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
+                           wintypes.DWORD, ctypes.POINTER(OVERLAPPED))
+    LockFileEx.restype = wintypes.BOOL
 else:
     import fcntl
 
@@ -61,9 +76,10 @@ def bloqueo(root):
     auxiliar = Path(root) / AUXILIAR
     auxiliar.mkdir(exist_ok=True)
     with (auxiliar / 'registro.lock').open('a+b') as candado:
-        candado.seek(0)
         if os.name == 'nt':
-            msvcrt.locking(candado.fileno(), msvcrt.LK_LOCK, 1)
+            handle = msvcrt.get_osfhandle(candado.fileno())
+            if not LockFileEx(handle, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, ctypes.byref(OVERLAPPED())):
+                raise ctypes.WinError(ctypes.get_last_error())
         else:
             fcntl.flock(candado, fcntl.LOCK_EX)
         yield auxiliar
@@ -82,11 +98,20 @@ def registrar(root, fila):
 
 def guardar_evidencia(auxiliar, datos):
     """Conserva una instantánea exclusiva y sincronizada antes de modificar el activo."""
-    with tempfile.NamedTemporaryFile(dir=auxiliar, prefix='original-', suffix='.jsonl', delete=False) as copia:
-        copia.write(datos)
-        copia.flush()
-        os.fsync(copia.fileno())
-        return Path(copia.name)
+    carpeta = Path(tempfile.mkdtemp(dir=auxiliar, prefix='recuperacion-'))
+    temporal = carpeta / 'copia.tmp'
+    original = carpeta / 'original.jsonl'
+    try:
+        with temporal.open('xb') as copia:
+            copia.write(datos)
+            copia.flush()
+            os.fsync(copia.fileno())
+        temporal.rename(original)
+    except BaseException:
+        temporal.unlink(missing_ok=True)
+        carpeta.rmdir()
+        raise
+    return original
 
 
 def publicar(temporal, ruta):

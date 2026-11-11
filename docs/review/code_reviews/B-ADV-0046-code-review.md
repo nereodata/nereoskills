@@ -1,3 +1,34 @@
+# B-ADV-0046 · Reevaluación independiente de código, fase D
+
+Veredicto: APROBADO
+
+Producto revisado: ab8aed66ffdbaf55cc569a386f734b4c2cdf464f690b80092bbb36ff1fae31ac
+
+Hades · `/review-code` v1.1.2 · `hotfix/v1.1.3`
+
+Base histórica `aaf7a5e7c1402141e3df6bcf8dbdf3e6a9a6517d`. La reevaluación cubre el delta desde `a347a81` hasta el árbol verificado `e7cd78bff42190b553e51940d857723025633716`. El cambio de producción se concentra en `adevv/registro_metricas.py`.
+
+## Seguimiento de la revisión anterior
+
+- **D1 · resuelto.** En `bloqueo`, el escritor solicita con `LockFileEx` un bloqueo exclusivo y síncrono del primer byte de `registro.lock`. La llamada espera mientras otro proceso posee el intervalo y propaga el error de Windows si falla. El archivo activo se cierra dentro del bloqueo. En la regresión acreditada, el escritor seguía pendiente tras 12 segundos de contención y, al liberarse el bloqueo, terminó con éxito y dejó E3 exactamente una vez. [Contrato de LockFileEx](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex)
+- **D2 · resuelto.** En `guardar_evidencia`, cada recuperación reserva su propio directorio. El nombre `original.jsonl` aparece al renombrar `copia.tmp` después de escribir, sincronizar y cerrar la copia. Si falla la sincronización, se eliminan el temporal y su directorio antes de propagar el error. La regresión con `ENOSPC` acredita que el activo conserva sus bytes y que el reintento guarda una copia completa y preserva la evidencia anterior.
+
+## Hallazgos nuevos
+
+Ninguno. El delta cumple el diseño actualizado. En POSIX, `flock` protege el archivo completo con independencia del cursor. En ambas plataformas, la recuperación entrega a la CLI la ruta efectiva de la copia y solo después de guardar la evidencia prepara el reemplazo del activo.
+
+## Puntuaciones
+
+| Corrección | Seguridad | Conformidad | Calidad | Eficiencia | Documentación | Media |
+|---:|---:|---:|---:|---:|---:|---:|
+| 9/10 | 9/10 | 10/10 | 9/10 | 9/10 | 9/10 | **9,17/10** |
+
+## Evidencia y análisis estático
+
+`orquestar_evidencias.jsonl` registra en Windows los dos fallos con la implementación anterior y el paso de ambas regresiones con la corrección. Las 20 pruebas del triaje pasaron en 32,949 s en el árbol revisado. En ese mismo árbol constan en verde `git diff --check`, la comprobación de secretos y `adevv orquestar --calidad` sin escritura con la base histórica. Formato, lint y tipado se omitieron por falta de configuración. La ronda no cambia dependencias.
+
+---
+
 # B-ADV-0046 · Revisión independiente de código, fase D
 
 Veredicto: RECHAZADO

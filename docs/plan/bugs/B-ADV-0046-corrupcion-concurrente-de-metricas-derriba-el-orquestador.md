@@ -5,7 +5,7 @@ type: bug
 weight: 0
 dificultad: dificil
 version: "v1.1.3"
-status: planned
+status: completed
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
 created_at: 2026-11-11
@@ -42,6 +42,7 @@ No modificar los archivos activos de Aprexx ni su copia de evidencia. Trabajar e
 - A [EXEC] Especificar cola en curso, corrupción visible, recuperación y continuidad en orquestacion.feature.
 - B [EXEC] Diseñar bloqueo multiproceso, publicación, recuperación y cursores.
 - C1 [EXEC] Regresiones con registros sintéticos y con el bucle sobre un repositorio temporal.
+- Ampliación de C2 por D1 y D2: en el mismo módulo del triaje, mantener el bloqueo real en Windows durante más de diez segundos y comprobar que E3 se confirma una sola vez. Inyectar ENOSPC al sincronizar la copia, comprobar el activo y la limpieza de temporales, y recuperar de nuevo.
 - C2 [EXEC] Centralizar lectores y escritores. El bucle cuenta líneas físicas y decodifica el delta directamente. Las búsquedas de sesión y el diagnóstico de revisión también leen por separado. Motor, agentes, verificador y gateway escriben mediante registrar sin exclusión mutua. No consta qué produjo el fragmento del incidente.
 - D [EXEC] Hades revisa contrato, pruebas y corrección en sus fases respectivas.
 - E [EXEC] Documentar el diagnóstico y el procedimiento de recuperación local.
@@ -85,3 +86,7 @@ El motor, los agentes, el verificador y el gateway comparten un bloqueo de archi
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades rechazó la fase D (8,50/10) sobre el producto 583b836296a5b87a66dab3268dde8e2f7e3771318cde5d9e0520d918e82b2f04. D1 alta: en Windows, msvcrt.LK_LOCK falla tras 9,1 segundos de contención y E3 queda sin registrar. Reintentar la contención hasta adquirir el bloqueo, propagando otros errores. D2 media: un fallo por espacio insuficiente puede dejar una copia parcial con nombre de original íntegro. Publicar la evidencia solo después de escribirla y sincronizarla completamente. Artemisa reanuda C2, amplía el triaje para estas regresiones y solicita reevaluación de D. Quedan cerradas las dos observaciones de C1. Informe y reproducción en docs/review/code_reviews/B-ADV-0046-code-review.md.
+
+## Cierre de la corrección
+
+Las dos regresiones añadidas fallaron con el escritor anterior en Windows. Tras el arreglo, el proceso que solicitó E3 esperó doce segundos y lo registró una sola vez al liberarse el bloqueo. Al simular ENOSPC en la sincronización, se conservaron el registro activo y la evidencia anterior y se eliminó la copia fallida. Un reintento produjo una copia íntegra. Las 20 pruebas del triaje pasaron. Hades dio por resueltos D1 y D2 y aprobó la fase D con 9,17/10. [Informe de código](../../review/code_reviews/B-ADV-0046-code-review.md)

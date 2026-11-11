@@ -1,5 +1,6 @@
 """Regresiones de persistencia con registros sintéticos y productores independientes."""
 import csv
+import errno
 import io
 import json
 import multiprocessing
@@ -199,3 +200,36 @@ class RegistroMetricasTests(unittest.TestCase):
         self.assertTrue(publicando.is_set())
         self.assertEqual(copia.read_bytes(), original)
         self.assertEqual(motor.metricas.leer_registros(self.root), [CONSUMO, V1, V2])
+
+    @unittest.skipUnless(os.name == 'nt', 'La ventana de reintentos de la CRT es propia de Windows')
+    def test_escritor_espera_mas_de_diez_segundos(self):
+        """La solicitud de otro proceso sigue viva hasta que se libera el bloqueo."""
+        abierto, solicitado = self.mp.Event(), self.mp.Event()
+        with motor.registro_metricas.bloqueo(self.root):
+            proceso = self.proceso(escribir_durante_recuperacion, abierto, solicitado)
+            abierto.set()
+            self.assertTrue(solicitado.wait(30))
+            proceso.join(12)
+            self.assertTrue(proceso.is_alive(), 'El escritor abandonó antes de liberar el bloqueo')
+        proceso.join(30)
+        self.assertEqual(proceso.exitcode, 0)
+        self.assertEqual(self.filas_activas(), [V2])
+
+    def test_fallo_al_sincronizar_evidencia_conserva_original(self):
+        """Un ENOSPC deja el activo y las copias anteriores listos para un reintento."""
+        anterior = linea(V1) + b'?\n'
+        self.ruta.write_bytes(anterior)
+        primera = motor.metricas.recuperar(self.root)
+        original = linea(CONSUMO) + b'\xff\n' + linea(V1)
+        self.ruta.write_bytes(original)
+        archivos = set(self.root.rglob('*'))
+        with patch.object(os, 'fsync', side_effect=OSError(errno.ENOSPC, 'disco lleno')):
+            with self.assertRaises(OSError) as fallo:
+                motor.metricas.recuperar(self.root)
+        self.assertEqual(fallo.exception.errno, errno.ENOSPC)
+        self.assertEqual(self.ruta.read_bytes(), original)
+        self.assertEqual(set(self.root.rglob('*')), archivos)
+        segunda = motor.metricas.recuperar(self.root)
+        self.assertEqual(primera.read_bytes(), anterior)
+        self.assertEqual(segunda.read_bytes(), original)
+        self.assertEqual(self.filas_activas(), [CONSUMO, V1])
