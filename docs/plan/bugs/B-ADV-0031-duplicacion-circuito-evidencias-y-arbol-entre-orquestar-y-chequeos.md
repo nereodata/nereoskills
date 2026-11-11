@@ -60,3 +60,10 @@ updated_at: 2026-11-11
 - Próximo intento: obtener la revisión independiente de los escenarios antes de continuar con diseño, pruebas y corrección. Las reservas y perfiles siguen bajo control de `--agente`, sin cambios manuales ni pregunta humana.
 - El bug permanece `in_progress`, sin señal de completado.
 - Chequeos del intento: `adevv orquestar --verificar "git diff --check"` verde; `--calidad --base 32d567cb8e1ad1c881a460b09e6742f3b3f2c6cc --aplicar` sin errores, formato y lint omitidos por ausencia de herramientas configuradas. No acredita funcionalidad implementada.
+
+## Reintento · 2026-11-11 16:38 (Europe/Madrid)
+
+- Se repitió `/review-spec` mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`, sobre todos los escenarios del bug y con su ID maestro. Invocación registrada: `e79f4d7b6aeb432d9417cf23254a066f`.
+- El lanzador seleccionó Codex conforme a los perfiles autorizados. Hades volvió a informar que no pudo acceder a archivos: tanto ejecución de comandos como Node fallaron con `registered Core launch requires an installed app`.
+- Aunque el proceso devolvió código cero, no existe dictamen ni informe canónico: no acredita revisión aprobada. Se conserva `/review-spec` pendiente y el estado `in_progress`.
+- Sin hallazgos asignados que enrutar, preguntas humanas, implementación ni nuevas pruebas. La siguiente acción sigue siendo obtener la revisión independiente antes de diseño y fase roja.
