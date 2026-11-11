@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import chdir, redirect_stdout
+from contextlib import chdir, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -140,6 +140,43 @@ class ProgresoTests(unittest.TestCase):
 
     def test_commits_de_diagnostico_bug(self):
         self.repeticion('bug-fix', self.iid)
+
+    def test_reanuda_con_metricas_corruptas(self):
+        dependiente = 'B-DEMO-0002'
+        ficha_b = self.crear_ficha(dependiente, 'planned')
+        ficha_b.write_text(ficha_b.read_text(encoding='utf-8').replace('depende_de: []',
+                           f'depende_de: [{self.iid}]'), encoding='utf-8')
+        self.commit('B depende de A')
+        self.args.max_pasos = 1
+        ruta = self.root / motor.METRICAS
+        self.assertFalse(ruta.exists())
+        def intento(n):
+            if self.llamadas[-1] == ('bug-fix', self.iid):
+                self.crear_ficha(self.iid, 'completed')
+                self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
+                self.escribir(self.informe, '**Veredicto:** APROBADO\nRevisado el doble corregido.')
+                self.commit('cierre de A')
+                motor.registrar(self.root, dict(tipo='agente', id=self.iid, modelos={'lector': {'entrada': 7}}))
+                with ruta.open('ab') as salida:
+                    salida.write(b'_s": 0}\n')
+                self.hades(n, veredicto='APROBADO')
+            return 0, ''
+        self.accion = intento
+        with redirect_stderr(StringIO()) as error:
+            motor.bucle(self.args, self.root)
+        self.assertRegex(error.getvalue(), r'orquestar_metricas\.jsonl[^\n]*línea 2')
+        self.assertEqual(self.git('log', '-1', '--pretty=%s'), 'cierre de A')
+        self.assertEqual(motor.frontmatter(self.ficha)['status'], 'completed')
+        self.assertEqual(motor.motivo_revision(self.root, self.iid), '')
+        filas = motor.leer_metricas(self.root)
+        self.assertEqual([f['modelos']['lector'] for f in filas if 'lector' in f.get('modelos', {})],
+                         [{'entrada': 7}])
+        self.assertEqual([f['veredicto'] for f in filas if f.get('rol') == 'hades'], ['APROBADO'])
+        self.assertEqual(self.llamadas, [('bug-fix', self.iid)])
+        motor.metricas.recuperar(self.root)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('bug-fix', dependiente))
+        motor.bucle(self.args, self.root)
+        self.assertEqual(self.llamadas, [('bug-fix', self.iid), ('bug-fix', dependiente)])
 
     def test_commits_de_diagnostico_tarea(self):
         self.ficha.unlink()

@@ -69,3 +69,8 @@ Ocho procesos Python 3.12 escribieron 400 filas cada uno en un archivo temporal 
 ## Reanudación de desarrollo
 
 Fase A aprobada. Hades cerró H-01 a H-05 en los seis escenarios `@metricas`. Retomar el triaje en B (diseño); las regresiones ejecutables corresponden a C1. [Revisión de especificación](../../review/spec_reviews/B-ADV-0046-spec-review.md)
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades rechazó /review-test de C1 (7,75/10) y asignó cuatro hallazgos al desarrollador. H1 alta: acreditar la delegación real de motor, agente, verificador y gateway en el escritor compartido y mantener los cuatro procesos. H2 alta: coordinar lectura y publicación con una frontera controlable y anunciar E3 al solicitar el registro, sin depender del bloqueo de plataforma. H3 media: antes de V2 exigir dos filas físicas válidas, consumo y V1, tras el acortamiento. H4 media: comprobar los objetos activos y localizar la copia por contenido binario, sin imponer extensión, salida ni CRLF. Artemisa reanuda C1 y solicita reevaluación antes de C2. Diseño y regresiones en hotfix/v1.1.3. Informe de Hades en docs/review/test_reviews/B-ADV-0046-test-review.md. El rojo dirigido reproduce la caída real en la recogida de A (17 pruebas, dos fallos y cinco errores).
