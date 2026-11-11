@@ -41,6 +41,8 @@ Cada modelo único `harness/model` incluye `X.X% consumido`. Un agotamiento vige
 
 **Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
+Los intentos de un rol comparten `invocacion` por llamada. Una cuota recuperada mediante reserva conserva su historial sin bloquear el paso terminado en disco. Las revisiones independientes pendientes mantienen su espera; la fila del paso referencia `bloqueo_agente` con el proveedor y modelo reales, sin atribuirle al perfil principal su agotamiento.
+
 ### Consulta y exportación de métricas
 
 `adevv orquestar --metricas [FILTRO]` (alias `--metrics`) consulta el registro y el backlog sin arrancar ni detener el bucle. Sin filtro muestra todas las versiones; acepta `todas` / `all`, `ultima` / `last`, `ultimas:N` / `last:N` (N positivo), o una lista como `v0.2,v0.3.0`. `--version-filtro FILTRO` sustituye al filtro posicional. El orden es numérico; `v0.3` y `v0.3.0` representan el mismo bloque.

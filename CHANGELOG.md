@@ -6,6 +6,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0039** — Las cuotas de reservas de Hades conservan su historial sin detener pasos completados por otro proveedor; una revisión aún pendiente informa su proveedor y modelo reales.
+
 - **B-ADV-0036** — El cierre cuenta las recaídas por comprobación y causa. Tras tres en difícil, Hades revisa los arreglos y sus evidencias. Solo abre una pregunta humana cuando identifica la intervención necesaria.
 
 - **B-ADV-0033** — El detector conserva el destino antes de recortar la evidencia, admite etiquetas Markdown y prioriza la última declaración de salida sobre la última de la tarea.

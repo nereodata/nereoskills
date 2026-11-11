@@ -1295,12 +1295,13 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(len(llamadas), 3)
 
         metricas = [json.loads(l) for l in (self.root / motor.METRICAS).read_text(encoding='utf-8').splitlines()]
-        self.assertEqual(len(metricas), 3)
-        self.assertNotIn('sin_cuota', metricas[0])
-        self.assertNotIn('sin_cuota', metricas[1])
-        self.assertTrue(metricas[2]['sin_cuota'])
-        # Menor cuota de las tres: sondeo supuesto de 300 segundos.
-        self.assertEqual(metricas[2]['espera_s'], 300)
+        self.assertEqual(len(metricas), 4)
+        self.assertFalse(any(f.get('sin_cuota') for f in metricas[:3]))
+        self.assertEqual([f['modelo_cuota'] for f in metricas[:3]], ['opus', 'sonnet', 'flash'])
+        self.assertTrue(metricas[3]['sin_cuota'])
+        self.assertEqual(metricas[3]['espera_s'], 300)
+        self.assertEqual((metricas[3]['arnes'], metricas[3]['modelo_cuota']), ('claude', 'sonnet'))
+        self.assertEqual(metricas[3]['modelos'], {})
 
     def test_loop_retries_immediately_with_reserva_on_quota_without_waiting(self):
         cfg = {

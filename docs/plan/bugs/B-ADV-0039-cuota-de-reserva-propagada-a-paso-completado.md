@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: in_progress
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -33,3 +33,35 @@ En `skills/orquestar/orquestar.py`, revisar cómo el bucle delimita las filas nu
 2. Cubrir también una invocación de subagente cuyo primer intento agota cuota y cuya reserva completa la misma revisión. El paso que la invocó debe conservar su resultado satisfactorio. Ninguna métrica debe imputar el agotamiento de Gemini al arnés o al modelo de Codex.
 3. Probar el caso de contraste en el que sigue faltando una revisión obligatoria por cuota. Incluso si hubo progreso o se completó otra revisión, el bucle debe conservar el impedimento y comunicar el proveedor, el modelo y el motivo reales.
 4. Verificar tras la recuperación que el historial conserva el fallo de acceso de Claude, el agotamiento y la espera de Gemini, las ejecuciones de Codex y el consumo registrado de cada intento. El agotamiento puede seguir vigente para Gemini sin bloquear trabajo ya completado mediante una reserva.
+
+## Triaje
+
+- base_calidad: cafcd0f31c8ce95342bb3e4108d78d1d2f49e27c
+- A: [SKIP] El contrato de recuperación y sus cuatro regresiones ya están descritos en esta incidencia; no cambia requisitos.
+- B: [SKIP] Corrección local del consumo de métricas, sin decisión arquitectónica nueva.
+- C1: [EXEC] Regresiones del bucle con agentes reales y proveedores simulados: reserva en la misma revisión, revisión pendiente independiente e historial por proveedor.
+- C2: [EXEC] Correlacionar los intentos de cada invocación y consumir únicamente sus cuotas pendientes; no imputarlas al perfil principal.
+- D: [EXEC] Hades revisa pruebas y delta completo.
+- E: [EXEC] Aclaración mínima del contrato de métricas en la skill del orquestador y revisión de versión.
+- F: [EXEC] Cierre y commit tras aprobaciones.
+- Verificación al cierre: `python -m unittest discover -s skills/orquestar -p test_fallos_arnes.py` y `python -m unittest discover -s skills/orquestar -p test_acceso_agente.py`; ejercitan recuperación del paso y reservas del revisor. Chequeos: `git diff --check` y calidad del delta; no hay lint/tipado configurados ni cambios de dependencias.
+- Diagnóstico: el bucle busca cualquier fila nueva de agente con sin_cuota sin distinguir invocación ni recuperación posterior, y añade esa espera a la fila del perfil principal.
+
+- Ampliación dirigida del triaje: `python -m unittest tests.test_orquestar.ReservaCuotaTests` y `python -m unittest discover -s skills/orquestar -p test_arnes_ausente.py`, porque el resumen de espera cambia el registro terminal de reservas agotadas/ausentes.
+
+- Regresión histórica ajustada: los tres intentos conservan su fila; una cuarta fila sin consumo resume la espera mínima con su proveedor real. Antes esperaba el resumen fusionado con el último proveedor, que precisamente causaba la atribución incorrecta.
+
+## Revisión intermedia de Hades
+
+- C1/T1 (alta, desarrollador): distinguir cierre efectivo de progreso parcial commiteado, incluso con árbol limpio. Se añade contraste con estado in_progress real y falta de informe canónico.
+- C2 (media, desarrollador, resolver): conservar vencimiento original al resumir cuotas; nuevo reloj simulado avanza 4000 segundos entre reservas y exige esperar cero por la primera recuperación ya vencida.
+- La verificación dirigida de fallos_arnes pasa a 20 pruebas. La compilación de los tres archivos Python del delta se acredita mediante --verificar. Sin cambios de requisitos, arquitectura, dependencias ni perfiles.
+
+## Estado al terminar este intento
+
+El motor ordenó detener las correcciones tras dos rechazos seguidos de Hades y commitear el trabajo sin completar el bug. Se conserva `status: in_progress` y la base de calidad original.
+
+- review-test final RECHAZADO 8/10: T1 ya resuelto; T2 pendiente, corregir la aserción que exige borrar la marca vencida. Debe verificar el vencimiento original y la ausencia entre cuotas vigentes de consumo_cuotas.
+- review-code RECHAZADO: C1 pendiente en producción (no equiparar commit parcial limpio con cierre efectivo); C2 pendiente en producción (preservar vencimiento original y descontar tiempo de reservas al resumir).
+- Última verificación de fallos_arnes: 20 pruebas, dos fallos funcionales esperados en RED de C1/C2. No se aplicaron correcciones posteriores a la orden de parada. Antes de añadir esos contrastes estaban verdes las 46 pruebas dirigidas (18+14+9+5).
+- Reanudación: corregir T2, obtener review-test aprobado, implementar C1/C2 y repetir las verificaciones del triaje y review-code. La suite completa corresponde al bucle al cerrar versión.
