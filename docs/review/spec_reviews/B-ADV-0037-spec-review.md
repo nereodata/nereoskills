@@ -3,65 +3,104 @@
 - **Revisor:** Hades.
 - **Fecha:** 2026-11-11.
 - **Modo:** orquestado, revisión estática del delta.
-- **Veredicto: RECHAZADO.**
-- **Responsable de corrección:** especificador (Artemisa).
+- **Veredicto: APROBADO.**
+- **Informe:** docs/review/spec_reviews/B-ADV-0037-spec-review.md.
 
 ## Alcance y evidencia
 
-Se revisan exclusivamente los tres escenarios añadidos con `@B-ADV-0037` en `tests/features/publicacion.feature`, frente a los criterios y al triaje operativo de `docs/plan/bugs/B-ADV-0037-cierre-con-revisiones-hades-pendientes.md`.
+Se revisan exclusivamente los siete bloques de escenarios añadidos con
+`@B-ADV-0037` en `tests/features/publicacion.feature`, frente a CA1–5,
+las decisiones de especificación documentadas y los hallazgos anteriores
+H1, H2 y H3.
 
-La revisión utiliza los materiales completos aportados en la solicitud. El acceso local falla con `registered Core launch requires an installed app`; no se acredita una comparación independiente con el árbol o la base Git. No se revisan producción, diseño, implementación de pruebas ni escenarios anteriores. No se ejecutan pruebas ni commits.
+Los cinco escenarios originales se consideran aprobados y quedan fuera de
+reevaluación. En el material suministrado se conservan íntegros. Los tres
+escenarios del WIP e44c13d fueron un borrador rechazado, ausente de esta
+rama; no se consideran una base aprobada que deba restaurarse.
 
-CA3 se considera acreditado por los informes formales RECHAZADO de B-ADV-0032 y B-ADV-0033, trazados y con correcciones enrutadas a Artemisa en esos IDs. No se exige aprobación ficticia, repetir sus revisiones ni trasladar sus correcciones a B-ADV-0037. La identidad operativa completa de versión se distingue de la agrupación histórica de métricas, que se conserva.
+La revisión utiliza exclusivamente el material completo proporcionado.
+El acceso al filesystem falló con
+`registered Core launch requires an installed app`, también mediante la
+alternativa de acceso. No fue posible leer el perfil instalado, contrastar
+el árbol con Git ni guardar este informe. Las conclusiones sobre
+conservación de escenarios y documentos existentes quedan limitadas a
+la evidencia aportada.
+
+No se revisan diseño, producción ni implementación de pruebas. No se
+ejecutan pruebas, no se hacen commits y no se cambian estados del backlog.
 
 ## Obligatorias
 
 | Regla | Resultado | Motivo |
 |---|---|---|
-| No regresión | ✅ | El delta suministrado es aditivo; no modifica los cinco escenarios anteriores. Evaluación limitada al material aportado. |
-| Coherencia | ✅ | Bloquear ante revisión ausente o rechazada es coherente con el cierre sujeto a revisión. Aislar parches y equiparar v1.1 con v1.1.0 respeta la decisión operativa documentada y no exige cambiar métricas. |
-| Trazabilidad | ✅ | Los escenarios se vinculan al bug mediante `@B-ADV-0037`. No añaden etiquetas `@CA-*` inexistentes. Cubren parcialmente CA1, CA2, CA4 y CA5; CA3 queda acreditado por el saneamiento declarado. |
-| Delta real | ✅ | Introducen bloqueo por revisión formal, recuperación y aislamiento operativo de parches, comportamientos no descritos por los escenarios anteriores suministrados. |
+| No regresión | ✅ | El delta suministrado conserva los cinco escenarios originales y añade los casos de B-ADV-0037. El borrador rechazado del WIP no constituye una base aprobada. |
+| Coherencia | ✅ | Se exige revisión válida para cerrar, se admite N/A justificado por ausencia de código y se separa la identidad operativa completa de versión de la agrupación histórica de métricas. |
+| Trazabilidad | ✅ | Los nuevos escenarios llevan `@B-ADV-0037` y corresponden a los criterios del bug. No introducen etiquetas `@CA-*` inexistentes. CA3 se acredita mediante los informes existentes declarados en el expediente. |
+| Delta real | ✅ | Los casos añaden el veto por revisión pendiente o rechazada, su diagnóstico y recuperación, la excepción N/A y la separación operativa entre parches. No duplican el comportamiento de los cinco escenarios anteriores. |
 
 ## Puntuaciones
 
 | Dimensión | Puntuación | Motivo |
 |---|---:|---|
-| Claridad | 7/10 | Las alternativas del primer escenario y la condición N/A no identifican casos concretos. |
-| Completitud | 6/10 | Falta describir la generación del estado pendiente por indisponibilidad y concretar las variantes de bloqueo. |
-| Testeabilidad | 7/10 | Hay resultados observables, pero varias alternativas pueden quedar sin ejercitar manteniendo los escenarios satisfechos. |
-| Estructura | 9/10 | Los escenarios están en el feature funcional de publicación y mantienen el lenguaje de comportamiento. |
-| **Media** | **7,25/10** | No supera 8 y existen hallazgos de severidad alta. |
+| Claridad | 9/10 | Las entradas, estados de revisión, actores e identificadores están concretados; las decisiones documentadas delimitan el alcance. |
+| Completitud | 9/10 | Cubre ausencia y rechazo, tareas y bugs, tres entradas de cierre, varios pendientes, indisponibilidad, recuperación, N/A y límites de identidad de versión. |
+| Testeabilidad | 9/10 | Exige diagnósticos identificables, estados consultables, resultados opuestos para N/A y ausencia observable de cierre, etiquetas y publicación. |
+| Estructura | 9/10 | El delta permanece en el feature funcional de publicación y expresa comportamiento sin imponer almacenamiento ni algoritmos internos. |
+| **Media** | **9/10** | Supera 8 y no se identifican hallazgos críticos ni altos. |
 
-## Hallazgos
+## Reevaluación de H1/H2/H3
 
-### H1 — 🟠 ALTA: el bloqueo agrupa alternativas sin concretar su cobertura
+| Hallazgo anterior | Severidad anterior | Para | Destino para menores | Resultado |
+|---|---|---|---|---|
+| H1 — Alternativas de bloqueo sin cobertura discriminante | 🟠 ALTA | especificador | No aplica | RESUELTO |
+| H2 — Estado pendiente presupuesto, sin provocar indisponibilidad | 🟠 ALTA | especificador | No aplica | RESUELTO |
+| H3 — Excepción N/A sin ejercicio propio | 🟡 MEDIA | especificador | resolver — cumplido | RESUELTO |
 
-- **Ubicación:** «Cierre bloqueado por revisión formal ausente o rechazada».
-- **Criterios afectados:** CA1 y CA5.
-- **Evidencia:** el título menciona ausencia y rechazo, pero el único estado inicial es «sin informe formal aprobado». La acción también agrupa «validar, cerrar o publicar» y solo se utiliza un bug.
-- **Problema:** el escenario no determina qué estado de informe ni qué acción se ejercita. Puede satisfacerse cubriendo únicamente un bug sin informe al validar, dejando sin especificación discriminante el informe RECHAZADO, las tareas completadas o el intento directo de cierre/publicación. La obligatoriedad de comprobar cada tarea o bug queda incompleta.
-- **Para:** `especificador` (Artemisa).
-- **Corrección requerida:** separar los casos o utilizar ejemplos explícitos para ausencia y RECHAZADO, tareas y bugs completados y los puntos de entrada aplicables. Incluir una versión con varios IDs completados para exigir que se identifiquen todos los que carecen de revisión válida. Mantener como resultados observables el bloqueo, la identificación de pendientes y la ausencia de cierre declarado, etiqueta y publicación.
+### H1 — Resuelto
 
-### H2 — 🟠 ALTA: se presupone el estado pendiente sin especificar cómo se produce
+La matriz contiene los doce ejemplos de ausencia/RECHAZADO × tarea/bug
+maestro completado × preflight local/cierre Telegram/publicación por API.
+Cada fila presupone satisfechos los demás requisitos, lo que permite
+atribuir el rechazo a la revisión formal.
 
-- **Ubicación:** «Recuperación tras indisponibilidad de Hades».
-- **Criterios afectados:** CA2 y CA5.
-- **Evidencia:** el `Dado` parte de una revisión que ya quedó pendiente por falta de Hades; el `Cuando` solo describe su recuperación y aprobación.
-- **Problema:** no hay un caso que haga indisponible a Hades e intente obtener la revisión o continuar el cierre. Por ello no se exige observar que esa indisponibilidad deja un estado pendiente con ID, motivo concreto y vía de reanudación, sin sustituirlo por la suite verde. El primer escenario exige un motivo genérico de revisión pendiente, pero tampoco provoca la indisponibilidad.
-- **Para:** `especificador` (Artemisa).
-- **Corrección requerida:** añadir un caso con Hades indisponible y pruebas verdes que desencadene el flujo y compruebe el estado pendiente, ID, motivo de indisponibilidad, instrucción de reanudación y bloqueo del cierre. Conservar el caso de recuperación y hacer explícita la revalidación tras recibir el informe APROBADO.
+El escenario adicional exige enumerar simultáneamente el ID sin informe y
+el ID con informe rechazado, excluyendo al aprobado. Se mantienen el
+diagnóstico, la vía de revisión y la prohibición de declarar el cierre,
+crear etiquetas o publicar main.
 
-### H3 — 🟡 MEDIA: la excepción N/A queda como condición sin ejercicio propio
+### H2 — Resuelto
 
-- **Ubicación:** última cláusula de «Recuperación tras indisponibilidad de Hades».
-- **Evidencia:** después de recibir un informe APROBADO se afirma que «un informe N/A solo permite continuar si declara por qué no hay código que revisar».
-- **Problema:** el informe N/A no forma parte de los antecedentes ni de la acción. Esa cláusula no exige ejercitar un N/A válido ni uno sin justificación.
-- **Para:** `especificador` (Artemisa).
-- **Destino:** `resolver`.
-- **Corrección requerida:** expresar la excepción en casos propios con informe N/A justificado y sin justificación, indicando respectivamente si la revisión deja de bloquear o permanece pendiente.
+El caso de indisponibilidad provoca un intento de revisión con Hades sin
+cuota y pruebas verdes. Exige consultar el estado y validar el cierre,
+observando ID, causa concreta e instrucciones de recuperación y
+reanudación. Las pruebas verdes no sustituyen la aprobación formal.
+
+El caso de recuperación exige reanudar la revisión, obtener el informe
+APROBADO y volver a ejecutar el preflight. También establece que obtener
+el informe no cierra ni publica automáticamente la versión.
+
+### H3 — Resuelto
+
+El esquema N/A contiene dos ejemplos propios: justificación explícita de
+ausencia de código y justificación vacía. Sus resultados son opuestos:
+dejar de bloquear o mantener el bloqueo. Se elimina así la condición
+inejercitada del borrador anterior.
+
+## Cobertura de CA1–5
+
+| Criterio | Evaluación |
+|---|---|
+| CA1 | Cubierto por la matriz de bloqueo y el diagnóstico de todos los pendientes, con prohibición explícita de etiquetar o declarar cerrada la versión. |
+| CA2 | Cubierto por el intento con Hades sin cuota, el estado consultable y el diagnóstico con ID, motivo y forma de reanudar. |
+| CA3 | Acreditado según el expediente aportado por los informes formales RECHAZADO de B-ADV-0032 y B-ADV-0033, trazados durante el saneamiento de v1.1.2. No se han leído independientemente esos archivos. Obtener revisión no equivale a obtener aprobación ni autoriza cerrar con rechazo pendiente. |
+| CA4 | Cubierto por la selección del trabajo de v1.1.2 sin recuperar la revisión de v1.1.1 y por su exclusión del impedimento de cierre de ese parche. Se especifica además la equivalencia v1.1/v1.1.0. |
+| CA5 | La especificación contiene casos discriminantes de rechazo, recuperación y aislamiento entre parches. La existencia y calidad de su implementación como regresiones corresponde a una revisión posterior de pruebas. |
 
 ## Resolución
 
-Devolver el delta al especificador (Artemisa) para resolver H1, H2 y H3. Reevaluar los escenarios corregidos y su delta. Este veredicto se limita a la especificación de B-ADV-0037 y no cambia los veredictos ni los responsables de B-ADV-0032 y B-ADV-0033.
+APROBADO el delta de especificación suministrado. H1, H2 y H3 quedan
+resueltos; no se identifican nuevos hallazgos.
+
+El veredicto autoriza continuar el ciclo desde la especificación. No
+acredita diseño, implementación, pruebas ni cierre de versión, y no
+modifica los veredictos ni el trabajo pendiente de B-ADV-0032 y B-ADV-0033.
