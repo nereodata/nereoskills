@@ -5,11 +5,12 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
+pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -85,3 +86,8 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - DEC-ESP-0040-04: mantener el alcance documental y la verificación `git diff --check` mediante el coordinador conforme a DEC-ESP-0040-02. Las regresiones funcionales del triaje corresponden al siguiente bug-fix; no se restauran los borradores del WIP `0e24407`, no se acredita su rojo como evidencia del árbol actual y no se ejecuta la suite completa. El hueco de producción sigue vigente: `agente()` continúa solo por cuota y retorna en otros errores.
 
 - Cierre de esta reevaluación: Hades `/review-spec` APROBADO, media 8,75/10, RS-0040-01/02/05/06 resueltos y sin nuevos hallazgos. Se devuelve a `planned` sin `pendiente_de` para retomar bug-fix. Informe transcrito con límite de acceso al disco y antecedentes íntegros; sin acreditar diseño, pruebas o implementación.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades review-spec RECHAZADO 7,75/10: H1 alto para especificador pide casos observables de autenticación/red; H2 alto para especificador pide fixtures y estados observables de recuperación de ambas preguntas. Decisión: ejecutar especificar conforme al destino explícito. Advertencia de alcance: Artemisa reenvió por error el contrato ya aprobado sin modificaciones ni el informe anterior; resolver este contexto sin duplicar requisitos. Informe docs/review/spec_reviews/B-ADV-0040-spec-review.md conserva antecedentes. Borradores sin implementación ni review-test en wip/B-ADV-0040 db71195; WIP previo preservado en wip/B-ADV-0040-previo-0949. Último rojo dirigido: 8 pruebas, 7 fallos sin errores; restauración Git LF falla en Windows. Sin pregunta humana ni suite completa.

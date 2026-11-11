@@ -1,3 +1,37 @@
+**Veredicto:** RECHAZADO
+
+# B-ADV-0040 · Revisión de Artemisa al reanudar · 2026-11-11
+
+- Revisor: Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`; transcripción del dictamen independiente, media 7,75/10.
+- Límite: el arnés no pudo acceder al disco (`registered Core launch requires an installed app`) ni escribir el informe. Revisó los cinco bloques completos adjuntos, sin código ni pruebas. No regresión no verificable por el revisor; coherencia conforme solo dentro del material recibido; trazabilidad y delta real conformes.
+- Error de alcance de Artemisa: se reenviaron los cinco bloques previamente aprobados sin cambios, aunque `/review-spec` excluye los escenarios ya aprobados. No se adjuntó el informe aprobado anterior. Se conserva ese informe íntegro como antecedente; el especificador recibe también este límite para resolver el enrutado sin duplicar contratos. No se atribuye a Hades una comprobación del disco ni una revisión de pruebas o implementación.
+
+| Dimensión | Puntuación |
+|---|---:|
+| Claridad | 8 |
+| Completitud | 7 |
+| Testeabilidad | 7 |
+| Estructura | 9 |
+| Media | 7,75 |
+
+## Hallazgos recibidos
+
+### H1 · Alta · para: especificador · destino: resolver
+
+El escenario de indisponibilidad prepara únicamente el literal de suscripción deshabilitada y afirma que los errores genéricos conservan su tratamiento anterior, sin provocarlos. Hades pide casos independientes de autenticación y red con entradas representativas y resultados observables (lanzamientos y resultado/diagnóstico), referenciando el contrato vigente sin inventar otro.
+
+### H2 · Alta · para: especificador · destino: resolver
+
+La recuperación no fija para cada copia la respuesta recibida, revisión pendiente, dictamen y destino de la reserva ni estado observable de reanudación. Hades pide fixtures identificadas o instantáneas iniciales para comparar WIP, historial, respuestas y trabajo ajeno, además de esos resultados determinados.
+
+## Decisión y evidencia del intento
+
+Se enruta a especificador por asignación explícita; no se abre pregunta humana. El contrato BDD no se ha modificado. Diseño y pruebas siguen siendo borradores sin review-test ni implementación de producción. Rojo dirigido: 8 pruebas, 7 fallos, sin errores; seis fallos reproducen reservas/diagnóstico/espera y el séptimo reproduce restauración WIP LF con Git real en Windows. Se corrigió antes del último rojo la declaración de perfil estricto para usar `estricto` al nivel admitido por el parser. No se ha ejecutado la suite completa.
+
+---
+
+## Antecedentes íntegros
+
 **Veredicto:** APROBADO
 
 # B-ADV-0040 · Reevaluación con evidencia completa · 2026-11-11
