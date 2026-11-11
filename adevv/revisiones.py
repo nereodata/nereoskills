@@ -49,25 +49,36 @@ class CitasHTML(HTMLParser):
     """Separa el texto propio de las citas y los ejemplos de código HTML."""
 
     etiquetas = ('blockquote', 'pre', 'code')
-    apertura = re.compile(r'<(?:' + '|'.join(etiquetas) + r')(?=[\s/>]|$)', re.I)
+    contenedores = ('address', 'article', 'aside', 'body', 'caption', 'dd', 'details', 'dialog', 'div', 'dl',
+                    'dt', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'header', 'hgroup', 'html',
+                    'li', 'main', 'menu', 'nav', 'ol', 'section', 'summary', 'table', 'tbody', 'td', 'tfoot',
+                    'th', 'thead', 'tr', 'ul')
+    etiqueta_html = re.compile(r'</?(?:' + '|'.join(etiquetas + contenedores) + r')(?=[\s/>]|$)', re.I)
 
     def __init__(self):
         super().__init__()
         self.abiertas = []
+        self.contenedores_abiertos = []
         self.visible = []
+        self.bloque = False
 
     def handle_starttag(self, tag, attrs):
         if tag in self.etiquetas:
             if not self.abiertas:
+                self.bloque = self.bloque or tag != 'code'
                 self.visible.append(' ')
             self.abiertas.append(tag)
         elif not self.abiertas:
+            if tag in self.contenedores:
+                self.contenedores_abiertos.append(tag)
             self.visible.append(self.get_starttag_text())
 
     def handle_endtag(self, tag):
         if self.abiertas and tag == self.abiertas[-1]:
             self.abiertas.pop()
         elif not self.abiertas:
+            if self.contenedores_abiertos and tag == self.contenedores_abiertos[-1]:
+                self.contenedores_abiertos.pop()
             self.visible.append(f'</{tag}>')
 
     def handle_data(self, data):
@@ -77,11 +88,13 @@ class CitasHTML(HTMLParser):
     def sin_citas(self, linea):
         """Retiene el texto propio a ambos lados de una cita, incluso entre líneas."""
         continuacion = self.abiertas or self.rawdata
-        if not continuacion and ('<' not in linea or linea.startswith(('    ', '\t'))
+        self.bloque = any(tag != 'code' for tag in self.abiertas)
+        codigo_sangrado = linea.startswith(('    ', '\t')) and not self.contenedores_abiertos
+        if not continuacion and ('<' not in linea or codigo_sangrado
                                  or re.match(r' {0,3}(?:>|`{3,}|~{3,})', linea)):
             return linea
         protegida = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', lambda m: escape(m[0]), linea)
-        if not continuacion and not self.apertura.search(protegida):
+        if not continuacion and not self.etiqueta_html.search(protegida):
             return linea
         self.visible.clear()
         self.feed(protegida + '\n')
@@ -113,11 +126,13 @@ def lineas_del_informe(texto):
     citas_html = CitasHTML()
     for linea in contenido_del_informe(texto):
         if not abierto:
-            linea = citas_html.sin_citas(linea)
-            if linea is None:
-                parrafo_citado = False
+            visible = citas_html.sin_citas(linea)
+            if visible is None:
+                if citas_html.bloque or not linea.strip():
+                    parrafo_citado = False
                 yield None
                 continue
+            linea = visible
         marca = re.match(CERCO, linea)
         contenido = linea.strip()
         if abierto:
