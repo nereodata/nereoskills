@@ -1,3 +1,101 @@
+# B-ADV-0032 — Reevaluación de código
+
+**Veredicto: RECHAZADO**
+**Revisor:** Hades
+**Árbol declarado:** `fff2e720d2`
+**Media: 7,50/10. Existe un hallazgo ALTA.**
+
+## Alcance y límites
+
+Revisión estática del delta completo de producción de B-ADV-0032: captura JSON, terminación de árboles, configuración de timeout y consumidores `ejecutar()`/`agente()`. Se contrastan las funciones exactas adjuntas con la ficha, el diseño y la plataforma proporcionados.
+
+Se excluyen cambios de otros IDs y las pruebas como código de producción. La conmutación por acceso de suscripción se considera contexto ajeno al bug.
+
+El arnés impidió ejecutar comandos y acceder a archivos por la vía alternativa. Se utilizaron las instrucciones, skill y materiales adjuntos. No se comprobó directamente el árbol, no se ejecutaron pruebas y no se modificaron archivos.
+
+## Análisis estático y evidencia
+
+| Comprobación | Evidencia y límite |
+|---|---|
+| Regresiones específicas | Coordinador `--verificar`: 11 pruebas, GREEN, 3,209 s, un skip POSIX explícito. No se repiten. |
+| Review-test | APROBADO, 8,75/10, según informe aportado. |
+| Compilación | `py_compile` de los dos Python afectados comunicado como verde sobre el árbol declarado. No se repite. |
+| Integridad del diff | `git diff --check` comunicado como verde. No se repite. |
+| Calidad aportada | `--calidad --base 9a143486c663f2afe2bbe4e7ef3a30743c65532a --aplicar`: código 0; formato/lint **OMITIDOS**, sin acreditar ejecución de esas herramientas. |
+| Calidad de esta revisión | Intentada sin escritura y sin `--aplicar`; el arnés rechazó el lanzamiento. No produjo resultado de calidad. |
+| Tipado y secretos | Herramientas no configuradas. No se observan secretos en el material revisado; no equivale a un escaneo automatizado. |
+| Dependencias | Sin cambios declarados. |
+| POSIX real | No ejecutado; seguimiento en B-ADV-0038. |
+
+## Puntuaciones
+
+| Criterio | Nota | Justificación |
+|---|---:|---|
+| Corrección | 6 | Corrige supervisión, precedencia y espera final; queda terminación incompleta en Windows con padre ya terminado. |
+| Seguridad | 8 | Comandos por argumentos y aislamiento POSIX; persiste trabajo residual posible en Windows. |
+| Conformidad | 8 | Respeta diseño, motor y biblioteca estándar; la garantía operativa de terminar el árbol queda incompleta. |
+| Calidad | 8 | Sentinel explícito y supervisión legible; la estrategia Windows depende de conservar vivo al padre. |
+| Eficiencia | 7 | Sondeo y esperas limitados en captura JSON; el caso Windows puede conservar procesos y bloquear captura por líneas. |
+| Documentación | 8 | Documenta las correcciones y limitaciones POSIX, pero sigue prometiendo terminación del árbol sin cubrir el caso señalado. |
+| **Media** | **7,50** | Existe un hallazgo ALTA que impide aprobar. |
+
+## Reevaluación de hallazgos anteriores
+
+| Hallazgo | Gravedad original | Estado | Para | Destino |
+|---|---|---|---|---|
+| H-01: supervisión tras salir el padre y terminación del grupo POSIX | ALTA | **Resuelto en el camino POSIX señalado anteriormente** | Desarrollador | Resolver; corrección satisfecha |
+| H-02: rechazo de timeout no finito | MEDIA | **Resuelto; se mantiene cerrado** | Desarrollador | Descartar como pendiente |
+| H-03: distinguir timeout omitido y desactivado | MEDIA | **Resuelto** | Desarrollador | Resolver; corrección satisfecha |
+| H-04: proteger espera posterior al EOF | ALTA | **Resuelto respecto a la cancelación prematura** | Desarrollador | Resolver; corrección satisfecha |
+
+**H-01:** la captura JSON vigila conjuntamente proceso y lectores. La salida del padre ya no abandona la supervisión: conserva timeout y gracia, y añade un plazo desde su salida. Ambos `Popen` crean sesión POSIX propia y el helper llama a `killpg` incluso con el líder terminado. La inspección resuelve el defecto previo; la ejecución POSIX real continúa pendiente.
+
+**H-02:** `math.isfinite` sigue rechazando valores no finitos antes de interpretar cero o negativos finitos como desactivación.
+
+**H-03:** `_TIMEOUT_OMITIDO` distingue omisión de `None` explícito. `ejecutar()` propaga también `None`; `agente()` conserva el valor resuelto. El perfil desactivado ya no recupera involuntariamente el timeout del entorno.
+
+**H-04:** el temporizador permanece activo durante `p.wait()` y se cancela después. Esto corrige la cancelación anterior al cierre del proceso. Su eficacia sigue dependiendo de que la terminación del árbol funcione; el defecto Windows siguiente es independiente de esa corrección.
+
+## Hallazgos nuevos
+
+### H-05 — 🟠 ALTA: Windows no termina descendientes cuando el padre ya salió
+
+**Para:** desarrollador / Artemisa
+**Destino:** resolver en B-ADV-0032
+**Ubicación:** `_terminar_arbol_proceso()`, invocado desde la supervisión JSON y el temporizador de captura por líneas.
+
+La rama Windows utiliza exclusivamente `taskkill /F /T /PID <pid_del_padre>` para terminar descendientes. Si el padre ya terminó y su PID dejó de existir, esa orden no dispone del proceso raíz desde el que localizar el árbol. El posterior `p.kill()` tampoco alcanza a los descendientes. Además, se ignora el código de salida de `taskkill`.
+
+**Caso concreto:**
+
+1. El arnés crea un hijo que hereda stdout/stderr.
+2. El padre emite JSON final y termina.
+3. El hijo permanece ejecutándose con los pipes abiertos.
+4. La nueva supervisión agota la gracia e invoca el helper con el PID del padre terminado.
+5. `taskkill` falla y el helper no conserva otro mecanismo para terminar al hijo.
+
+En captura JSON puede devolverse éxito con `cierre_forzado=True` aunque el descendiente continúe trabajando. En captura por líneas, el temporizador puede encontrar igualmente al padre terminado y dejar al lector esperando EOF del descendiente, sin resolver el bloqueo.
+
+**Impacto:** incumple la terminación del árbol en Windows, entorno principal del producto. Puede conservar trabajo que modifica artefactos después del retorno y mantener bloqueado el camino por líneas.
+
+**Corrección requerida:** conservar una capacidad de terminación de descendientes que sobreviva a la salida del padre, por ejemplo mediante una agrupación Windows gestionada desde el lanzamiento. No basta con repetir `taskkill` sobre el PID desaparecido. Proteger específicamente el caso de padre terminado con hijo vivo y pipes heredados, sin exigir proveedores externos ni la suite completa.
+
+Este hallazgo se deduce del flujo adjunto. No se presenta como reproducción ejecutada ni corresponde al seguimiento POSIX de B-ADV-0038.
+
+## Antecedentes conservados
+
+La revisión anterior fue **RECHAZADA**, con media **7,17/10**: H-01 persistía parcialmente; H-02 estaba resuelto; H-03 y H-04 eran nuevos.
+
+Esta reevaluación reconoce las tres correcciones pendientes y mantiene H-02 cerrado. H-05 identifica una limitación adicional de la terminación Windows dentro del alcance completo solicitado.
+
+## Dictamen
+
+**RECHAZADO por H-05.** Resolver la terminación de descendientes Windows tras la salida del padre. No se requiere decisión humana ni ampliación a otros IDs. La ejecución POSIX real permanece registrada en B-ADV-0038.
+
+---
+
+## Informes anteriores
+
 # B-ADV-0032 — Revisión independiente de código
 
 **Veredicto: RECHAZADO**

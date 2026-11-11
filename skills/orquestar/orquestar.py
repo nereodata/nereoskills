@@ -1659,6 +1659,7 @@ def comando(a, prompt, root=None, rol=None, sesion=None):
 
 TIMEOUT_AGENTE_S = 1800
 GRACIA_CIERRE_JSON_S = 10
+_TIMEOUT_OMITIDO = object()
 _SUBPROCESS_RUN = subprocess.run
 
 
@@ -1820,8 +1821,14 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
     inicio_espera = time.monotonic()
     por_timeout = False
     cierre_forzado = False
-    while p.poll() is None:
+    instante_salida = None
+    while True:
+        terminado = p.poll() is not None
+        if terminado and not t_out.is_alive() and not t_err.is_alive():
+            break
         ahora_m = time.monotonic()
+        if terminado and instante_salida is None:
+            instante_salida = ahora_m
         if (instante_json[0] is not None and gracia_cierre is not None
                 and (ahora_m - instante_json[0]) >= gracia_cierre):
             cierre_forzado = True
@@ -1829,6 +1836,11 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
             break
         if timeout is not None and (ahora_m - inicio_espera) >= timeout:
             por_timeout = True
+            _terminar_arbol_proceso(p)
+            break
+        if (instante_salida is not None
+                and ahora_m - instante_salida >= (gracia_cierre if gracia_cierre is not None else GRACIA_CIERRE_JSON_S)):
+            cierre_forzado = instante_json[0] is not None
             _terminar_arbol_proceso(p)
             break
         time.sleep(0.02)
@@ -1852,10 +1864,10 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
     return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
 
 
-def lanzar(cmd, root, harness, entrada=None, env=None, timeout=None, gracia_cierre=GRACIA_CIERRE_JSON_S):
+def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO, gracia_cierre=GRACIA_CIERRE_JSON_S):
     """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
     inicio = time.monotonic()
-    if timeout is None:
+    if timeout is _TIMEOUT_OMITIDO:
         timeout = timeout_de_rol(None, por_defecto=None, env=env)
     if harness == 'agy' and '--output-format' in cmd:
         rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
@@ -1956,8 +1968,11 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=None, gracia_cier
                 elif evento.get('type') in ('error', 'turn.failed'):
                     print(json.dumps(evento, ensure_ascii=False), flush=True)
         finally:
-            if temporizador is not None:
-                temporizador.cancel()
+            try:
+                p.wait()
+            finally:
+                if temporizador is not None:
+                    temporizador.cancel()
     m = {'duracion_s': round(time.monotonic() - inicio)}
     if por_timeout[0]:
         m.update(timeout=True, error=True)
@@ -2036,7 +2051,7 @@ def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
         rol = rol_de(root, paso, dificultad=dif, iid=iid)[1]
     harness = arnes(a, rol)
     timeout_paso = timeout_de_rol(rol, por_defecto=None, env=env)
-    kwargs_extra = {'timeout': timeout_paso} if (timeout_paso is not None and _acepta_kwarg(lanzar, 'timeout')) else {}
+    kwargs_extra = {'timeout': timeout_paso} if _acepta_kwarg(lanzar, 'timeout') else {}
     if sesion:
         cmd = comando(a, prompt, root, rol, sesion=sesion)
         codigo, m, salida = lanzar(cmd, root, harness, env=env, **kwargs_extra)

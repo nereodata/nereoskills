@@ -1,5 +1,69 @@
 # Revisión de tests: B-ADV-0032
 
+**Veredicto: APROBADO**
+**Revisor:** Hades
+**Media: 8,75/10. Sin hallazgos ALTA ni CRÍTICA vigentes.**
+
+## Alcance y evidencia
+
+Reevaluación de RT-01/RT-02 exclusivamente sobre `tests.test_orquestar.SubprocesoColgadoTests`, según las pruebas exactas adjuntas. Se revisan ambas correcciones y su interacción con las regresiones de la clase. No se revisa producción.
+
+El acceso al disco falló por ambas vías disponibles. Las instrucciones de Hades, la skill `/review-test`, la ficha, las pruebas y los informes anteriores se han leído en los materiales proporcionados. No se ha comprobado directamente el árbol ni escrito este informe.
+
+Se acepta como evidencia del coordinador:
+
+- **RED mediante `--verificar`:** 11 pruebas en 8,138 s, cuatro fallos de aserción esperados: propagación de `None` desde `ejecutar()`, cancelación del timeout tras EOF, padre terminado con pipes abiertos y recuperación del entorno pese a `None` explícito.
+- La prueba portable incorporada para RT-01 pasa.
+- Un skip POSIX explícito. **No se acredita ejecución POSIX real**; permanece registrada en **B-ADV-0038**.
+- Compilación y ambos chequeos de diff comunicados como verdes sobre el árbol declarado `2a0ad787c7`. No se han repetido.
+- Formato, lint y tipado no configurados; no cuentan como verificaciones superadas.
+
+No se han ejecutado pruebas. La aprobación evalúa su calidad y suficiencia para continuar la corrección; no convierte la evidencia RED en GREEN.
+
+## Puntuaciones
+
+| Criterio | Puntuación | Evaluación |
+|---|---:|---|
+| Cobertura | 9/10 | Se añade protección explícita del aislamiento POSIX en la captura por líneas, completando la carencia señalada. |
+| Aserciones | 9/10 | Comprueban argumentos de creación, terminación, resultados, métricas, salida parcial y precedencia de configuración. |
+| Rojo correcto | 9/10 | Los cuatro fallos comunicados corresponden a los comportamientos pendientes, sin errores de carga o fixtures. |
+| Estabilidad | 8/10 | El margen de arranque aumenta a 2 s; permanece la dependencia acotada de planificación en las pruebas con procesos reales. |
+| **Media** | **8,75/10** | **Cumple el umbral estricto superior a 8.** |
+
+## Reevaluación de RT-01/RT-02
+
+| Hallazgo | Gravedad original | Estado | Para | Destino |
+|---|---|---|---|---|
+| RT-01: falta de protección del aislamiento POSIX en captura por líneas | 🟠 ALTA | **Resuelto** | Desarrollador / Artemisa | Resolver en B-ADV-0032; corrección satisfecha |
+| RT-02: timeout real de 0,2 s insuficiente para el arranque | 🟡 MEDIA | **Resuelto** | Desarrollador / Artemisa | Resolver en B-ADV-0032; corrección satisfecha |
+
+**RT-01:** `test_captura_lineas_crea_sesion_posix_propia` simula POSIX, invoca el camino por líneas mediante `harness='codex'` e inspecciona los argumentos efectivos de `Popen`. Exige que `start_new_session` sea exactamente `True`. El doble no introduce ese argumento: la aserción falla si se elimina el aislamiento únicamente de este camino. Cubre la corrección solicitada de forma portable. Su resultado satisfactorio no acredita terminación real de grupos POSIX.
+
+**RT-02:** `test_lanzar_agy_corta_por_timeout_cuando_proceso_se_cuelga_antes_del_json` amplía el timeout a **2 s**, manteniéndolo claramente por debajo del bloqueo de 60 s del hijo. Conserva las aserciones de código 124, métricas `timeout` y `error`, y recuperación de la salida parcial. Satisface el ajuste solicitado sin debilitar el comportamiento comprobado.
+
+## Antecedentes y trazabilidad
+
+- La revisión completa inicial aprobó las regresiones de H-01/H-02, pero detectó una interpretación insuficiente de errores de `ps` y dejó pendiente la ejecución POSIX real.
+- La reevaluación posterior aprobó la corrección de las comprobaciones de `ps`. La validación POSIX quedó registrada en B-ADV-0038.
+- La revisión inmediatamente anterior fue **RECHAZADA**, con media **8,25/10**, por falta de cobertura del aislamiento POSIX en el camino por líneas —RT-01— y señaló el margen de arranque de 0,2 s —RT-02—.
+- Esa revisión consideró cubiertos en las pruebas H-03, sobre timeout explícitamente desactivado, y H-04, sobre timeout durante la espera posterior al EOF. Este dictamen conserva esa evaluación; no declara corregida su implementación.
+
+Los identificadores RT-01/RT-02 de esta reevaluación corresponden al rechazo inmediatamente anterior; los informes históricos conservarán sus identificadores originales.
+
+## Hallazgos nuevos
+
+No se identifican hallazgos nuevos en el delta revisado. La ejecución POSIX real continúa pendiente en B-ADV-0038, sin duplicar el seguimiento.
+
+## Dictamen
+
+**APROBADO para el alcance de pruebas revisado.** RT-01 y RT-02 quedan resueltos por inspección del material adjunto, con evidencia comunicada de que la nueva prueba portable pasa. Puede continuar la corrección de producción pendiente. Este dictamen no aprueba producción ni acredita ejecución POSIX real.
+
+---
+
+## Informes anteriores
+
+# Revisión de tests: B-ADV-0032
+
 **Veredicto: RECHAZADO**
 
 **Destino del informe:** `docs/review/test_reviews/B-ADV-0032-test-review.md`

@@ -100,3 +100,14 @@ Q-ADV-0001: Decisión humana de local:Iván Moreno: Continuar con las reservas d
 - Se invocó `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt` con ORQUESTAR_ID=B-ADV-0032, sin cambiar perfiles ni elegir reservas manualmente. El motor ejecutó codex/gpt-6.1-sol; su retorno 0 es operacional y no constituye aprobación.
 - Hades informó: «Revisión pendiente por impedimento técnico: tanto la ejecución local como el acceso alternativo a archivos fallaron con “registered Core launch requires an installed app”. No pude leer Hades, la skill, el delta ni el reporte previo, ni escribir el dictamen. No ejecuté pruebas ni modifiqué archivos. La evidencia RED aportada queda sin evaluación; no emito un veredicto sin revisar las pruebas».
 - Se conserva el informe anterior y la revisión pendiente. Paso terminado sin completar el bug ni cambiar su estado, sin preguntas nuevas. Al disponer de acceso técnico, retomar C1 con el dictamen real de Hades antes de corregir producción.
+
+### Reanudación con dictamen de pruebas
+
+- Hades review-test APROBADO 8,75/10 sobre materiales exactos adjuntos tras fallo de acceso del arnés al disco; informe transcrito literalmente con espacios finales normalizados y antecedentes conservados. RT-01/RT-02 resueltos.
+- RED del árbol inicial: 11 pruebas, cuatro fallos esperados, un skip POSIX; 8,138 s. Compilación reutilizada del mismo árbol y diff-check verdes mediante --verificar. Se retoma C2 para H-01/H-03/H-04, manteniendo base_calidad y triaje.
+- GREEN tras corrección: 11 pruebas en 3,209 s, un skip POSIX explícito. Captura JSON supervisa streams tras salir el padre, sentinel conserva None explícito y captura por líneas mantiene el temporizador durante wait. Validación POSIX real pendiente en B-ADV-0038.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-code RECHAZADO 7,50/10. H-01/H-03/H-04 resueltos y H-02 cerrado. H-05 ALTA para desarrollador/Artemisa: en Windows taskkill sobre PID del padre ya salido no termina descendiente con pipes heredados; conservar capacidad de terminacion desde el lanzamiento que sobreviva al padre y proteger ese caso sin proveedores externos. Decision: reanudar desarrollo con diseno y pruebas dirigidas dentro de SubprocesoColgadoTests, sin decision ni recurso humano. Review-test actual APROBADO 8,75/10; 11 pruebas GREEN con 1 skip POSIX no cubren H-05. Conservar informes y delta, no completar el bug.
