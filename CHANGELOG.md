@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.3] - 2026-11-11
+
+### Corregido
+
+- **B-ADV-0044** — El orquestador acota las revisiones técnicas pendientes aunque cada intento confirme otra nota de diagnóstico. Un retorno erróneo solo permite cerrar el desarrollo con una aprobación vigente sobre el producto.
+
 ## [1.1.2] - 2026-11-11
 
 ### Corregido

@@ -35,7 +35,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from adevv import diagnostico_suite
-from adevv.revisiones import clave_version as vkey, nombre_version, motivo_revision, diagnostico_revision
+from adevv.revisiones import clave_version as vkey, nombre_version, motivo_informe, motivo_revision, diagnostico_revision
 from adevv.store import write_json_atomic
 
 try:
@@ -78,6 +78,10 @@ CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
 PRODUCTO = 'docs/review/versions/{v}-producto.md'  # revisión funcional, con su tabla de decisiones
+DOCUMENTOS_PASO = {'ciclo-requisitos': 'req_analysis.md', 'platform-plan': 'platform_plan.md',
+                   'revisar-plataforma': 'platform_review.md', 'work-plan': 'work_plan.md'}
+INFORMES_VERSION = {'revisar-deuda': 'deuda', 'revisar-version': 'arquitectura',
+                    'revisar-producto': 'producto', 'aplicar-producto': 'producto'}
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
@@ -1362,9 +1366,48 @@ def estado(root, docs):
     return ('PASO', 'start-version', nombre_version(v), None)
 
 
-def firma(root, docs):
-    return (estado(root, docs), git('rev-parse', 'HEAD'), git('status', '--porcelain'),
-            tuple((i['id'], i['status']) for i in backlog(root)), arbol(root))
+def rutas_producto(root):
+    """Selecciona el producto y deja las fichas y el seguimiento a sus señales propias."""
+    carpetas = [d.relative_to(root).as_posix() for d in backlog_dirs(root)]
+    return ['.', ':(exclude)docs/review/**', *(f':(exclude,literal){d}' for d in carpetas)]
+
+
+def firma(root, docs, paso=None, arg=''):
+    """Observa el entregable del paso original aunque cambie el selector o se confirme el WIP."""
+    if paso is None:
+        seleccion = estado(root, docs)
+        paso = seleccion[1] if seleccion[0] == 'PASO' else ''
+        arg = seleccion[2] if len(seleccion) > 2 else ''
+    rutas = []
+    if paso in DOCUMENTOS_PASO:
+        rutas = [f'{docs}/{DOCUMENTOS_PASO[paso]}']
+        if paso in ('ciclo-requisitos', 'work-plan'):
+            rutas.extend(['*.feature', f'{docs}/funcionalidades'])
+    elif paso in INFORMES_VERSION:
+        rutas = [f'docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md']
+    elif paso == 'especificar':
+        rutas = ['*.feature', f'{docs}/requirements.md', f'{docs}/funcionalidades',
+                 f'{docs}/platform_plan.md', ':(glob)**/evals/**']
+    elif paso not in ('revisar-tarea', 'calcular-dependencias'):
+        rutas = rutas_producto(root)
+    fichas = ()
+    if paso in ('task-dev', 'bug-fix', 'revisar-tarea', 'especificar', 'work-plan',
+                'calcular-dependencias', 'aplicar-producto', 'revisar-deuda', 'revisar-version'):
+        de_id = paso in DESARROLLO or paso == 'especificar'
+        fichas = tuple((i['id'], i['status'], i['version'], i['pendiente_de'], i['depende_de'], i['weight'])
+                       for i in backlog(root) if not de_id or i['id'] == arg)
+    dictamenes = []
+    if arg and paso in DESARROLLO:
+        for tipo in ('spec', 'test', 'code'):
+            motivo = motivo_informe(root / f'docs/review/{tipo}_reviews/{arg}-{tipo}-review.md')
+            dictamenes.append(motivo if motivo in ('', 'informe rechazado') else None)
+    contenido = b''
+    if rutas:
+        with indice_de_trabajo(root) as env:
+            contenido = subprocess.check_output(['git', 'ls-files', '--stage', '-z', '--', *rutas],
+                                                cwd=root, env=env)
+    rama = git('branch', '--show-current') if paso == 'start-version' else None
+    return contenido, fichas, dictamenes, rama
 
 
 # ---------------------------------------------------------------- arneses y roles
@@ -1517,7 +1560,8 @@ def reintentos_acumulados(root, iid):
             pasos = 0
             rech = 0
             continue
-        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota'):
+        if (f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota')
+                and not f.get('revision_pendiente') and not f.get('bloqueo_agente')):
             if f.get('progreso'):
                 pasos = 0
             else:
@@ -2259,7 +2303,8 @@ def agente(root, rol, prompt):
         exe = buscar_ejecutable(base[0])
         if not exe:
             posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
-            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid)
+            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid,
+                               invocacion=invocacion)
             if cfg_actual is cfg and cfg.get('fijado'):
                 cede = 'sin arnés'
             continue
@@ -2378,12 +2423,63 @@ def cuota_agente_pendiente(filas):
     return menor_espera_agente(pendientes) if pendientes else None
 
 
+def revision_sin_dictamen(filas, paso, iid):
+    """La última reserva de cada revisión determina si quedó sin dictamen."""
+    revisiones = {}
+    for n, fila in enumerate(filas):
+        if (fila.get('tipo') == 'agente' and fila.get('rol') == 'hades'
+                and fila.get('paso', paso) == paso and fila.get('id', iid) == iid):
+            revisiones[fila.get('invocacion') or n] = fila
+    return any(not f.get('veredicto') and not f.get('sin_cuota') for f in revisiones.values())
+
+
 def cierre_revisado(root, paso, iid, base):
     """Acredita que el trabajo revisado quedó completo y confirmado durante el paso."""
-    if paso not in DESARROLLO or git('rev-parse', 'HEAD') == base or git('status', '--porcelain'):
+    head = git('rev-parse', 'HEAD')
+    if paso not in DESARROLLO or head == base or git('status', '--porcelain'):
         return False
     fichero = fichero_de(root, iid)
-    return bool(fichero and frontmatter(fichero).get('status') == 'completed' and revisada(root, iid))
+    if not fichero or frontmatter(fichero).get('status') != 'completed' or not revisada(root, iid):
+        return False
+    informe = f'docs/review/code_reviews/{iid}-code-review.md'
+    revisado = git('log', '-1', '--format=%H', '--', informe)
+    if not revisado:
+        return False
+    if revisado == head:
+        return True
+    return subprocess.run(['git', 'diff', '--quiet', revisado, head, '--', *rutas_producto(root)],
+                          cwd=root).returncode == 0
+
+
+def cierre_tras_error(root, docs, paso, arg, base, antes):
+    """Un error solo se da por recuperado cuando el entregable del paso está confirmado."""
+    if paso in DESARROLLO:
+        return cierre_revisado(root, paso, arg, base)
+    if git('rev-parse', 'HEAD') == base or git('status', '--porcelain') or firma(root, docs, paso, arg) == antes:
+        return False
+    if paso == 'especificar':
+        f = fichero_de(root, arg)
+        fm = frontmatter(f) if f else {}
+        return fm.get('status') == 'planned' or (fm.get('status'), fm.get('pendiente_de')) == ('blocked', 'humano')
+    if paso == 'calcular-dependencias':
+        items = backlog(root)
+        abiertas = (i for i in items if i['status'] not in CERRADO and vkey(i['version']))
+        return all(i['depende_de'] is not None for i in abiertas) and not errores_dependencias(items)
+    if paso == 'start-version':
+        return git('branch', '--show-current') == f'release/{arg}'
+    if paso == 'work-plan':
+        return (root / docs / 'work_plan.md').is_file() and bool(backlog(root))
+    if paso == 'aplicar-producto':
+        return decision_producto(root / PRODUCTO.format(v=arg)) == 'APLICADA'
+    if paso == 'revisar-producto':
+        return decision_producto(root / PRODUCTO.format(v=arg)) == 'PENDIENTE'
+    if paso in ('revisar-deuda', 'revisar-version'):
+        return (root / f'docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md').is_file()
+    if paso == 'revisar-plataforma':
+        informe = root / docs / DOCUMENTOS_PASO[paso]
+        return informe.is_file() and motivo_informe(informe) in ('', 'informe rechazado')
+    artefacto = DOCUMENTOS_PASO.get(paso)
+    return bool(artefacto and (root / docs / artefacto).is_file())
 
 
 def tope_de_rechazos(root, iid):
@@ -2713,11 +2809,18 @@ def evento_de(e):
 
 # ---------------------------------------------------------------- evidencia de verificación
 
-def arbol(root):
-    """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
+@contextmanager
+def indice_de_trabajo(root):
+    """Captura el contenido rastreable del árbol sin modificar el índice del usuario."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
         subprocess.run(['git', 'add', '-A', '.'], cwd=root, env=env, capture_output=True, check=True)
+        yield env
+
+
+def arbol(root):
+    """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
+    with indice_de_trabajo(root) as env:
         valor = subprocess.run(['git', 'write-tree'], cwd=root, env=env, capture_output=True,
                                text=True, check=True).stdout.strip()
         if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', valor):
@@ -3538,6 +3641,7 @@ def bucle(a, root):
     intentos_dependencias = {tuple(r['errores']): r['n'] for r in recarga.get('intentos_dependencias', [])}
     recuperaciones_analisis = {(r['paso'], r['arg']): r
                               for r in recarga.get('recuperaciones_analisis', [])}
+    intentos_revision = {(p, i): n for p, i, n in recarga.get('intentos_revision', [])}
     for n in range(recarga.get('n', 1), a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
@@ -3545,12 +3649,17 @@ def bucle(a, root):
         if not a.estado and recargar_version(__file__, root, PID,
                                              {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado,
                                               'recuperaciones_analisis': list(recuperaciones_analisis.values()),
+                                              **({'intentos_revision': [[p, i, n] for (p, i), n in intentos_revision.items()]}
+                                                 if intentos_revision else {}),
                                               'intentos_dependencias': [{'errores': list(k), 'n': v}
                                                                         for k, v in intentos_dependencias.items()]},
                                              'orquestar'):
             return 0
         if not a.estado:
-            incorporar_respuestas(root)
+            for respuesta in incorporar_respuestas(root):
+                for contadores in (intentos_revision, recuperaciones_analisis):
+                    for clave in [k for k in contadores if k[1] == respuesta['tarea_id']]:
+                        del contadores[clave]
             for iid, titulo in ingerir(root):
                 print(f'[orquestar] alta desde Telegram: {iid} {titulo}', flush=True)
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
@@ -3622,7 +3731,7 @@ def bucle(a, root):
                     dif = nueva_dif
         if intervencion.restaurar(root, SimpleNamespace(**globals()), arg) is False:
             return parar(root, 'error', f'{arg}: WIP pendiente; guarda el trabajo local ajeno y reintenta.')
-        antes = firma(root, a.docs)
+        antes = firma(root, a.docs, paso, arg)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
         escalado = False
         if paso not in PASOS_ANALISIS:
@@ -3677,6 +3786,7 @@ def bucle(a, root):
         pendiente_cuota = False
         paso_completado = False
         ultimo_registrado = False
+        revision_pendiente = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
             arnes_paso = args_paso.cmd or arnes(args_paso, cfg_actual)
@@ -3725,6 +3835,7 @@ def bucle(a, root):
                 cuota_agente = None
                 if cuota is None and f_met.exists():
                     nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                    revision_pendiente = revision_sin_dictamen(nuevas, paso, arg)
                     cuota_agente = cuota_agente_pendiente(nuevas)
                     if cuota_agente is not None:
                         if cierre_revisado(root, paso, arg, env['ORQUESTAR_BASE']):
@@ -3732,10 +3843,11 @@ def bucle(a, root):
                             cuota_agente = None
                         else:
                             cuota = cuota_agente.get('espera_s', 1800)
-                if not codigo or cuota is not None:
-                    break
-                if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                if codigo and cuota is None and not paso_completado and cierre_tras_error(
+                        root, a.docs, paso, arg, env['ORQUESTAR_BASE'], antes):
                     paso_completado = True
+                    cuota = cuota_agente = None
+                if not codigo or cuota is not None or paso_completado:
                     break
                 if intento == getattr(a, 'reintentos_arnes', 3):
                     break
@@ -3765,7 +3877,7 @@ def bucle(a, root):
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
-            if codigo and cuota_propia is not None:
+            if codigo and cuota_propia is not None and not paso_completado:
                 datos = fallo_cuota(root, arnes_paso, cfg_actual.get('model') or 'predeterminado', salida)
                 m.update(datos)
                 cuota_propia = datos['cuota_espera_s']
@@ -3842,14 +3954,17 @@ def bucle(a, root):
                     m = {'modelos': {}}
         if not codigo:
             recuperar_cuota(root, arnes(args_paso, cfg_usada), cfg_usada.get('model') or 'predeterminado')
-        despues = firma(root, a.docs)
+        despues = firma(root, a.docs, paso, arg)
         hubo_progreso = bool(paso_completado or (despues != antes))
+        if hubo_progreso:
+            intentos_revision.pop(clave_analisis, None)
         if not ultimo_registrado or cuota is not None:
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
                              **({'dificultad': dif} if dif else {}),
                              'progreso': hubo_progreso,
+                             **({'revision_pendiente': True} if revision_pendiente and not hubo_progreso else {}),
                              **marca_fijado(cfg_usada),
                              **({'escalado': True} if escalado else {}),
                              **({'sin_cuota': True, 'espera_s': cuota} if cuota and cuota_agente is None else {}),
@@ -3881,11 +3996,6 @@ def bucle(a, root):
                 return 2
             continue
         if codigo or cuota is not None:
-            if cuota_agente is None and despues != antes and not git('status', '--porcelain'):
-                print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
-                sin_progreso = 0
-                recuperaciones_analisis.pop(clave_analisis, None)
-                continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
             if cuota_agente is not None:
@@ -3898,6 +4008,12 @@ def bucle(a, root):
         esperado = 0
 
         if despues == antes:
+            if revision_pendiente:
+                intentos_revision[clave_analisis] = intentos_revision.get(clave_analisis, 0) + 1
+                if intentos_revision[clave_analisis] >= a.reintentos:
+                    return parar(root, 'error', f'{paso} {arg or ""}: revisión técnica pendiente de Hades '
+                                 f'tras {intentos_revision[clave_analisis]} intentos sin avance.')
+                continue
             if recuperacion is not None:
                 recuperacion['intentos'] += 1
                 print(f'[orquestar] {paso} {arg or ""}: sin progreso '

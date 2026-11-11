@@ -236,6 +236,10 @@ Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se
 
 ## Recuperación de análisis sin progreso
 
+El avance se compara sobre el entregable del paso original. En desarrollo incluye el producto sin confirmar, los cambios operativos de la ficha y el dictamen formal del ID. Los commits vacíos, las notas de la ficha y el resumen de versión conservan el contador. Ante un retorno erróneo, el cierre en desarrollo exige ficha completada, árbol limpio, commit nuevo y aprobación canónica vigente sobre el producto.
+
+Una revisión sin dictamen tras las reservas autorizadas consume un intento técnico cuando el paso termina sin avance. Al alcanzar `--reintentos` para el mismo paso e ID, el motor para e identifica la revisión pendiente. Una respuesta incorporada o un avance del entregable renuevan el presupuesto correspondiente. La recarga cooperativa transfiere los contadores. El arranque manual inicia otra tanda y conserva el WIP, las métricas y las preguntas. La cuota pendiente de una revisión mantiene su espera.
+
 Para `especificar`, `revisar-tarea`, `revisar-version`, `calcular-dependencias`,
 `work-plan`, `revisar-deuda` y `aplicar-producto`, una ejecución correcta del arnés
 sin cambio en la firma de progreso consume un intento del perfil actual. Cada par

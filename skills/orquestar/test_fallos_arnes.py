@@ -360,6 +360,8 @@ class FallosArnesTests(unittest.TestCase):
         def git(*args, **kwargs):
             if args == ('rev-parse', 'HEAD'):
                 return 'commit-final'
+            if args == ('log', '-1', '--format=%H', '--', 'docs/review/code_reviews/B-ADV-0011-code-review.md'):
+                return 'commit-final'
             if args == ('status', '--porcelain'):
                 return '' if limpio else ' M bug.md'
             return ''

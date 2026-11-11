@@ -20,7 +20,11 @@ def nombre_version(clave):
 
 def motivo_revision(root, iid):
     """Diagnostica el informe canónico del ID; vacío significa revisión válida."""
-    path = Path(root) / 'docs/review/code_reviews' / f'{iid}-code-review.md'
+    return motivo_informe(Path(root) / 'docs/review/code_reviews' / f'{iid}-code-review.md')
+
+
+def motivo_informe(path):
+    """Interpreta el dictamen formal de un informe de revisión."""
     try:
         texto = path.read_text(encoding='utf-8')
     except FileNotFoundError:

@@ -31,6 +31,12 @@ flowchart LR
 
 Cada caja es una ejecución del arnés. Los análisis sin progreso prueban niveles superiores, escalada y reservas con `--reintentos` intentos por perfil (2 por defecto), independientemente por paso y argumento. Al agotarlos, `especificar` y `revisar-tarea` bloquean solo el ID y continúan con las independientes; los análisis globales paran con diagnóstico de perfiles e intentos. Un `task-dev`/`bug-fix` sin progreso conserva su promoción y bloqueo local. Los pasos restantes paran tras agotar `--reintentos`. También se para por suite roja que agota su recuperación de cierre, fallo persistente de todos los perfiles del arnés, `--parar` o `--max-pasos`. Las tareas con alguna `depende_de` sin completar esperan. La recarga conserva perfiles y contadores parciales de análisis. Una tarea o bug puede fijar su propio `perfil` (arnés, modelo y esfuerzo, único o por rol) por encima del perfil por dificultad: si no está disponible se usan las reservas con un aviso, con `estricto: true` se espera la cuota o se bloquea la tarea, y un perfil inválido para el bucle con el error del backlog. Pasos, roles, esperas y verificaciones quedan en `orquestar_metricas.jsonl`.
 
+El bucle observa el entregable del paso. En desarrollo cuentan los cambios de producto, incluso sin commit, el estado operativo de la ficha y los dictámenes formales del ID. En análisis cuenta el artefacto del paso. Confirmar un commit vacío o reformular el diagnóstico en la ficha y el resumen de versión deja intacto el presupuesto de intentos.
+
+Si Hades agota los perfiles autorizados sin emitir dictamen, cada intento sin avance cuenta para ese paso e ID. Al alcanzar `--reintentos`, el bucle identifica la revisión pendiente y se detiene con el trabajo en su sitio. Una reserva puede aportar el dictamen en la misma invocación. Si queda cuota pendiente, el bucle aplica su espera. La recarga automática conserva los contadores técnicos. Un arranque manual concede otra tanda y conserva el árbol Git, las preguntas y las métricas. Incorporar una respuesta renueva los intentos técnicos de su ID.
+
+Ante un error del arnés, desarrollo continúa al paso siguiente si la ficha está completada, hay un commit nuevo, el árbol está limpio y la aprobación canónica cubre el producto confirmado. El trabajo parcial se conserva durante la recuperación del arnés.
+
 ```mermaid
 flowchart TD
   idea(["requirements.md (idea)"]) --> req["ciclo-requisitos"]
