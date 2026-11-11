@@ -1,3 +1,35 @@
+**Veredicto:** RECHAZADO
+
+# B-ADV-0040 · Revisión aislada del intento de bug-fix · 2026-11-11
+
+- Revisor: Hades mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`.
+- Transcripción resumida del dictamen independiente. El arnés no pudo leer disco ni escribir el informe (`registered Core launch requires an installed app`); tampoco pudo leer las instrucciones instaladas de Hades/review-spec. Dictaminó exclusivamente sobre los adjuntos.
+- Hades recibió por error solo el primer esquema BDD. Artemisa cortó la extracción en la siguiente etiqueta del mismo ID. El rechazo no demuestra un defecto del contrato completo del repositorio y no invalida por sí mismo los escenarios previamente aprobados. La siguiente revisión requiere todos los bloques completos y las instrucciones de la skill adjuntas.
+- No hubo revisión de diseño, pruebas ni código, ni implementación de producción.
+
+## Dictamen recibido
+
+**RECHAZADO sobre el contrato BDD adjunto**. Hallazgos para **especificador**, tratamiento **resolver**.
+
+| Hallazgo | Severidad | Evidencia recibida por Hades | Para | Destino |
+|---|---|---|---|---|
+| RS-0040-01 | Alta | No se aporta el escenario de perfil explícitamente estricto. | especificador | resolver |
+| RS-0040-02 | Alta | No se aporta el escenario de rechazo auténtico y tratamiento de su destino. | especificador | resolver |
+| RS-0040-05 | Alta | No se especifica la indisponibilidad total ni la repetición del mismo fallo. | especificador | resolver |
+| RS-0040-06 | Alta | No se especifica la recuperación de Q-ADV-0001 y Q-ADV-0002 con conservación del estado. | especificador | resolver |
+
+Hades dio por resueltos RS-0040-03/04 en el esquema adjunto: registro del arnés revisor, Codex elegible y omisión de agy agotado. Indicó que, si los escenarios restantes ya existen, deben incorporarse a la evidencia sin duplicarlos. No emitió puntuaciones numéricas en esta respuesta.
+
+## Decisión y límites
+
+Se ejecutó `--enrutar-hallazgo B-ADV-0040 especificador` conforme al destino explícito. Sin pregunta humana. Se preservó el intento en `wip/B-ADV-0040` (0e24407), con el WIP anterior en `wip/B-ADV-0040-anterior-20261111`. El árbol de trabajo volvió al estado previo al intento antes de registrar el enrutado.
+
+La prueba dirigida dio 8 casos, 6 fallos y 1 error; la fixture de recuperación Git aún falla en Windows y no acredita rojo válido del producto. No se ejecutó suite completa ni se aprobó review-test, implementación o cierre.
+
+---
+
+## Antecedente previo íntegro
+
 **Veredicto:** APROBADO
 
 # B-ADV-0040 · Revisión aislada de especificación · 2026-11-11

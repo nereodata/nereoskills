@@ -5,11 +5,12 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: blocked
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Q-ADV-0001 (B-ADV-0032) y Q-ADV-0002 (B-ADV-0033), motor instalado 1.1.1"
+pendiente_de: especificador
 ---
 
 # B-ADV-0040 · Acceso denegado de Claude durante una revisión de Hades
@@ -71,3 +72,8 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - DEC-ESP-0040-02: el paso documental verifica solo `git diff --check` mediante `adevv orquestar --verificar`. Las pruebas funcionales del triaje permanecen para bug-fix: no se recuperan ni ejecutan borradores defectuosos para aprobar especificación. No hay Python nuevo que compilar. Se descarta ejecutar la suite completa o usar el rojo del WIP como evidencia del árbol actual.
 - Se conserva el informe rechazado como antecedente y se solicita nueva revisión aislada del contrato; no se modifican preguntas reales, perfiles, tareas dependientes ni B-ADV-0032/0033.
 - Cierre de especificar: Hades `/review-spec` APROBADO, 9/10, cuatro hallazgos resueltos sin nuevos hallazgos. Informe actualizado con antecedente íntegro. Se devuelve a `planned` sin `pendiente_de`; siguiente paso bug-fix, sin acreditar diseño, pruebas ni implementación. La copia WIP conserva el intento antiguo y no debe sustituir este contrato aprobado.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades review-spec RECHAZADO sobre adjunto incompleto: RS-0040-01/02/05/06 altos para especificador, destino resolver. Artemisa omitió por error cuatro escenarios al extraer el mandato; Hades no pudo leer disco. Los escenarios sí existen en el contrato aprobado: reenviar los cinco bloques completos sin duplicarlos ni alterar requisitos. Borradores y diagnóstico rojo conservados en wip/B-ADV-0040 (0e24407); anterior WIP preservado en wip/B-ADV-0040-anterior-20261111. Sin implementación ni cierre; sin pregunta humana.
