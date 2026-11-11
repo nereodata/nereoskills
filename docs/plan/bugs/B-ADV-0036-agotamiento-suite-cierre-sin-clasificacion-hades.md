@@ -5,11 +5,10 @@ type: bug
 weight: 20
 dificultad: dificil
 version: "v1.1.2"
-status: blocked
+status: planned
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Caso observado en Afinn release/v0.7, B-AFN-0185, con Adevv 1.1.1"
-pendiente_de: humano
 ---
 
 # B-ADV-0036: El agotamiento de reintentos de la suite de cierre bloquea al humano sin diagnóstico de Hades
@@ -199,6 +198,7 @@ concreta requerida. No se reinicia el ciclo de forma ilimitada.
 - Se solicita sobre este árbol únicamente `adevv orquestar --verificar "python -m unittest discover -s tests -p test_orquestar.py -k SuiteRecoveryTests"`. Su resultado queda en la evidencia duradera del verificador y acredita la base existente, no el arreglo pendiente.
 
 ## Bloqueo sin progreso
+- Reabierta con el motor de B-ADV-0040 para que Hades pueda emitir el dictamen con sus reservas configuradas. El conflicto de definición sigue pendiente de revisión.
 - B-ADV-0036 bloqueada para el humano: 2 intentos sin progreso en dificil; fecha: 2026-11-11T10:28:04
 - Cola de la última salida:
 
