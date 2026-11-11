@@ -17,7 +17,7 @@ origen: "Incidente Aprexx, bug-fix B-APX-0262, Adevv 1.1.2; petición expresa de
 
 ## Hechos confirmados y reproducción
 
-Aprexx sufrió una caída en bucle() al ejecutar la comprensión directa json.loads sobre las líneas nuevas de orquestar_metricas.jsonl (línea 3727 del motor instalado 1.1.2). Se evita leer_metricas(), que usa metricas.leer_registros(..., tolerar_ultima=True). El registro original tiene 2369 líneas. La línea 2367 contiene exactamente `_s": 0}` entre registros válidos. Las otras 2368 son JSON válido. Se ha reproducido JSONDecodeError: Expecting value: line 1 column 1 (char 0) aplicando esa lectura a una copia íntegra en build/adevv-metricas-repro-0046/orquestar_metricas.original.jsonl de este worktree. SHA256 de la copia y original: 3233e90ef1a56e744326774efe37d5e1488ff14c1c394d01dc93d358f9428cd2.
+Aprexx sufrió una caída en bucle() al ejecutar la comprensión directa json.loads sobre las líneas nuevas de orquestar_metricas.jsonl (línea 3727 del motor instalado 1.1.2). Se evita leer_metricas(), que usa metricas.leer_registros(..., tolerar_ultima=True). El registro original tiene 2369 líneas. La línea 2367 contiene exactamente `_s": 0}` entre registros válidos. Las otras 2368 son JSON válido. Se ha reproducido JSONDecodeError: Expecting value: line 1 column 1 (char 0) aplicando esa lectura a una copia íntegra en C:/Users/IVNMOR~1/AppData/Local/Temp/adevv-metricas-repro-0046/orquestar_metricas.original.jsonl, fuera del checkout. SHA256 de la copia y original: 3233e90ef1a56e744326774efe37d5e1488ff14c1c394d01dc93d358f9428cd2.
 
 El diagnóstico original y la copia before-recovery están en C:/Users/Iván Moreno/SW/Aprexx/build/adevv-recovery-20261111/. Solo lectura. La recuperación ya realizada allí conservó el original y retiró exclusivamente el fragmento; el proyecto reanudó sin cambiar la instalación.
 
@@ -35,3 +35,7 @@ registrar() usa append y write(JSON más salto de línea), sin bloqueo visible. 
 ## Restricciones y cierre
 
 No modificar los archivos activos de Aprexx ni su copia de evidencia. Trabajar exclusivamente en Adevv y copias o fixtures. Mantener las causas del productor y del lector diferenciadas hasta tener evidencia. Hades debe revisar los contratos, pruebas y corrección con el perfil potente fijado, manteniendo el alcance del hotfix. Este bug forma parte de v1.1.3 y debe quedar corregido y validado junto a B-ADV-0044 y B-ADV-0045 antes de instalarla.
+
+## Hallazgo del lector compartido actual
+
+metricas.leer_registros(root, tolerar_ultima=True) actualmente hace continue ante cualquier JSONDecodeError o fila no objeto, incluso en una línea intermedia. Sustituir la comprensión directa por ese lector sin corregir su semántica incumpliría el requisito de diagnóstico y conservación de corrupción intermedia. La copia íntegra privada está fuera del checkout para impedir su inclusión accidental en un commit; las pruebas distribuidas deben usar fixtures mínimos sin contenido privado.
