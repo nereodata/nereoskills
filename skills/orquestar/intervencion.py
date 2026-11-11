@@ -70,8 +70,13 @@ def listar(root, solo_pendientes=False):
     return [q for q in leer(root) if not solo_pendientes or q['estado'] == 'pendiente']
 
 
-def git(root, *args, entrada=None):
-    """Ejecuta Git en la raíz explícita y propaga cualquier fallo."""
+def git(root, *args, entrada=None, binario=False):
+    """Ejecuta Git preservando los bytes de parches y propaga cualquier fallo."""
+    if binario or entrada is not None:
+        datos = entrada.encode('utf-8') if isinstance(entrada, str) else entrada
+        salida = subprocess.run(['git', *args], cwd=root, input=datos,
+                                capture_output=True, check=True).stdout
+        return salida if binario else salida.decode('utf-8').strip()
     return subprocess.run(['git', *args], cwd=root, input=entrada, text=True,
                           encoding='utf-8', capture_output=True, check=True).stdout.strip()
 
@@ -349,7 +354,7 @@ def notificar_reanudacion(root, motor, iid):
 
 
 def restaurar(root, motor, iid):
-    """Aplica el delta WIP sobre la rama actual preservando cambios independientes."""
+    """Restaura WIP sobre destino limpio; devuelve False si debe esperar trabajo ajeno."""
     if not (root / PREGUNTAS).exists():
         return
     with bloqueo(root):
@@ -357,10 +362,16 @@ def restaurar(root, motor, iid):
         for q in preguntas:
             if q['tarea_id'] != iid or q['estado'] != 'incorporada' or not q['wip_rama'] or q['wip_restaurado']:
                 continue
+            sucio = bool(git(root, 'status', '--porcelain'))
+            if sucio:
+                q['impedimento_incorporacion'] = 'WIP pendiente: hay trabajo local en índice o árbol; no se restaura.'
+            if sucio or not asegurar_destino(root, motor, q):
+                guardar(root / PREGUNTAS, preguntas)
+                return False
             parche = git(root, 'diff', '--binary', q['base_commit'], q['wip_rama'], '--', '.',
-                         ':!docs/plan', ':!docs/review/versions')
+                         ':!docs/plan', ':!docs/review/versions', binario=True)
             if parche:
-                git(root, 'apply', '--3way', '-', entrada=parche + '\n')
+                git(root, 'apply', '--3way', '-', entrada=parche)
             q['wip_restaurado'] = True
             guardar(root / PREGUNTAS, preguntas)
 

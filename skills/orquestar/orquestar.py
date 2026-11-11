@@ -462,7 +462,10 @@ def construir_prompt_paso(root, paso, arg):
         ' Verifica con `adevv orquestar --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol), '
         'solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión.'
     )
-    extra += (' Si Hades ha asignado un hallazgo a `artemisa` o `especificador`, ejecuta '
+    extra += (' Si una revisión falla técnicamente por acceso deshabilitado, conserva el trabajo y la revisión pendiente; '
+              'termina el paso sin completarlo ni abrir preguntas para elegir reservas o restaurar Claude. '
+              'Las reservas autorizadas las resuelve --agente, respetando el perfil estricto. '
+              'Si Hades ha asignado un hallazgo a `artemisa` o `especificador`, ejecuta '
               f'`adevv orquestar --enrutar-hallazgo {arg or "ID"} <destino> --contexto "<hallazgo y decisión>"`; '
               'no uses `--preguntar`: el primer destino reanuda desarrollo y el segundo ejecuta especificar. '
               'Solo si Hades ha asignado explícitamente `humano`, o no existe valor por defecto seguro, ejecuta `adevv orquestar --preguntar '
@@ -2062,6 +2065,11 @@ def base_comando_agente(harness, prompt, sesion=None):
     return None
 
 
+def acceso_suscripcion_denegado(harness, salida):
+    """Reconoce el diagnóstico específico de Claude sin reclasificar autenticación genérica."""
+    return harness == 'claude' and 'Your organization has disabled Claude subscription access for Claude Code.' in salida
+
+
 def agente(root, rol, prompt):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
@@ -2079,6 +2087,7 @@ def agente(root, rol, prompt):
     configs_a_probar = configuraciones_con_cuota(root, configs_originales)
     cuotas_acumuladas = []
     ultima_cuota = None
+    acceso_denegado = False
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
     cede = 'sin cuota' if cfg.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg else ''
 
@@ -2106,12 +2115,27 @@ def agente(root, rol, prompt):
         if cede and cfg_actual is not cfg:
             avisar_perfil(root, iid, cfg, cede, cfg_actual)
             cede = ''
-        if es_reanudacion and codigo != 0 and espera_cuota(salida) is None and not m.get('timeout'):
+        if (es_reanudacion and codigo != 0 and espera_cuota(salida) is None
+                and not acceso_suscripcion_denegado(harness, salida) and not m.get('timeout')):
             prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
             cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
             entrada_fresh = None if harness == 'agy' else prompt_fresh
             codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=entrada_fresh, **kwargs_lanzar)
+
+        if codigo and acceso_suscripcion_denegado(harness, salida):
+            acceso_denegado = True
+            registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                             'arnes': harness, 'codigo': codigo, **m, **marca_fijado(cfg_actual),
+                             'modelo': cfg_actual.get('model') or 'predeterminado',
+                             'acceso_denegado': True, 'diagnostico': salida[-1200:],
+                             **({'escalado': True} if escalado else {})})
+            print(f'[orquestar] {rol}: acceso de Claude por suscripción deshabilitado; '
+                  + ('conmutando a reserva autorizada.' if hay_mas_reservas else 'sin más reservas elegibles.'),
+                  flush=True)
+            if cfg_actual is cfg and cfg.get('fijado'):
+                cede = 'sin acceso por suscripción'
+            continue
 
         cuota = espera_cuota(salida) if codigo else None
         if cuota is not None:
@@ -2132,7 +2156,7 @@ def agente(root, rol, prompt):
                 continue
             else:
                 menor_cuota = min(cuotas_acumuladas)
-                veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+                veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' and not codigo else []
                 registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                                  'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                                  **({'veredicto': veredicto[-1]} if veredicto else {}),
@@ -2144,10 +2168,11 @@ def agente(root, rol, prompt):
 
         if not codigo:
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
-        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' else []
+        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' and not codigo else []
         registrar(root, {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                          'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                          **({'veredicto': veredicto[-1]} if veredicto else {}),
+                         **({'diagnostico': salida[-1200:]} if codigo else {}),
                          **({'escalado': True} if escalado else {}), **m})
         if veredicto and veredicto[-1] == 'RECHAZADO':
             print(tope_de_rechazos(root, iid), flush=True)
@@ -2166,6 +2191,12 @@ def agente(root, rol, prompt):
                          'modelos': {}, 'sin_cuota': True, 'espera_s': espera,
                          **({'escalado': True} if escalado else {})})
         print(f'[orquestar] {rol} sin cuota; se conserva la recuperación vigente.', flush=True)
+        return 1
+    if acceso_denegado:
+        restriccion = ' (perfil estricto)' if cfg.get('estricto') else ''
+        print(f'[orquestar] {rol}: revisión pendiente por acceso deshabilitado{restriccion}; '
+              'conserva el trabajo y termina el paso sin completar ni abrir preguntas. '
+              'Reintenta cuando un perfil autorizado recupere acceso.', flush=True)
         return 1
     mensaje = f'{rol}: ningún arnés disponible en el principal ni en las reservas.'
     print(f'[orquestar] {mensaje}', flush=True)
@@ -3313,7 +3344,8 @@ def bucle(a, root):
                 nueva_dif = promover_dificultad(root, arg, motivo=motivo)
                 if nueva_dif:
                     dif = nueva_dif
-        intervencion.restaurar(root, SimpleNamespace(**globals()), arg)
+        if intervencion.restaurar(root, SimpleNamespace(**globals()), arg) is False:
+            return parar(root, 'error', f'{arg}: WIP pendiente; guarda el trabajo local ajeno y reintenta.')
         antes = firma(root, a.docs)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
         escalado = False

@@ -6,6 +6,8 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0040** — Hades continúa por sus reservas autorizadas ante suscripción de Claude deshabilitada, respeta perfiles estrictos y conserva la revisión pendiente sin preguntas nuevas. La recuperación del WIP espera al trabajo ajeno y preserva los bytes del parche en Windows.
+
 - **B-ADV-0034** — Responder preguntas del orquestador desde CLI local sin Telegram, compartiendo validación, persistencia e incorporación con el gateway y respetando dependencias.
 
 - **B-ADV-0032** — Los arneses se aíslan en una sesión POSIX para terminar también sus descendientes al vencer el timeout o la gracia tras JSON. Los timeouts no finitos recuperan el valor seguro por defecto.

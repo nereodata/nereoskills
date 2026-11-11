@@ -5,7 +5,7 @@ type: bug
 weight: 15
 dificultad: media
 version: "v1.1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -101,3 +101,15 @@ Al subir B-ADV-0032 y B-ADV-0033 a dificultad difícil, Hades pasó de revisar c
 - La reevaluación de Hades recibe el informe anterior íntegro, el diff nuevo y el contexto BDD completo; revisará H1/H2 y los dos bloques añadidos, sin reabrir los cinco bloques aprobados.
 
 - Cierre de especificar H1/H2: Hades `/review-spec` APROBADO, media 9/10, ambos hallazgos resueltos sin nuevos hallazgos. Dictamen sobre adjuntos exactos por fallo de acceso a disco, transcrito con antecedentes íntegros. Se devuelve a planned sin pendiente_de para continuar bug-fix; no acredita diseño, pruebas, implementación ni cierre funcional.
+
+## Reanudación de bug-fix · 2026-11-11
+
+- Se conserva base_calidad y el contrato aprobado (siete bloques BDD); no se reabre review-spec sin delta. Diseño y pruebas recuperados del WIP como borradores para revisar desde cero. Se amplía C2 al transporte binario del parche Git que discrimina la regresión LF en Windows.
+
+- Review-test desde cero: primer dictamen RECHAZADO (8/10), RT-01/02 para desarrollador. Corregidos consumo del dictamen observable y preservación exacta de HEAD/índice/diff/stash; reevaluación APROBADO (9/10). Se añadió propagación restaurar=False al bucle. Al superar el rojo se corrigieron dos fixtures ocultas: parser normalizado para perfil estricto y mock Popen limitado a Codex, delegando Git al proceso real. Se solicita reevaluación limitada de esas dos correcciones.
+- Rojo válido previo a producción: 10 pruebas, 13 fallos contando subTests, sin errores. Verde tras corrección: 10 pruebas de acceso/recuperación, 9 de arnés ausente, 8 de cuotas vigentes y 27 de perfil fijado, mediante el coordinador. No se han ejecutado pruebas fuera del triaje ni la suite completa.
+- Implementación: clasificador literal exclusivo de Claude antes del reintento de sesión, reservas ya filtradas por cuota/estricto, métricas sin veredicto técnico ni cuota inventada; mandato conserva revisión pendiente sin nuevas preguntas. Restauración exige destino limpio y transporta parche binario íntegro. No se modificaron perfiles, preguntas ni WIP reales de las otras tareas.
+
+- QA: Hades `/review-code` RECHAZADO (8,5/10), RC-01 alto para desarrollador: asegurar_destino toleraba un índice ajeno AJENO cancelado por worktree=HEAD. Se añade regresión al mismo comando del triaje: rojo de 11 tests con un fallo por restauración indebida. Hades `/review-test` aprueba el delta de prueba con 9/10 sin nuevos hallazgos. Corrección: barrera estricta de `git status --porcelain` antes del helper en restauración de respuestas incorporadas; no cambia la recuperación de escrituras preparadas de incorporar. Reevaluación de código pendiente.
+
+- Cierre: Hades review-code APROBADO 9/10, RC-01 resuelto sin nuevos hallazgos; review-test APROBADO 9/10 conserva RT-01/02 resueltos. Informes transcritos con límite de acceso a disco. Verificación dirigida final: 55 pruebas, compilación y diff-check; calidad omite formato/lint por ausencia de herramientas. Sin deuda ni intervenciones nuevas; validación funcional y decisiones trasladadas a v1.1.2-revision.md.
