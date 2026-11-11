@@ -49,7 +49,6 @@ class CitasHTML(HTMLParser):
     """Separa el texto propio de las citas y los ejemplos de código HTML."""
 
     etiquetas = ('blockquote', 'pre', 'code')
-    etiqueta_html = re.compile(r'</?(?:' + '|'.join(etiquetas) + r')(?=[\s/>]|$)', re.I)
     inicio_bloque_html = re.compile(
         r' {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|'
         r'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|'
@@ -98,8 +97,6 @@ class CitasHTML(HTMLParser):
                                  or re.match(r' {0,3}(?:>|`{3,}|~{3,})', linea)):
             return linea
         protegida = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', lambda m: escape(m[0]), linea)
-        if not continuacion and not self.etiqueta_html.search(protegida):
-            return linea
         self.visible.clear()
         self.feed(protegida + '\n')
         visible = ''.join(self.visible).rstrip('\n')
@@ -107,6 +104,27 @@ class CitasHTML(HTMLParser):
 
 
 CERCO = r' {0,3}(`{3,}|~{3,})'
+
+
+def contenido_de_lista(linea, sangrias, literal):
+    """Separa los marcadores Markdown y la sangría de sus elementos anidados."""
+    contenido = linea.expandtabs(4)
+    if not contenido.strip():
+        return '', '', False
+    espacios = len(contenido) - len(contenido.lstrip(' '))
+    cambio = False
+    while sangrias and espacios < sangrias[-1]:
+        sangrias.pop()
+        cambio = True
+    inicio = sangrias[-1] if sangrias else 0
+    if literal and not cambio:
+        return contenido[inicio:], '', False
+    fin = inicio
+    while marca := re.match(r' {0,3}(?:[-+*]|\d{1,9}[.)]) (?: {0,3}(?=\S))?', contenido[fin:]):
+        fin += marca.end()
+        sangrias.append(fin)
+        cambio = True
+    return contenido[fin:], contenido[inicio:fin], cambio
 
 
 def cierra_cerco(linea, marca):
@@ -128,7 +146,14 @@ def lineas_del_informe(texto):
     abierto = ''
     parrafo_citado = False
     citas_html = CitasHTML()
-    for linea in contenido_del_informe(texto):
+    sangrias = []
+    for original in contenido_del_informe(texto):
+        literal = abierto or citas_html.abiertas or citas_html.rawdata
+        linea, marcador, cambio_lista = contenido_de_lista(original, sangrias, literal)
+        if cambio_lista:
+            citas_html = CitasHTML()
+            parrafo_citado = False
+            abierto = ''
         if not abierto:
             visible = citas_html.sin_citas(linea)
             if visible is None:
@@ -154,7 +179,7 @@ def lineas_del_informe(texto):
             continue
         else:
             parrafo_citado = False
-            yield None if linea.expandtabs(4).startswith('    ') else contenido.replace('**', '')
+            yield None if linea.startswith('    ') else (marcador + contenido).strip().replace('**', '')
             continue
         yield None
 
