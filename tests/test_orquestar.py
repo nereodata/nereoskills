@@ -2142,6 +2142,17 @@ class SubprocesoColgadoTests(unittest.TestCase):
         self.assertEqual(codigo, 124)
         self.assertTrue(metricas.get('timeout'))
 
+    def test_captura_lineas_crea_sesion_posix_propia(self):
+        """El camino por líneas aísla el grupo que puede terminar por timeout."""
+        proceso = MagicMock(returncode=0)
+        proceso.__enter__.return_value = proceso
+        proceso.stdout = []
+        with (patch.object(motor.os, 'name', 'posix'),
+              patch.object(motor.subprocess, 'Popen', return_value=proceso) as popen,
+              patch('builtins.print')):
+            motor.lanzar(['codex'], self.root, 'codex', timeout=None)
+        self.assertIs(popen.call_args.kwargs.get('start_new_session'), True)
+
     def test_timeout_explicito_desactivado_no_recupera_entorno(self):
         """None explícito desactiva; omitir el argumento conserva el entorno."""
         respuesta = (0, '{"status":"SUCCESS","response":"ok"}', '', False, False)
@@ -2262,7 +2273,7 @@ class SubprocesoColgadoTests(unittest.TestCase):
         script = 'import sys, time; sys.stdout.write("escribiendo informes...\\n"); sys.stdout.flush(); time.sleep(60)'
         cmd = [sys.executable, '-c', script, '--output-format', 'json']
         with patch('builtins.print'):
-            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=0.2, gracia_cierre=0.1)
+            codigo, m, salida = motor.lanzar(cmd, self.root, 'agy', timeout=2.0, gracia_cierre=0.1)
         self.assertEqual(codigo, 124)
         self.assertTrue(m.get('timeout'))
         self.assertTrue(m.get('error'))

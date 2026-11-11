@@ -92,3 +92,11 @@ Responder: /responder Q-ADV-0001 <respuesta>
 
 ## Intervención humana Q-ADV-0001
 Q-ADV-0001: Decisión humana de local:Iván Moreno: Continuar con las reservas de Hades ya configuradas, en su orden, usando el motor corregido de B-ADV-0040. Para las pruebas de la conmutación usar dobles locales. Sigue pendiente el dictamen real de review-test.
+
+### Reanudación Q-ADV-0001: review-test pendiente por impedimento técnico
+
+- Se conserva el delta de pruebas de RT-01/RT-02: sesión POSIX propia del camino por líneas y margen de arranque de 2 s en el proceso real. Producción sin modificar; H-01/H-03/H-04 pendientes de corrección después de review-test.
+- RED actual mediante `adevv orquestar --verificar "python -m unittest tests.test_orquestar.SubprocesoColgadoTests"`: 11 pruebas en 7,864 s, cuatro fallos de aserción esperados y un skip POSIX explícito. No es evidencia GREEN ni validación POSIX real.
+- Se invocó `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt` con ORQUESTAR_ID=B-ADV-0032, sin cambiar perfiles ni elegir reservas manualmente. El motor ejecutó codex/gpt-6.1-sol; su retorno 0 es operacional y no constituye aprobación.
+- Hades informó: «Revisión pendiente por impedimento técnico: tanto la ejecución local como el acceso alternativo a archivos fallaron con “registered Core launch requires an installed app”. No pude leer Hades, la skill, el delta ni el reporte previo, ni escribir el dictamen. No ejecuté pruebas ni modifiqué archivos. La evidencia RED aportada queda sin evaluación; no emito un veredicto sin revisar las pruebas».
+- Se conserva el informe anterior y la revisión pendiente. Paso terminado sin completar el bug ni cambiar su estado, sin preguntas nuevas. Al disponer de acceso técnico, retomar C1 con el dictamen real de Hades antes de corregir producción.
