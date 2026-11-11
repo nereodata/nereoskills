@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.1"
-status: completed
+status: planned
 created_at: 2026-11-09
 updated_at: 2026-11-10
 ---
@@ -61,3 +61,8 @@ updated_at: 2026-11-10
 - `especificador` conserva la tarea en `blocked` con `pendiente_de: especificador`, registra la evidencia y deja que el bucle ejecute `especificar`; `artemisa` la devuelve a `planned`; solo `humano` crea una pregunta persistente.
 - El detector de bloqueos conserva como salvaguarda el destino explícito presente en el contexto o salida del paso.
 - El selector del bucle reconoce también ramas `hotfix/v*`, de modo que el flujo automático funciona en `hotfix/v1.1.1`.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades RECHAZADO (docs/review/code_reviews/B-ADV-0033-code-review.md). H-01 ALTA para desarrollador/Artemisa: detectar_bloqueo recorta a 4000 caracteres antes de extraer destino y puede perder especificador, creando pregunta humana; extraer antes del recorte y definir precedencia. H-02 ALTA para desarrollador/Artemisa: destino_hallazgo no reconoce etiquetas Markdown resaltadas o entre backticks; soportarlas sin degradar a humano. Decisión: reanudar desarrollo, corregir ambos y ampliar únicamente HallazgosHadesRoutingTests con los casos indicados antes de reevaluar.
