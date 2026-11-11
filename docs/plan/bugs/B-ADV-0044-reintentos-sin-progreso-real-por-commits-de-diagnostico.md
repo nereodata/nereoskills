@@ -174,3 +174,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: C1 aprobada por Hades (9,50/10) sobre 51f8328d7e41b1b45975db7554557807dd3fe4af. N10 medio, resolver en C2: guardar el ejemplo HTML pre/code en el informe canónico y comprobar que el preflight mantiene pendiente el ID. Corregir D10 (procedencia de una aprobación escueta copiada tras añadir una nota posterior) y D11 (ejemplo HTML interpretado como dictamen propio), conservar el control de aprobación legítima de B y solicitar revisión D. Las cuatro pruebas focalizadas produjeron cinco fallos de aserción y el control positivo pasó.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades D rechazó el árbol cba87a86f9fd1ded147ddf0a341e648f521b9710 (7,67/10). D10 y N10 resueltos. Reanudar C2: D11, una apertura pre/code sangrada dentro de details expone el dictamen del ejemplo; D12, ocultar code en línea interrumpe una cita Markdown y expone su aprobación. Conservar el rechazo propio posterior y la reserva si falta dictamen. Reproducciones e impacto en proveedor e informe canónico en docs/review/code_reviews/B-ADV-0044-code-review.md. Las 170 pruebas del triaje pasaron en 211,847 s.

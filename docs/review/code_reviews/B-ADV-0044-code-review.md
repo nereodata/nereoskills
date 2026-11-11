@@ -1,67 +1,65 @@
 **Veredicto:** RECHAZADO
-Producto revisado: b107cb5fec8a7787e6607b604a60229695b3dd4c143643b16bdcd2ac20a4e662
-Rechazo reevaluado: 3d7c803e8403da1f8a6aab8cb34f87637706e9a0
+Producto revisado: e395e3b443c65679be4a54420402ff6a2e4fa08190b62d975a7cbab303927242
+Rechazo reevaluado: 63286be7fd1b3d0ca5e84c732b9e61ecd19649c2
 
-# B-ADV-0044 · Revisión de código de la fase D
+# B-ADV-0044 · Reevaluación D de código
 
-**Media 7,33/10.** D9 queda resuelto en sus tres consumidores. D10 permite cerrar un producto rechazado mediante una nota de archivo. D11 permite registrar como propio el veredicto de un ejemplo y omitir la reserva de Hades.
+**Media 7,67/10.** D10 y el control N10 quedan resueltos. D11 persiste en un ejemplo HTML con sangría. D12 es una regresión de esta ronda. En ambos casos, el lector atribuye a Hades una aprobación ajena, incluso cuando Hades emite después su propio rechazo.
 
-## Reevaluación de D9
+## Hallazgos anteriores y control de C1
 
-Al confirmar la copia literal del informe sin huella de A, `acreditacion_anterior` encuentra las palabras de la aprobación revocada incluso cuando el commit de la copia ya contiene B. La regresión pasó de tres aserciones fallidas en C1 a tres decisiones correctas sobre el producto revisado. El selector pide `revisar-tarea`, el preflight incluye el ID y `cierre_revisado` devuelve `False` tras el error de `bug-fix`.
+**D10 · 🔴 Crítico · Resuelto.** En `adevv/revisiones.py:254`, la comparación histórica sin huella usa el cuerpo guardado al emitirse el veredicto. Si se confirma una copia escueta de la aprobación de A sobre el B rechazado, añadir después una nota de archivo conserva el cuerpo vacío de aquella emisión. La evidencia verde cubre ambas etapas. El selector pide `revisar-tarea` para el ID, el preflight incluye el ID y `cierre_revisado` devuelve `False` tras el error de `bug-fix`. También pasa el control positivo histórico sin huella: si la primera emisión de B ya contenía su propia comprobación, el selector avanza a versión y el preflight queda vacío. **Asignación** `desarrollador` (Artemisa). **Destino** `resolver`, cumplido en C2.
 
-El control positivo también pasa. Tras la aprobación escueta de A y el rechazo de B, la primera emisión histórica de B contiene su propia comprobación. El selector avanza a `revisar-version` y el preflight devuelve `[]`. **D9 resuelto** por Artemisa en C2. H1–H7 y D1–D8 conservan su resolución en los recorridos acreditados, incluidos la restauración del cuerpo con cambios de marcado, la referencia al rechazo y la renovación de intentos por ID durante la espera.
+**D11 · 🟠 Alta · Persiste.** Para la apertura sin sangría de la reproducción original, la pila de `CitasHTML` excluye el texto de `<pre><code>`. El principal sin dictamen da paso a la reserva en la misma invocación. Si emite un rechazo después del cierre, se registra ese rechazo y termina la llamada al principal. Los dos casos tienen evidencia verde. Sin embargo, esta entrada también contiene una aprobación exclusivamente dentro de un ejemplo:
 
-## Hallazgos nuevos
-
-### D10 · 🔴 Crítico · Una nota posterior a la copia confirmada de una aprobación escueta permite cerrar B
-
-Secuencia con una ficha `completed` y el informe canónico del mismo ID. Los resultados de esta tabla se deducen de las ramas del código. La evidencia ejecutada de C1 cubre la copia con cuerpo y el control positivo descritos arriba.
-
-| Commit | Cambio en Git | Efecto en la revisión |
-|---|---|---|
-| A | Aprobar A con la única línea `**Veredicto:** APROBADO`, sin huella ni cuerpo. | La aprobación pertenece a A. |
-| R | Introducir un defecto en B y confirmar su rechazo. | B queda pendiente. |
-| C | Restaurar desde A únicamente el informe y confirmar la copia literal. | Ambos cuerpos están vacíos. El comparador reconoce la restauración y mantiene pendiente B. |
-| N | Añadir al informe de C la línea «Se archiva el expediente el 11 de noviembre» y confirmar solo ese archivo. | El selector avanza a `revisar-version`, el preflight queda vacío y `cierre_revisado` para `bug-fix` con base R devuelve `True`. El defecto de B sigue presente. |
-
-En `adevv/revisiones.py:249`, las palabras se extraen del texto actual de N. La emisión sigue siendo C porque N conserva el veredicto y carece de huella nueva. En la línea 252, la nota activa `not anteriores and bool(palabras)`. Al diferir los productos de A y C, se descarta la aprobación revocada. La validación final acepta la emisión de C sobre B. El historial permite distinguir ambos casos: en C quedó registrada la copia escueta y la explicación apareció un commit después. En el control positivo, la comprobación de B ya figuraba en la primera emisión.
-
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Mantener la procedencia de la copia durante las ediciones de seguimiento. En C y N los tres consumidores deben conservar B pendiente. Preservar el control positivo de una aprobación propia de B sin huella.
-
-### D11 · 🟠 Alta · Un ejemplo HTML de la respuesta técnica cuenta como dictamen de Hades
-
-Una respuesta normal del proveedor puede contener este texto literal:
-
-```text
-No pude leer el repositorio. El informe anterior contenía este ejemplo:
-
-<pre><code>
+```html
+<details>
+<summary>Salida anterior</summary>
+    <pre><code>
 Veredicto: APROBADO
-</code></pre>
-
-La revisión sigue pendiente.
+    </code></pre>
+</details>
 ```
 
-En `adevv/revisiones.py:106`, `lineas_del_informe` conserva la línea interior. El lector reconoce cercos Markdown, sangría y citas, pero las etiquetas `<pre><code>` no abren un bloque de ejemplo para ese lector. En la línea 140, `cabecera_informe` acepta la declaración interior. Con código de salida cero, `skills/orquestar/orquestar.py:2379` registra la aprobación en métricas y la llamada termina antes de probar la reserva autorizada. El mismo recorrido en un informe canónico puede tomar el ejemplo por su declaración formal. Este hallazgo se identifica por lectura del delta acumulado. Los controles anteriores de citas HTML ejercitan `blockquote`.
+En `adevv/revisiones.py:80`, los cuatro espacios de la apertura hacen que la línea salga antes de llegar a `HTMLParser`. El lector descarta esa línea por sangría y procesa la siguiente como texto propio. Reproduje en memoria que `declaracion` devuelve `APROBADO` tanto con ese fragmento aislado como al añadir un rechazo formal después de `</details>`. El árbol del rechazo anterior daba el mismo resultado. En `skills/orquestar/orquestar.py:2379`, esa aprobación con retorno cero se registra y evita la reserva. En disco, `motivo_informe` acepta el mismo texto como aprobación formal.
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Excluir del lector compartido las declaraciones encerradas en bloques de código HTML. La respuesta anterior debe dejar al principal sin dictamen y permitir la reserva. Un rechazo propio escrito después de cerrar el ejemplo debe seguir registrándose como rechazo del principal.
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Conservar los límites del ejemplo cuando sus etiquetas están sangradas dentro del bloque HTML. El fragmento aislado debe dejar al principal sin dictamen y el informe canónico pendiente. Un rechazo propio posterior debe prevalecer.
 
-## Alcance, evidencia y limitaciones
+**N10 · 🟡 Media · Resuelto.** El control asignado en C1 guarda el ejemplo original como único posible dictamen en el informe canónico de una ficha `completed`, lo confirma en Git y llama a `pendientes_cierre`. La prueba verde exige el ID y el motivo «sin veredicto formal». D11 conserva la variante con sangría como hallazgo de producto. **Asignación** `desarrollador` (Artemisa). **Destino** `resolver`, cumplido en C2.
 
-Revisé el delta de producción del ID desde `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` y el cambio de esta ronda respecto del árbol D anterior. Contrasté el cálculo de progreso con el triaje y el diseño, el presupuesto por paso e ID con las vías de cuota y recarga, la lectura del dictamen con la selección de reservas y la acreditación histórica con las tres decisiones de cierre. Los cambios intercalados de B-ADV-0045, B-ADV-0046 y B-ADV-0047 tienen revisión independiente. El delta del ID mantiene el stack Python/Git y las capas del plan de plataforma.
+## Hallazgo nuevo
 
-Antes de escribir el informe, los archivos rastreados coincidían con el árbol de evidencia `e40be2b764ee04736af04642d760d44a5c0b056d`. Comprobé su huella de producto y el último commit del informe canónico. C1 está aprobada con 9,75/10. Reutilicé el verde de los dos casos focalizados (4,095 s) y de las 166 pruebas del triaje (205,746 s). D10 y D11 son recorridos estáticos. La suite completa corresponde al bucle al cierre de versión.
+**D12 · 🟠 Alta · Una línea de código HTML en una cita Markdown expone la aprobación citada.** Esta cita contiene un único párrafo. La línea en blanco separa el rechazo propio:
 
-Ejecuté `adevv orquestar --calidad --base 4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` sin escritura. Devolvió 0 y comunicó la omisión de formato y lint por ausencia de herramientas reconocidas. La evidencia separada de Ruff cubre `E9,F63,F7,F82`. Pasaron los controles de espacios del WIP y de las rutas del ID desde la base. El primer intento del escaneo de secretos falló por las comillas de PowerShell y el comando corregido devolvió 0 sobre el mismo árbol. El proyecto carece de comprobador de tipos configurado y el ID conserva las dependencias.
+```markdown
+> El informe anterior de
+<code>bug-fix</code>
+Veredicto: APROBADO
+
+**Veredicto:** RECHAZADO
+```
+
+Comparé las dos versiones de `declaracion` en memoria con la misma entrada. La versión del rechazo anterior devuelve `RECHAZADO`. La actual devuelve `APROBADO`. Al retirar el rechazo propio, la anterior devuelve un veredicto vacío y la actual sigue devolviendo `APROBADO`.
+
+En `adevv/revisiones.py:89`, ocultar el contenido de `<code>` convierte la segunda línea en `None`. En la línea 118, ese valor desactiva `parrafo_citado` aunque el párrafo citado continúe en la línea siguiente. El primer veredicto que llega a `cabecera_informe` es el citado. El arnés puede registrar la aprobación, omitir la reserva o perder el rechazo propio. El informe canónico comparte el lector.
+
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Conservar la continuidad de la cita al ocultar un elemento de código en línea. Verificar con la entrada anterior que el principal registra su rechazo y que, cuando falta la declaración propia, queda disponible la reserva.
+
+## Alcance y análisis estático
+
+La comparación con Git confirmó que las rutas del árbol de trabajo coincidían con `cba87a86f9fd1ded147ddf0a341e648f521b9710` antes de escribir este informe. Comprobé la huella de producto y el commit del rechazo canónico. El delta de producción de esta ronda se concentra en `CitasHTML` y `acreditacion_anterior`. Revisé sus consumidores de selección, preflight, cierre tras error y registro del veredicto. H1–H7 y D1–D9 conservan su resolución previa. B-ADV-0045, B-ADV-0046 y B-ADV-0047 tienen revisión independiente.
+
+Reutilicé las cinco pruebas focalizadas verdes (7,369 s) y las 170 del triaje (211,847 s). Las reproducciones adicionales se ejecutaron sobre el lector en memoria. Los efectos en los consumidores para esas variantes se determinaron por lectura del código.
+
+Ejecuté `adevv orquestar --calidad --base 4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` sin escritura. Devolvió 0 y comunicó que omitía formato y lint por ausencia de herramientas reconocidas. Ruff selectivo (`E9,F63,F7,F82`) pasó por separado sobre el mismo árbol. Pasaron los dos controles de espacios y el escaneo corregido de secretos tras el fallo inicial de comillas. El proyecto carece de verificador de tipos configurado. El delta del ID conserva las dependencias.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Corrección | 5/10 | D9 pasa en los tres consumidores. D10 permite un cierre indebido y D11 omite una reserva autorizada. |
-| Seguridad | 9/10 | Las consultas Git usan argumentos separados y el escaneo de secretos del delta pasó. |
-| Conformidad | 6/10 | Se respetan el presupuesto por ID y la arquitectura. D10 incumple la barrera de cierre y D11 la exigencia de un dictamen propio. |
-| Calidad | 8/10 | Los consumidores comparten la decisión de vigencia. Esa decisión mezcla el cuerpo de la emisión con el de su edición posterior. |
-| Eficiencia | 8/10 | La revisión recorre el historial de la ruta canónica y consulta árboles Git para atribuir productos. |
-| Documentación | 8/10 | La guía explica el límite de reintentos y la persistencia. La garantía de conservar la acreditación ante notas falla en D10. |
+| Corrección | 6/10 | La acreditación histórica conserva la emisión de la copia. Dos entradas reproducibles convierten una aprobación ajena en propia. |
+| Seguridad | 9/10 | La ronda procesa texto local con la biblioteca estándar. El escaneo corregido de secretos pasó. |
+| Conformidad | 6/10 | Se respeta la arquitectura Python/Git. D11 y D12 incumplen la exigencia de un dictamen propio para dar por atendida la revisión. |
+| Calidad | 8/10 | Los consumidores comparten el lector. Un mismo valor representa contenido oculto y provoca el fin del párrafo citado. |
+| Eficiencia | 9/10 | La pila sigue las etiquetas en una pasada. Conservar el cuerpo de la emisión aprovecha el recorrido Git existente. |
+| Documentación | 8/10 | La guía describe la vigencia de la aprobación y el uso de reservas. La garantía del dictamen propio queda pendiente en D11 y D12. |

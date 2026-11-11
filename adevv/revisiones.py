@@ -46,39 +46,42 @@ def huella_producto(root, arbol, carpetas, mandato_temporal=None):
 
 
 class CitasHTML(HTMLParser):
-    """Sigue las citas HTML entre líneas, incluidos sus atributos multilínea."""
+    """Separa el texto propio de las citas y los ejemplos de código HTML."""
+
+    etiquetas = ('blockquote', 'pre', 'code')
+    apertura = re.compile(r'<(?:' + '|'.join(etiquetas) + r')(?=[\s/>]|$)', re.I)
 
     def __init__(self):
         super().__init__()
-        self.profundidad = 0
+        self.abiertas = []
         self.visible = []
 
     def handle_starttag(self, tag, attrs):
-        if tag == 'blockquote':
-            if not self.profundidad:
+        if tag in self.etiquetas:
+            if not self.abiertas:
                 self.visible.append(' ')
-            self.profundidad += 1
-        elif not self.profundidad:
+            self.abiertas.append(tag)
+        elif not self.abiertas:
             self.visible.append(self.get_starttag_text())
 
     def handle_endtag(self, tag):
-        if tag == 'blockquote' and self.profundidad:
-            self.profundidad -= 1
-        elif not self.profundidad:
+        if self.abiertas and tag == self.abiertas[-1]:
+            self.abiertas.pop()
+        elif not self.abiertas:
             self.visible.append(f'</{tag}>')
 
     def handle_data(self, data):
-        if not self.profundidad:
+        if not self.abiertas:
             self.visible.append(data)
 
     def sin_citas(self, linea):
         """Retiene el texto propio a ambos lados de una cita, incluso entre líneas."""
-        continuacion = self.profundidad or self.rawdata
-        if not continuacion and ('<blockquote' not in linea.lower() or linea.startswith(('    ', '\t'))
+        continuacion = self.abiertas or self.rawdata
+        if not continuacion and ('<' not in linea or linea.startswith(('    ', '\t'))
                                  or re.match(r' {0,3}(?:>|`{3,}|~{3,})', linea)):
             return linea
         protegida = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', lambda m: escape(m[0]), linea)
-        if not continuacion and not re.search(r'<blockquote(?=[\s/>]|$)', protegida, re.I):
+        if not continuacion and not self.apertura.search(protegida):
             return linea
         self.visible.clear()
         self.feed(protegida + '\n')
@@ -225,12 +228,14 @@ def acreditacion_anterior(root, ruta, historial, texto, carpetas):
     """Atribuye cada edición al producto y la referencia de su emisión original."""
     buscado = cabecera_informe(texto)[0]
     previo = emision = huella = referencia = ultimo_rechazo = None
+    informe_emitido = ''
     aprobaciones = []
     revocadas = 0
     for commit, informe in chain(informes_confirmados(root, ruta, historial), [(None, texto)]):
         veredicto, declarada, reevaluado = cabecera_informe(informe)
         if veredicto != previo or (declarada is not None and declarada != huella):
             emision, huella, referencia = commit, declarada, reevaluado
+            informe_emitido = informe
         elif reevaluado:
             referencia = reevaluado
         previo = veredicto
@@ -246,7 +251,7 @@ def acreditacion_anterior(root, ruta, historial, texto, carpetas):
     producto_actual = huella
     if producto_actual is None and emision:
         producto_actual = huella_producto(root, emision, carpetas)
-    palabras = palabras_informe(texto)
+    palabras = palabras_informe(informe_emitido if huella is None else texto)
     for origen, declarada, historico in aprobaciones[:revocadas]:
         anteriores = palabras_informe(historico)
         comparar_productos = huella is not None or (not anteriores and bool(palabras))

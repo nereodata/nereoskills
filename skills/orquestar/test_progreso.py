@@ -751,6 +751,13 @@ class ProgresoTests(unittest.TestCase):
         self.comprobar_reserva_tras_cita('<pre><code>\nVeredicto: APROBADO\n</code></pre>')
         self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
 
+    def test_preflight_exige_dictamen_fuera_del_ejemplo_html(self):
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, '<pre><code>\nVeredicto: APROBADO\n</code></pre>')
+        self.commit('archivar un ejemplo sin dictamen propio')
+        pendientes = pendientes_cierre(self.root, 'v1.1.3')
+        self.assertTrue(any(self.iid in p and 'sin veredicto formal' in p for p in pendientes), pendientes)
+
     def test_rechazo_propio_despues_de_ejemplo_de_codigo_html(self):
         self.comprobar_rechazo_del_principal('<pre><code>\nVeredicto: APROBADO\n</code></pre>\n'
                                              '**Veredicto:** RECHAZADO')
