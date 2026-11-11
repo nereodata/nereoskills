@@ -41,7 +41,7 @@ Cada modelo único `harness/model` incluye `X.X% consumido`. Un agotamiento vige
 
 **Métricas.** Registro común en `orquestar_metricas.jsonl`, con `tipo`: `paso` (cada ejecución del bucle), `agente` (cada rol lanzado con `--agente`, ligado al paso y al ID en curso), `espera` (esperas de cuota) y `verificacion` (ejecutada o reutilizada). Incluye duración y, con `claude` y `codex`, turnos y tokens por modelo (`claude` informa además el coste a precio de lista). `--estado` lo resume y muestra las tareas que más consumen. Los ficheros del bucle (`orquestar.log`, `.pid`, `.parar`, `.espera`, las métricas y las evidencias) quedan excluidos de git.
 
-Los intentos de un rol comparten `invocacion` por llamada. Una cuota recuperada mediante reserva conserva su historial sin bloquear el paso terminado en disco. Las revisiones independientes pendientes mantienen su espera; la fila del paso referencia `bloqueo_agente` con el proveedor y modelo reales, sin atribuirle al perfil principal su agotamiento.
+Los intentos de un rol comparten `invocacion` por llamada y cada intento conserva su consumo. Cuando se agotan las reservas, el resumen conserva la fecha y la duración del intento que recupera cuota primero. Su campo `espera_s` descuenta el tiempo transcurrido. Si otra reserva termina la revisión, el bucle continúa. Una revisión independiente pendiente figura en `bloqueo_agente` con su proveedor y modelo. Para dar por cerrada la tarea o el bug pese a esa señal, el bucle exige un commit nuevo, árbol limpio, estado `completed` e informe canónico aprobado o N/A justificado.
 
 ### Consulta y exportación de métricas
 

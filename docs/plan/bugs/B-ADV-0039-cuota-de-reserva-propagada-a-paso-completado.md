@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: dificil
 version: "v1.1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-11
 updated_at: 2026-11-11
@@ -57,7 +57,7 @@ En `skills/orquestar/orquestar.py`, revisar cómo el bucle delimita las filas nu
 - C2 (media, desarrollador, resolver): conservar vencimiento original al resumir cuotas; nuevo reloj simulado avanza 4000 segundos entre reservas y exige esperar cero por la primera recuperación ya vencida.
 - La verificación dirigida de fallos_arnes pasa a 20 pruebas. La compilación de los tres archivos Python del delta se acredita mediante --verificar. Sin cambios de requisitos, arquitectura, dependencias ni perfiles.
 
-## Estado al terminar este intento
+## Historial del intento interrumpido
 
 El motor ordenó detener las correcciones tras dos rechazos seguidos de Hades y commitear el trabajo sin completar el bug. Se conserva `status: in_progress` y la base de calidad original.
 
@@ -77,3 +77,9 @@ El motor ordenó detener las correcciones tras dos rechazos seguidos de Hades y 
 - Evidencia: Hades rechaza review-test (8/10): falta verificar que el paso principal registra solo sus 11 tokens y no duplica el consumo de Opus, Gemini ni GPT. Artemisa reanuda la corrección de las aserciones.
 
 Al reanudar, comparar también los vencimientos del contraste temporal con la fecha y la duración registradas en cada intento original. Las duraciones incluyen el margen de 120 segundos del analizador. Las aserciones posteriores al primer fallo aún no llegaron a ejecutarse. C1 y C2 siguen pendientes en producción.
+
+## Resolución verificada
+
+El paso principal conserva sus 11 tokens en la regresión de consumo. Las tres filas del revisor conservan respectivamente 2, 3 y 5 tokens. El resumen de cuota elige el vencimiento absoluto más próximo y descuenta el tiempo empleado en las reservas. Si aún falta una revisión, un commit parcial deja el bug pendiente y el aviso identifica el proveedor y modelo afectados.
+
+Las dos regresiones fallaron antes de la corrección y pasaron después. Las cuatro verificaciones del triaje suman 48 pruebas verdes (20 + 14 + 5 + 9). Hades aprobó [las pruebas](../../review/test_reviews/B-ADV-0039-test-review.md) con 9/10 y [el código](../../review/code_reviews/B-ADV-0039-code-review.md) con 9,17/10. C1, C2 y el hallazgo de consumo quedaron resueltos.

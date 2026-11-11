@@ -1262,6 +1262,7 @@ class ReservaCuotaTests(unittest.TestCase):
         self.assertEqual(metricas[1]['veredicto'], 'APROBADO')
 
     def test_agente_exhausts_all_reservas_records_min_quota_and_fails(self):
+        self.enterContext(patch.object(motor, 'ahora', return_value='2026-11-11T12:00:00+00:00'))
         cfg = {
             'hades': {
                 'harness': 'claude',

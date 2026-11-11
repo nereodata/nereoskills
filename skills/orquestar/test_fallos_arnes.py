@@ -297,8 +297,10 @@ class FallosArnesTests(unittest.TestCase):
         self.assertEqual(agentes[1]['modelo_cuota'], 'gemini')
         self.assertGreaterEqual(agentes[1]['cuota_espera_s'], 3600)
         self.assertEqual(agentes[-1]['veredicto'], 'APROBADO')
-        self.assertEqual([f['modelos'][m]['entrada'] for f, m in zip(agentes, ['opus', 'gemini', 'gpt'])], [2, 3, 5])
+        self.assertEqual([f['modelos'] for f in agentes], [
+            {'opus': {'entrada': 2}}, {'gemini': {'entrada': 3}}, {'gpt': {'entrada': 5}}])
         pasos = [f for f in filas if f.get('tipo') == 'paso']
+        self.assertEqual([f['modelos'] for f in pasos], [{'principal': {'entrada': 11}}])
         self.assertFalse(any(f.get('sin_cuota') or f.get('espera_s') for f in pasos))
         marcas = motor.marcas_cuota(self.root, motor.fecha_estado(motor.ahora()))
         self.assertIn(('agy', 'gemini'), marcas)
@@ -392,9 +394,11 @@ class FallosArnesTests(unittest.TestCase):
         self.assertEqual(resumen['fecha'], filas[0]['fecha'])
         instante = motor.fecha_estado(motor.ahora())
         marcas = motor.marcas_cuota(self.root, instante)
-        vencimiento = self.instante + timedelta(hours=1)
+        primero, segundo = filas[:2]
+        vencimiento = motor.fecha_estado(primero['fecha']) + timedelta(seconds=primero['cuota_espera_s'])
         self.assertEqual(marcas[('agy', 'primero')]['hasta'], vencimiento)
         self.assertLessEqual(vencimiento, instante)
         _, vigentes = motor.consumo_cuotas(self.root, instante)
         self.assertNotIn(('agy', 'primero'), vigentes)
-        self.assertEqual(vigentes[('codex', 'segundo')], instante + timedelta(minutes=10))
+        self.assertEqual(vigentes[('codex', 'segundo')],
+                         motor.fecha_estado(segundo['fecha']) + timedelta(seconds=segundo['cuota_espera_s']))

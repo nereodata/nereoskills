@@ -2241,7 +2241,6 @@ def agente(root, rol, prompt):
     configs_originales = [cfg] + reservas
     configs_a_probar = configuraciones_con_cuota(root, configs_originales)
     intentos_cuota = []
-    ultima_cuota = None
     acceso_denegado = False
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
     cede = 'sin cuota' if cfg.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg else ''
@@ -2296,32 +2295,18 @@ def agente(root, rol, prompt):
         if cuota is not None:
             datos = fallo_cuota(root, harness, cfg_actual.get('model') or 'predeterminado', salida)
             m.update(datos)
-            cuota = datos['cuota_espera_s']
-            intentos_cuota.append({'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
-                                   'paso': paso, 'id': iid, 'arnes': harness, 'codigo': codigo,
-                                   **datos, **marca_fijado(cfg_actual)})
+            intento = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
+                       'arnes': harness, 'codigo': codigo, **datos, **marca_fijado(cfg_actual),
+                       **({'escalado': True} if escalado else {})}
+            intentos_cuota.append(intento)
+            registrar_intento({**intento, **m})
             if hay_mas_reservas:
-                ultima_cuota = {'tipo': 'agente', 'fecha': ahora(), 'rol': rol,
-                                'paso': paso, 'id': iid, 'arnes': harness, 'codigo': codigo}
-                registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                 'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
-                                 **({'escalado': True} if escalado else {}), **m})
                 print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
                       f'conmutando a reserva...', flush=True)
                 if cfg_actual is cfg and cfg.get('fijado'):
                     cede = 'sin cuota'
                 continue
-            else:
-                registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
-                                   'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
-                                   **({'escalado': True} if escalado else {}), **m})
-                menor = min(intentos_cuota, key=lambda f: f['cuota_espera_s'])
-                registrar_intento({**menor, 'fecha': ahora(), 'modelos': {}, 'sin_cuota': True,
-                                   'espera_s': menor['cuota_espera_s'],
-                                   **({'escalado': True} if escalado else {})})
-                print(f'[orquestar] {rol} sin cuota: termina el paso ahora mismo sin tocar estados; '
-                      'el bucle esperará la cuota y reintentará.', flush=True)
-                return codigo
+            break
 
         if not codigo:
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
@@ -2335,13 +2320,11 @@ def agente(root, rol, prompt):
             print(tope_de_rechazos(root, iid), flush=True)
         return codigo
 
-    if ultima_cuota is not None:
-        menor = min(intentos_cuota, key=lambda f: f['cuota_espera_s'])
-        registrar_intento({**menor, 'fecha': ahora(), 'modelos': {}, 'sin_cuota': True,
-                           **({'escalado': True} if escalado else {}),
-                           'espera_s': menor['cuota_espera_s']})
-        print(f'[orquestar] {rol} sin cuota; se conserva la espera del arnés disponible.', flush=True)
-        return ultima_cuota['codigo']
+    if intentos_cuota:
+        registrar_intento({**menor_espera_agente(intentos_cuota), 'modelos': {}, 'sin_cuota': True})
+        print(f'[orquestar] {rol} sin cuota: termina el paso sin tocar estados; '
+              'el bucle esperará la cuota y reintentará.', flush=True)
+        return intentos_cuota[-1]['codigo']
     espera, cfg_omitida = cuota_descartada(root, [cfg] + reservas, configs_a_probar)
     if espera is not None:
         registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
@@ -2363,6 +2346,21 @@ def agente(root, rol, prompt):
     return 1
 
 
+def menor_espera_agente(filas):
+    """Selecciona el primer vencimiento y descuenta el tiempo transcurrido desde su intento."""
+    instante = fecha_estado(ahora())
+
+    def vencimiento(fila):
+        """Los resúmenes modernos conservan la fecha y duración originales del intento."""
+        duracion = (fila['espera_s'] if 'espera_s' in fila and not fila.get('invocacion')
+                    else fila.get('cuota_espera_s', fila.get('espera_s', 1800)))
+        return (fecha_estado(fila.get('fecha')) or instante) + timedelta(seconds=duracion)
+
+    menor = min(filas, key=vencimiento)
+    restante = max(0, math.ceil((vencimiento(menor) - instante).total_seconds()))
+    return {**menor, 'espera_s': restante}
+
+
 def cuota_agente_pendiente(filas):
     """Devuelve una espera no resuelta; conserva registros antiguos sin correlación."""
     ultimas = {}
@@ -2375,7 +2373,15 @@ def cuota_agente_pendiente(filas):
         else:
             historicas.append(fila)
     pendientes = [f for f in [*historicas, *ultimas.values()] if f.get('sin_cuota')]
-    return min(pendientes, key=lambda f: f.get('espera_s', 1800), default=None)
+    return menor_espera_agente(pendientes) if pendientes else None
+
+
+def cierre_revisado(root, paso, iid, base):
+    """Acredita que el trabajo revisado quedó completo y confirmado durante el paso."""
+    if paso not in DESARROLLO or git('rev-parse', 'HEAD') == base or git('status', '--porcelain'):
+        return False
+    fichero = fichero_de(root, iid)
+    return bool(fichero and frontmatter(fichero).get('status') == 'completed' and revisada(root, iid))
 
 
 def tope_de_rechazos(root, iid):
@@ -3719,7 +3725,7 @@ def bucle(a, root):
                     nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
                     cuota_agente = cuota_agente_pendiente(nuevas)
                     if cuota_agente is not None:
-                        if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                        if cierre_revisado(root, paso, arg, env['ORQUESTAR_BASE']):
                             paso_completado = True
                             cuota_agente = None
                         else:
@@ -3814,7 +3820,7 @@ def bucle(a, root):
         if pendiente_cuota:
             cuota = min(cuotas_paso)
             m = {}
-        if codigo and not paso_completado and (cuota is None or cuotas_paso):
+        if codigo and cuota_agente is None and not paso_completado and (cuota is None or cuotas_paso):
             cuota_omitida, cfg_omitida = cuota_descartada(root, configs_originales, configs_a_probar)
             pendientes = [(max(hasta - time.monotonic(), 0), cfg) for hasta, cfg in recuperaciones_paso]
             if cuota_omitida is not None:
@@ -3846,7 +3852,7 @@ def bucle(a, root):
                              **({'escalado': True} if escalado else {}),
                              **({'sin_cuota': True, 'espera_s': cuota} if cuota and cuota_agente is None else {}),
                              **({'bloqueo_agente': {k: cuota_agente.get(k) for k in
-                                 ('rol', 'arnes', 'modelo_cuota', 'espera_s', 'invocacion')}}
+                                 ('rol', 'arnes', 'modelo_cuota', 'cuota_origen', 'espera_s', 'invocacion')}}
                                 if cuota_agente is not None else {})})
         if paso_completado:
             print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
@@ -3858,17 +3864,11 @@ def bucle(a, root):
             esperado += cuota
             marcas = marcas_cuota(root, fecha_estado(ahora()))
             clave = (arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
-            causas = [marcas[clave]] if clave in marcas else []
-            nuevas = leer_metricas(root)[contexto_cuota['desde']:]
-            for fila in nuevas:
-                if (fila.get('tipo') == 'agente' and fila.get('cuota_espera_s') is not None
-                        and fila.get('cuota_espera_s') == cuota):
-                    marca = marcas.get((fila.get('arnes'), fila.get('modelo_cuota')))
-                    if marca:
-                        causas.append(marca)
-            if not any(marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())
-                       for marca in causas):
-                avisar(root, 'cuota', f'⏳ Sin cuota en "{paso}" {arg or ""}: espero hasta las '
+            if cuota_agente is not None:
+                clave = (cuota_agente.get('arnes'), cuota_agente.get('modelo_cuota'))
+            marca = marcas.get(clave)
+            if not (marca and marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())):
+                avisar(root, 'cuota', f'⏳ Sin cuota en {clave[0]}/{clave[1]} para "{paso}" {arg or ""}: espero hasta las '
                                       f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
             inicio = time.monotonic()
             seguir = esperar(root, cuota, cuotas_esperadas=contexto_cuota)
@@ -3879,7 +3879,7 @@ def bucle(a, root):
                 return 2
             continue
         if codigo or cuota is not None:
-            if despues != antes and not git('status', '--porcelain'):
+            if cuota_agente is None and despues != antes and not git('status', '--porcelain'):
                 print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
                 sin_progreso = 0
                 recuperaciones_analisis.pop(clave_analisis, None)
@@ -3888,7 +3888,8 @@ def bucle(a, root):
                       else '¿autenticación, red?')
             if cuota_agente is not None:
                 motivo += (f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
-                           f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}")
+                           f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"
+                           f" ({cuota_agente.get('cuota_origen') or 'cuota agotada'})")
             return parar(root, 'cuota' if cuota is not None else 'error',
                          f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.'
                          + (f'\nÚltima salida del arnés:\n{salida[-2000:]}' if cuota is None else ''))
