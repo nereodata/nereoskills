@@ -5,11 +5,10 @@ type: bug
 weight: 20
 dificultad: dificil
 version: "v1.1.2"
-status: blocked
+status: planned
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Caso observado en Afinn release/v0.7, B-AFN-0185, con Adevv 1.1.1"
-pendiente_de: especificador
 ---
 
 # B-ADV-0036: El agotamiento de reintentos de la suite de cierre bloquea al humano sin diagnóstico de Hades
@@ -78,6 +77,13 @@ concreta requerida. No se reinicia el ciclo de forma ilimitada.
 8. Existen regresiones deterministas que cubren los destinos `desarrollador`,
    `especificador` y `humano`, y demuestran que llegar al contador no basta
    para bloquear al humano.
+
+## Decisiones de especificación · F-01 y F-02
+
+- **DEC-36-1 (F-01).** Se sustituye expresamente la regla de B-ADV-0006 que convertía la tercera recaída en `dificil` en un bloqueo humano automático. A partir de v1.1.2 esa transición solicita el diagnóstico. El bloqueo y su aviso siguen siendo el resultado correcto cuando Hades identifica una intervención humana concreta y justificada. El esquema histórico conserva sus seis ejemplos bajo esa precondición. Siguen vigentes el ID por versión y comando, la promoción tras tres recaídas en `media`, la conservación de los bugs ya bloqueados o cancelados y la exigencia de suite verde para cerrar.
+- **DEC-36-2 (F-02).** Dentro del mismo cierre, una recaída es la primera verificación roja tras un arreglo dado por terminado que vuelve a mostrar el impedimento que se intentó corregir. La comprobación afectada y la causa que acredita la evidencia permiten reconocer el grupo aunque cambien fechas, rutas temporales o fallos en cascada. Consultar la misma evidencia dos veces cuenta una sola vez. Un fallo independiente que aparece después de resolver el anterior empieza en cero en la dificultad vigente, en el mismo bug. El historial por grupo se conserva: si reaparece una causa conocida, recupera su presupuesto y dictamen previos. Se descarta identificar la causa solo por el texto de salida o solo por el ID del cierre, porque ambos pueden agrupar mal las recaídas.
+- **DEC-36-3 (F-02).** Hay un único dictamen válido por grupo que agota sus tres recaídas en `dificil`. Identifica los fallos, la causa, los arreglos y sus evidencias. Si cabe una corrección técnica o contractual, Hades indica el destino, una estrategia revisada y qué intervención concreta será necesaria si la verificación vuelve a acreditar la misma causa. Se concede una aplicación de esa estrategia, incluido el arreglo derivado de una aclaración del especificador. El verde permite continuar el cierre. Si persiste el grupo, se añade la última evidencia y se aplica la conclusión terminal del dictamen: cesan los arreglos y diagnósticos automáticos de ese grupo. También puede dictaminarse imposibilidad de entrada. La conclusión identifica la intervención y quién puede realizarla; solo un destino humano explícito con pregunta y motivo abre el bloqueo humano. Se descarta reiniciar el contador tras el dictamen porque permitiría repetir indefinidamente la misma estrategia.
+- **Cobertura de CA 8.** Los ejemplos de los tres destinos fijan entradas y respuestas reproducibles para que Artemisa los convierta en regresiones con Hades simulado. La verificación del triaje sigue siendo `SuiteRecoveryTests`.
 
 ## 📋 Evidencias
 
@@ -217,3 +223,12 @@ El mandato de Hades incluyó el contrato de B-ADV-0006, los ocho criterios de B-
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Dictamen consolidado RECHAZADO en docs/review/spec_reviews/B-ADV-0036-spec-review.md. F-01: reconciliar el bloqueo automático de B-ADV-0006 en dificil/2 con el diagnóstico previo y los tres destinos; preservar bloqueos, cancelaciones y la independencia por versión y comando. F-02: definir con ejemplos la identidad causal, el presupuesto por grupo y la condición terminal tras una estrategia revisada. CA8 completo; el delta BDD espera estas decisiones. Ejecutar especificar. Evidencia de la base: 16 SuiteRecoveryTests en verde.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: F-04 de /review-spec, APROBADO 9/10. Añadir un ejemplo de imposibilidad técnica acreditada desde el primer dictamen, con intervención concreta y sin otro arreglo ni diagnóstico al retomar. Atenea lo resuelve en especificar.
+
+## Salida de especificar
+
+Hades aprobó las decisiones y los escenarios de `tests/features/uso_sin_rutas.feature`. La reevaluación del caso de revocación irreversible cerró F-04. El informe está en `docs/review/spec_reviews/B-ADV-0036-spec-review.md`. Artemisa puede retomar `bug-fix` desde este contrato con la base de calidad y el triaje registrados.

@@ -113,6 +113,8 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
   @B-ADV-0006
   Esquema del escenario: Recaídas del mismo cierre reutilizan el bug y suben la dificultad
     Dado un bug de cierre de dificultad <nivel> con <previas> recaídas desde su última promoción
+    Y las recaídas corresponden a la misma causa que el arreglo intenta corregir
+    Y Hades, si se le solicita diagnóstico, asignará al humano la renovación de un certificado que solo su titular puede renovar
     Y bug-fix acaba de marcarlo completed
     Cuando la suite de la misma versión y comando falla con una salida distinta a la anterior
     Entonces se conserva el ID y se actualiza la salida del bug
@@ -149,6 +151,53 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
       | version | comando |
       | v0.1    | suite-b |
       | v0.2    | suite-a |
+
+  @B-ADV-0036 @CA-1 @CA-2 @CA-6
+  Escenario: La tercera recaída del grupo abre un único diagnóstico con el historial
+    Dado que dos arreglos en dificil dejaron roja la comprobación de pedidos porque falta la columna «moneda»
+    Cuando tras el tercer arreglo vuelve a faltar «moneda» aunque cambia la ruta temporal del informe
+    Entonces Hades recibe una solicitud con el ID del bug, el fallo vigente y los tres arreglos con sus evidencias
+    Y mientras falta el dictamen no se pide intervención humana ni se emite el aviso de bloqueo humano
+    Y al retomar el cierre con la misma evidencia se conserva una única solicitud para ese grupo
+
+  @B-ADV-0036 @CA-3 @CA-4 @CA-5 @CA-8
+  Esquema del escenario: El dictamen determina el siguiente paso del bug de cierre
+    Dado que un grupo agotó tres recaídas en dificil y el diagnóstico incluye los intentos y sus evidencias
+    Cuando Hades asigna el destino <destino> con la decisión «<decision>»
+    Entonces el bug conserva su ID, el destino y la decisión
+    Y el siguiente paso es <paso>
+    Y respecto a la persona se observa <intervencion>
+
+    Ejemplos:
+      | destino        | decision                                                                               | paso                                           | intervencion                                         |
+      | desarrollador  | Aplicar la migración antes de cargar los pedidos de prueba                             | bug-fix con esa estrategia y el bug planned    | ninguna pregunta ni aviso de bloqueo humano          |
+      | especificador  | Aclarar si la moneda se hereda del pedido o del cliente                                | especificar con esa contradicción documentada  | ninguna pregunta ni aviso de bloqueo humano          |
+      | humano         | ¿Puedes renovar el certificado de pruebas? Solo su titular puede emitir el reemplazo.  | blocked con pendiente_de humano                | una pregunta persistida con ese texto y su motivo    |
+
+  @B-ADV-0036 @CA-2 @CA-6
+  Escenario: Una causa independiente que aparece tras el arreglo dispone de su propio presupuesto
+    Dado un bug en dificil con dos recaídas por falta de «moneda» en la consulta de pedidos
+    Cuando el siguiente cierre confirma que la consulta pasa y falla por primera vez la firma de facturas por certificado caducado
+    Entonces el mismo ID conserva las dos recaídas de pedidos y registra cero recaídas de firma
+    Y al volver a fallar solo la firma después de su primer arreglo registra una recaída de firma sin solicitar diagnóstico
+    Y si después reaparece la columna ausente tras otro arreglo de pedidos, pedidos alcanza tres y se solicita su único diagnóstico
+
+  @B-ADV-0036 @CA-2 @CA-5 @CA-7
+  Escenario: La estrategia revisada se agota y se aplica la conclusión de Hades
+    Dado que Hades autorizó un intento de corregir la cadena de confianza con el certificado disponible
+    Y dispuso que, si seguía caducado, solo su titular podría renovar el certificado y dejó la pregunta «¿Puedes renovarlo?»
+    Cuando la verificación del arreglo confirma la misma caducidad
+    Entonces el diagnóstico terminal del grupo enumera los arreglos, sus evidencias y el resultado del último intento
+    Y el bug queda blocked para el humano con la pregunta y el motivo que indicó Hades
+    Y al retomar ese cierre no se repite el diagnóstico, el arreglo ni la pregunta
+
+  @B-ADV-0036 @CA-2 @CA-5 @CA-7
+  Escenario: El primer dictamen acredita que hace falta intervenir antes de otro arreglo
+    Dado que tres arreglos en dificil conservaron sus evidencias de rechazo de firma por certificado revocado
+    Y la autoridad emisora confirma la revocación irreversible y que solo el titular puede emitir el reemplazo
+    Cuando el primer dictamen de Hades cita esas evidencias y pide al humano «¿Puedes emitir un certificado de pruebas nuevo?»
+    Entonces el bug queda blocked para el humano con esa pregunta, el motivo, los tres intentos y sus evidencias
+    Y al retomar el cierre sin el certificado nuevo hay una sola pregunta, un solo diagnóstico y ningún cuarto arreglo
 
   @B-ADV-0012
   Esquema del escenario: Una tarea atascada queda aislada y permite avanzar a otra independiente
