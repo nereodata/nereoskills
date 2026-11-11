@@ -239,3 +239,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades rechazó la reevaluación D (7,50/10) del árbol cdcee1cb4fbd493365a05c9bd46aa630ffb27472. D21, D22 y D23 resueltos. Reanudar C2 por D24 y D25: una línea que empieza por 2. o una continuación sin sangría dentro de una viñeta exponen una aprobación de ejemplo y permiten cerrar pese al rechazo propio. D26: marcar un nombre de archivo como código antes del ejemplo pre oculta su cierre efectivo y el rechazo posterior, e invoca la reserva. Los tres son altos, para Artemisa, destino resolver. Reproducciones y controles en docs/review/code_reviews/B-ADV-0044-code-review.md. Pasaron las 210 pruebas del triaje en 233,099 s. La salida y el informe literal de Hades dicen RECHAZADO; el motor instalado 1.1.2 registró APROBADO en la métrica de esa invocación. Prevalece el informe canónico.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 aprobada por Hades (9,75/10). D24, D25 y D26 reproducidos en proveedor y preflight, con tres controles verdes. Artemisa reanuda C2 para corregir la delimitación del párrafo y el tratamiento de pre antes de reevaluar el código.

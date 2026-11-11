@@ -924,6 +924,35 @@ class ProgresoTests(unittest.TestCase):
     def test_preflight_tras_encabezado_y_linea_vacia(self):
         self.comprobar_informe_pendiente(self.informe_con_encabezado('\n\n'), 'informe rechazado')
 
+    def comprobar_rechazo_y_preflight(self, informe):
+        """Exige el rechazo del principal y el motivo de cierre pendiente para el mismo texto."""
+        with self.subTest(consumidor='proveedor'):
+            self.comprobar_rechazo_del_principal(informe)
+        with self.subTest(consumidor='preflight'):
+            self.comprobar_informe_pendiente(informe, 'informe rechazado')
+
+    def test_numero_en_fragmento_multilinea(self):
+        self.comprobar_rechazo_y_preflight('La salida fue `\n2. ejemplo\nVeredicto: APROBADO\nfin`.'
+                                         + self.rechazo_exterior)
+
+    def test_numero_en_prosa_del_fragmento(self):
+        self.comprobar_rechazo_y_preflight('La salida fue `\npaso 2. ejemplo\nVeredicto: APROBADO\nfin`.'
+                                         + self.rechazo_exterior)
+
+    def test_fragmento_en_continuacion_de_vineta(self):
+        self.comprobar_rechazo_y_preflight('- Se recibio `\nVeredicto: APROBADO\nfin`.' + self.rechazo_exterior)
+
+    def test_fragmento_en_continuacion_sangrada_de_vineta(self):
+        self.comprobar_rechazo_y_preflight('- Se recibio `\n  Veredicto: APROBADO\n  fin`.' + self.rechazo_exterior)
+
+    def test_pre_tras_nombre_de_archivo_en_codigo(self):
+        self.comprobar_rechazo_y_preflight('Se inspecciono `archivo.py`. Salida: <pre>\nMarca literal: `\n'
+                                          '</pre>\n**Veredicto:** RECHAZADO\nAfecta a `lector`.')
+
+    def test_pre_tras_nombre_de_archivo_en_prosa(self):
+        self.comprobar_rechazo_y_preflight('Se inspecciono archivo.py. Salida: <pre>\nMarca literal: `\n'
+                                          '</pre>\n**Veredicto:** RECHAZADO\nAfecta a `lector`.')
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',

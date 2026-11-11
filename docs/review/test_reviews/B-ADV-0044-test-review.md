@@ -1,39 +1,32 @@
-**Veredicto:** APROBADO · **9,75/10**
+**Veredicto:** APROBADO
 
-# B-ADV-0044 · Reevaluación C1 de D21, D22 y D23
+# B-ADV-0044 · Reevaluación C1 de las pruebas de D24–D26
 
-Las ocho pruebas nuevas distinguen dos errores de atribución del dictamen de Hades en los dos puntos donde cambian una decisión del motor. En D21 se acepta una aprobación citada. En D22 se pierde el rechazo del principal y se acepta la aprobación de la reserva. Cada control modifica únicamente un salto de línea y conserva el mismo rechazo esperado.
+**Media 9,75/10.** Las tres regresiones fallan en los dos consumidores del dictamen. Sus tres controles pasan en ambos. En las seis entradas, Hades emite el mismo rechazo exterior. Cada control cambia únicamente la presentación del texto que lo precede.
 
-| Entrada | Dictamen registrado por `motor.agente` | Resultado de `pendientes_cierre` para `B-DEMO-0001` |
-|---|---|---|
-| D21 · El primer ejemplo contiene un salto antes de su cierre. El segundo contiene un cierre literal entre acentos graves. | Falla. Claude registra la aprobación del ejemplo. | Falla. La lista vacía permite cerrar la ficha rechazada. |
-| Control D21 · Se suprime el salto antes del primer cierre. | Pasa. Una llamada a Claude con el modelo principal y una única métrica con su rechazo. | Pasa. La ficha queda pendiente por «informe rechazado». |
-| D22 · El encabezado termina en un acento grave y el rechazo abre el párrafo siguiente. | Falla. Claude queda sin dictamen y Codex registra la aprobación de reserva. | Falla. La ficha queda pendiente por «informe sin veredicto formal». |
-| Control D22 · Se añade una línea vacía tras el encabezado. | Pasa. Una llamada a Claude con el modelo principal y una única métrica con su rechazo. | Pasa. La ficha queda pendiente por «informe rechazado». |
+| Caso | Diferencia entre regresión y control | Resultado observado en la regresión con `motor.agente` | Resultado observado en la regresión con `pendientes_cierre` |
+|---|---|---|---|
+| D24 | La línea del fragmento empieza por `2. ejemplo`. El control antepone `paso `. | Claude registra la aprobación citada. | Devuelve `[]` y permite cerrar la ficha rechazada. |
+| D25 | Las dos líneas que continúan la viñeta carecen de sangría. El control añade dos espacios delante de cada una. | Claude registra la aprobación citada. | Devuelve `[]` y permite cerrar la ficha rechazada. |
+| D26 | El nombre `archivo.py` va entre acentos graves antes de la apertura de `<pre>`. El control quita solo esos dos acentos. | Claude queda sin dictamen y Codex registra la aprobación de la reserva. | Mantiene la ficha pendiente por «informe sin veredicto formal». |
+
+En los tres controles se observa una sola llamada a Claude con el modelo principal y una sola métrica de Hades con su rechazo. El preflight encuentra «informe rechazado» en la entrada de la ficha completada `B-DEMO-0001`. Exigir el motivo concreto permite detectar D26 incluso cuando la barrera de cierre sigue activa.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 10/10 | Cada defecto y su control llegan tanto al proveedor como al preflight de cierre. La verificación dirigida del triaje incluye el módulo completo `skills.orquestar.test_progreso` y recoge las ocho pruebas. |
-| Aserciones | 9/10 | El arnés registra las llamadas efectivas por proveedor y modelo y contrasta las métricas de Hades. El preflight lee el informe canónico confirmado junto con la ficha completada y exige ID y motivo en la misma entrada mediante subcadenas. |
-| Rojo correcto | 10/10 | Los cuatro fallos son de aserción. Identifican el veredicto atribuido al proveedor o la decisión de cierre equivocada. Los cuatro controles pasan con la misma preparación. |
-| Estabilidad | 10/10 | Cada prueba usa su propio repositorio Git temporal, configuración Git aislada y respuestas fijas de proveedor. Las aserciones funcionales son independientes de la duración. |
+| Cobertura | 10/10 | Cada prueba entrega el mismo informe a los dos consumidores mediante subpruebas. Así se observa la decisión de cierre incluso después del fallo de atribución al proveedor. El triaje incluye el módulo que contiene las seis pruebas. |
+| Aserciones | 9/10 | El arnés contrasta las métricas de Hades y las llamadas efectivas por proveedor y modelo. El preflight lee el informe y la ficha completada tras un commit real. Comprueba el ID y el motivo en la misma entrada mediante subcadenas. |
+| Rojo correcto | 10/10 | Los seis fallos son de aserción y muestran las discrepancias de la tabla. Los controles alcanzan las mismas comprobaciones con la misma preparación. |
+| Estabilidad | 10/10 | Cada prueba usa un repositorio Git temporal propio, configuración Git aislada y respuestas fijas de los proveedores simulados. Las aserciones son independientes del reloj y del orden entre pruebas. |
 
-## Seguimiento
+## Hallazgos y destino
 
-Los hallazgos anteriores de pruebas H1–H4 y N1–N10 siguen resueltos. D20 quedó resuelto en la revisión D anterior. Esta ronda añade dos generadores de informes y ocho pruebas en `test_progreso.py`. **Hallazgos nuevos o pendientes de C1: ninguno.**
+**C1 queda sin hallazgos nuevos ni pendientes.** H1–H4 y N1–N10 constaban resueltos y el delta conserva las pruebas anteriores. La revisión D aportada dio por resueltos D21–D23. D24, D25 y D26 conservan su destino de producto `resolver` en C2, a cargo de Artemisa (`desarrollador`).
 
-| Hallazgo de producto | Estado | Para | Destino y comprobación |
-|---|---|---|---|
-| D21 · 🟠 Alta | Persiste, reproducido en ambos consumidores. | Artemisa (`desarrollador`) | `resolver` en C2. Con ambas presentaciones, registrar el rechazo del principal en una llamada y mantener la ficha pendiente por «informe rechazado». |
-| D22 · 🟠 Alta | Persiste, reproducido en ambos consumidores. | Artemisa (`desarrollador`) | `resolver` en C2. Reconocer el rechazo que sigue al encabezado, con y sin línea vacía, y conservar la llamada única y el motivo «informe rechazado». |
-| D23 · 🟡 Media | Persiste como pendiente de rendimiento según la medición de D. | Artemisa (`desarrollador`) | `resolver` en C2. Repetir por separado la medición comparativa de `declaracion` descrita abajo. |
+## Evidencia y límites
 
-Para D23, la referencia de D es un solo párrafo que repite la línea «Se comprobo `archivo.py`.», seguido de una línea vacía y el rechazo. Con 300, 600 y 1.200 líneas se midieron 0,078 s, 0,325 s y 1,251 s. Al duplicar la entrada, el tiempo casi se cuadruplica. En C2 corresponde comparar antes y después con las mismas entradas y condiciones, comprobar que las tres devuelven el rechazo y contrastar cómo crece el tiempo. La medición queda separada de las pruebas funcionales, que no dependen de un umbral de reloj.
+El archivo de pruebas del árbol de trabajo coincide con el del árbol verificado `3b74053034b7ed7c30f99e3a9d45945b14b77194`. La ejecución focalizada adjunta registró `FF.FF.FF.` en 6,102 s para seis métodos. Los seis fallos corresponden a dos subpruebas por regresión. En las tres subpruebas rojas de proveedor, la aserción sobre métricas falló antes de alcanzar la de llamadas efectivas. Los tres controles sí verificaron ambas.
 
-## Evidencia
-
-La evidencia adjunta de `--verificar` corresponde al árbol `7449b14424d6198eabcc5aa09396c8389a96a5de` de `hotfix/v1.1.3`. El archivo de pruebas del árbol de trabajo coincide con el revisado. La ejecución focalizada registró `FF..FF..` en 5,872 s. En los dos rojos de proveedor, la discrepancia de métricas detuvo la prueba antes de la aserción sobre llamadas efectivas. Los dos controles de proveedor sí alcanzaron esa aserción.
-
-Se reutilizaron la ejecución focalizada y el resultado verde de Ruff selectivo (`E9,F63,F7,F82`). El proyecto carece de tipador configurado. Para C2 quedan la repetición de la medición D23 y la ejecución dirigida del triaje sobre el árbol corregido.
+El dictamen cubre las pruebas y su preparación. Se reutilizaron la ejecución focalizada y el resultado verde de Ruff selectivo (`E9,F63,F7,F82`). El proyecto carece de tipador declarado. Esta ronda no ejecutó la suite completa ni verificó una corrección de producción.
