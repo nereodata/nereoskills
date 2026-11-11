@@ -33,7 +33,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from adevv import diagnostico_suite
 from adevv.revisiones import clave_version as vkey, nombre_version, motivo_revision, diagnostico_revision
+from adevv.store import write_json_atomic
 
 try:
     import winreg
@@ -727,6 +729,7 @@ def backlog(root):
                 dif = 'media'
             perfil, perfil_errores = perfil_del_fichero(f)
             out.append({'paso': tipo, 'id': fm['id'], 'status': fm.get('status', 'backlog'),
+                        'suite_accion': fm.get('suite_accion', ''),
                         'perfil': perfil, 'perfil_errores': perfil_errores,
                         'version': fm.get('version', ''), 'pendiente_de': str(fm.get('pendiente_de', '')).strip().lower(),
                         'depende_de': lista(fm['depende_de']) if 'depende_de' in fm else None,
@@ -1278,7 +1281,9 @@ def estado(root, docs):
     errores = errores_perfil(items)
     if errores:
         return ('PARAR', 'Perfil inválido en el backlog (solo una persona lo corrige): ' + '; '.join(errores))
-    incompletas = [q for q in listar_preguntas(root, True) if not q.get('bloqueo_aplicado')]
+    diagnosticos = {i['id'] for i in items if i.get('suite_accion') == 'pendiente' and i['status'] != 'cancelled'}
+    incompletas = [q for q in listar_preguntas(root, True)
+                   if not q.get('bloqueo_aplicado') and q['tarea_id'] not in diagnosticos]
     if incompletas:
         return ('PARAR', 'Bloqueo global: intervención humana pendiente de persistir con seguridad; ' + '; '.join(
             f'{q["tarea_id"]} {q["id"]}: {q.get("impedimento_incorporacion", "recuperación pendiente")}'
@@ -1296,6 +1301,9 @@ def estado(root, docs):
     for rama in ramas_abiertas():
         v = rama.split('/')[1]
         suyas = [i for i in items if vkey(i['version']) == vkey(v)]
+        for i in suyas:
+            if i.get('suite_accion') == 'pendiente' and i['status'] != 'cancelled':
+                return ('PASO', 'diagnosticar-suite', i['id'], rama)
         recien_abierta = all(i['status'] in ('backlog', 'planned') for i in suyas)
         if recien_abierta and deuda(items) and not (root / f'docs/review/versions/{v}-deuda.md').exists():
             return ('PASO', 'revisar-deuda', v, rama)
@@ -1315,6 +1323,9 @@ def estado(root, docs):
         if preguntas:
             return ('PARAR', f'Bloqueos en {v}: Bloqueo de tarea; ' + '; '.join(
                 f'{q["tarea_id"]} {q["id"]}: {q["pregunta"]}' for q in preguntas))
+        for i in bloqueadas:
+            if i['pendiente_de'] == 'intervencion_tecnica':
+                return ('PARAR', f'{i["id"]}: diagnóstico terminal de la suite. Consulta la intervención en el bug.')
         if not (root / f'docs/review/versions/{v}-arquitectura.md').exists():
             return ('PASO', 'revisar-version', v, rama)
         if bloqueadas or pend:
@@ -2772,6 +2783,57 @@ def bloquear_sin_progreso(root, iid, intentos, salida, contexto='', causa=''):
     return resolver_arbol_sucio(root, f'continuar tras el bloqueo de {iid}')
 
 
+def confirmar_suite(root, iid, mensaje, *ficheros):
+    """Confirma únicamente los artefactos modificados en la transición del cierre."""
+    rutas = [str(f.relative_to(root)) for f in ficheros]
+    subprocess.run(['git', 'add', '--', *rutas], cwd=root, capture_output=True, check=True)
+    if git('diff', '--cached', '--name-only', '--', *rutas):
+        subprocess.run(['git', 'commit', '-qm', f'fix({iid}): {mensaje}', '--', *rutas],
+                       cwd=root, capture_output=True, check=True)
+
+
+def aplicar_diagnostico_suite(root, fichero):
+    """Retoma la solicitud o aplica el dictamen guardado, incluso después de reiniciar el bucle."""
+    ruta = fichero.with_suffix('.json')
+    historial = json.loads(ruta.read_text(encoding='utf-8'))
+    grupo = historial['grupos'][historial['actual']]
+    iid = frontmatter(fichero)['id']
+    if 'dictamen' not in grupo:
+        grupo['dictamen'] = diagnostico_suite.solicitar(root, iid, historial['comando'], grupo, ruta)
+        write_json_atomic(ruta, historial)
+        confirmar_suite(root, iid, 'conservar dictamen de Hades', ruta)
+    dictamen = grupo['dictamen']
+    accion = dictamen['terminal'] if grupo.get('recaida_tras_estrategia') else dictamen
+    contexto = (f'{dictamen["causa"]}. {dictamen["decision"]}\n'
+                f'Solicitud {grupo["solicitud"]}. Arreglos y evidencias: {ruta.name}.')
+    cambios = {'suite_accion': 'resuelta'}
+    revision = root / f'docs/review/versions/{nombre_version(vkey(frontmatter(fichero)["version"]))}-revision.md'
+    ficheros = [fichero, ruta]
+    motivo = ''
+    destino = accion['destino']
+    if destino == 'humano':
+        pregunta = solicitar_intervencion(root, iid, accion['pregunta'], contexto=contexto + '\n' + accion['motivo'],
+                                          paso='diagnosticar-suite', aislar=False)
+        if not pregunta['bloqueo_aplicado']:
+            raise diagnostico_suite.DiagnosticoPendiente(pregunta.get('impedimento_incorporacion', 'Bloqueo pendiente'))
+        motivo = f'{iid}: {accion["pregunta"]} {accion["motivo"]}'
+    elif destino == 'tecnico':
+        cambios.update(status='blocked', pendiente_de='intervencion_tecnica')
+        motivo = f'{iid}: {accion["responsable"]}: {accion["intervencion"]}'
+    else:
+        enrutar_hallazgo(root, iid, 'artemisa' if destino == 'desarrollador' else destino, contexto=contexto)
+        ficheros.append(revision)
+        grupo['estrategia_aplicada'] = True
+    cabecera, cuerpo = reescribir_frontmatter(fichero.read_text(encoding='utf-8'), cambios)
+    if motivo:
+        cuerpo = cuerpo.rstrip() + f'\n\n## Conclusión del diagnóstico\n{contexto}\n{motivo}\n'
+        motivo += '\nCola de la última salida:\n' + grupo['evidencias'][-1]['salida'][-1200:]
+    write_json_atomic(ruta, historial)
+    fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
+    confirmar_suite(root, iid, 'aplicar diagnóstico de la suite', *ficheros)
+    return iid, motivo
+
+
 def registrar_fallo_suite(root, version, cmd):
     """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
     evidencia = root / EVIDENCIAS
@@ -2789,6 +2851,8 @@ def registrar_fallo_suite(root, version, cmd):
     if fichero:
         fm = frontmatter(fichero)
         iid = fm['id']
+        if fm.get('suite_accion') == 'pendiente' and fm['status'] != 'cancelled':
+            return aplicar_diagnostico_suite(root, fichero)
         if fm.get('status') in ('blocked', 'cancelled'):
             return iid, f'{iid}: el bug de cierre está {fm["status"]}; no se reabre. Cola de la última salida:\n{cola_aviso}'
         texto = fichero.read_text(encoding='utf-8')
@@ -2808,34 +2872,42 @@ def registrar_fallo_suite(root, version, cmd):
         fichero.write_text(texto, encoding='utf-8')
         fm = frontmatter(fichero)
     dificultad = dificultad_de(root, iid)
-    intentos = int(fm.get('suite_intentos', '0')) if fm.get('suite_dificultad') == dificultad else 0
-    if fm.get('status') == 'completed':
-        intentos += 1
-    motivo = ''
-    if intentos >= 3:
-        nueva = promover_dificultad(root, iid, motivo=f'{intentos} arreglos tras los que la suite sigue roja')
-        if nueva:
-            dificultad, intentos = nueva, 0
-            texto = fichero.read_text(encoding='utf-8')
+    ruta = fichero.with_suffix('.json')
+    historial = diagnostico_suite.cargar(ruta, texto, fm, dificultad)
+    historial['comando'] = cmd
+    completado = fm.get('status') == 'completed'
+    arreglos = []
+    if completado:
+        base = git('log', '-1', '--format=%H', '--', str(ruta.relative_to(root))) if ruta.exists() else git(
+            'log', '-1', '--format=%H', '--fixed-strings', '--grep', f'fix({iid}): registrar fallo de suite al cierre')
+        arreglos = git('log', '--reverse', '--format=%H %s', f'{base}..HEAD' if base else '-1').splitlines()
+    grupo, nueva = diagnostico_suite.registrar_observacion(historial, ultima, dificultad, completado, arreglos)
+    if not nueva and ruta.exists() and not completado:
+        return iid, ''
+    pendiente = False
+    if completado and nueva and (grupo.get('estrategia_aplicada') or grupo['intentos'] >= 3):
+        if dificultad == 'dificil' or grupo.get('dictamen'):
+            pendiente = True
+            if grupo.get('estrategia_aplicada'):
+                grupo['recaida_tras_estrategia'] = True
+            grupo.setdefault('solicitud', diagnostico_suite.clave([iid, clave_comando, historial['actual'], ultima['arbol']]))
         else:
-            motivo = (f'{iid}: la suite sigue fallando tras 3 intentos en dificil. '
-                      f'Cola de la última salida (completa en el bug):\n{cola_aviso}')
-    cambios = {'status': 'blocked' if motivo else 'planned', 'updated_at': hoy,
-               'suite_dificultad': dificultad, 'suite_intentos': str(intentos)}
-    if motivo:
-        cambios['pendiente_de'] = 'humano'
+            dificultad = promover_dificultad(root, iid, motivo='3 recaídas de la misma causa')
+            grupo.update(dificultad=dificultad, intentos=0)
+            texto = fichero.read_text(encoding='utf-8')
+    cambios = {'status': 'planned', 'updated_at': hoy, 'suite_dificultad': dificultad,
+               'suite_intentos': str(grupo['intentos']), 'suite_accion': 'pendiente' if pendiente else 'ninguna'}
     cabecera, cuerpo = reescribir_frontmatter(texto, cambios)
     cuerpo = re.sub(r'\n## Último fallo de suite\n.*?(?=\n## |\Z)', '', cuerpo, flags=re.S)
     detalle = '\n'.join('    ' + linea for linea in salida.splitlines())
     cuerpo += (f'\n## Último fallo de suite\n- Comando: {json.dumps(cmd, ensure_ascii=False)}\n'
                f'- Código: {ultima["codigo"]}; árbol: {ultima["arbol"]}; fecha: {ahora()}\n\n{detalle}\n')
     fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
-    ruta = str(fichero.relative_to(root))
-    subprocess.run(['git', 'add', '--', ruta], cwd=root, capture_output=True, check=True)
-    subprocess.run(['git', 'commit', '-q', '-m', f'fix({iid}): registrar fallo de suite al cierre',
-                    '--', ruta], cwd=root, capture_output=True, check=True)
-    print(f'[orquestar] {iid}: suite roja registrada para {version} ({intentos} intentos en {dificultad}).', flush=True)
-    return iid, motivo
+    write_json_atomic(ruta, historial)
+    confirmar_suite(root, iid, 'registrar fallo de suite al cierre', fichero, ruta)
+    print(f'[orquestar] {iid}: suite roja registrada para {version} ({grupo["intentos"]} intentos en {dificultad}).',
+          flush=True)
+    return aplicar_diagnostico_suite(root, fichero) if pendiente else (iid, '')
 
 
 # ---------------------------------------------------------------- ficheros del bucle y métricas
@@ -3430,6 +3502,16 @@ def bucle(a, root):
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
         e = estado(root, a.docs)
         print(f'\n[orquestar] {n}. {e[0]}: ' + ' '.join(str(x) for x in e[1:] if x), flush=True)
+        if not a.estado and e[:2] == ('PASO', 'diagnosticar-suite'):
+            if git('branch', '--show-current') != e[3] and not cambiar_de_rama(root, e[3]):
+                return parar(root, 'error', f'no puedo cambiar a {e[3]}.')
+            try:
+                _, motivo = aplicar_diagnostico_suite(root, fichero_de(root, e[2]))
+            except diagnostico_suite.DiagnosticoPendiente as exc:
+                return parar(root, 'error', f'{e[2]}: diagnóstico pendiente. {exc}')
+            if motivo:
+                return parar(root, 'version', motivo)
+            e = estado(root, a.docs)
         espera_humana = e[0] == 'PARAR' and 'Bloqueo de tarea;' in e[1]
         if not a.estado and cmd_suite and cierre_de_version(e) and not espera_humana:
             version = e[2] if e[0] == 'PASO' else re.search(r'\bv\d+\.\d+(?:\.\d+)?', e[1])[0]
@@ -3441,7 +3523,10 @@ def bucle(a, root):
                 if not cambiar_de_rama(root, rama_cierre):
                     return parar(root, 'error', f'no puedo cambiar a {rama_cierre}.')
             if verificar(root, cmd_suite):
-                iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
+                try:
+                    iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
+                except diagnostico_suite.DiagnosticoPendiente as exc:
+                    return parar(root, 'error', f'Diagnóstico de la suite pendiente. {exc}')
                 if motivo:
                     return parar(root, 'version', motivo)
                 e = estado(root, a.docs)

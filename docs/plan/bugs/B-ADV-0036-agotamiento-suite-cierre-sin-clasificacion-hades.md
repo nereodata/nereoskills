@@ -242,3 +242,14 @@ Hades aprobó las decisiones y los escenarios de `tests/features/uso_sin_rutas.f
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades aprobó /review-test (8,75/10) y cerró H1, H2 y H3. H4 y H5, medios, para Artemisa: exigir que el mandato asocie los tres commits con su evidencia y resultado, y distinguir causas y comprobaciones por separado. Se conservan las aserciones añadidas en SuiteRecoveryTests para ambos hallazgos. Reanudar desarrollo desde el rojo dirigido; la corrección de producción y su QA siguen pendientes.
+
+## Corrección y verificación dirigida
+
+Las 20 pruebas de `SuiteRecoveryTests` reprodujeron cinco fallos en 41,055 s antes de la corrección. La primera verificación de la implementación pasó las 20 en 74,918 s, incluidas H4 y H5. Las pruebas usan repositorios Git temporales y respuestas deterministas de Hades. El comando del triaje y la base de calidad se conservan.
+
+El historial JSON del cierre conserva el presupuesto por causa, los commits, las salidas y el dictamen. El planificador retoma una solicitud pendiente antes del siguiente arreglo. La guía de la skill documenta la intervención terminal y la reanudación.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades /review-code RECHAZADO (7,67/10). H1: conservar el nivel y presupuesto propios de A al volver después de promocionar B. H2: mantener pendiente una transición cuyo commit falla y retomarla con el mismo dictamen sin duplicar destino ni pregunta. Ambos altos para Artemisa, resolver y aportar evidencia en SuiteRecoveryTests.
