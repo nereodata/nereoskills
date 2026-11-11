@@ -8,7 +8,9 @@ Ante un error del arnés, desarrollo exige estado completado, commit nuevo, árb
 
 Selección, recuperación y preflight contrastan el dictamen con el producto al completar el ID o al emitir una revisión posterior. Hades recibe una huella SHA-256 de las entradas Git de producto y la declara en el informe de código. Para informes históricos se toma el producto del primer commit de la secuencia que mantiene el mismo veredicto. Así, una nota en el informe conserva la acreditación anterior y el cierre de otra tarea conserva las revisiones ya válidas.
 
-El transporte entrega la respuesta de Hades para reconocer su declaración formal. La salida normal sin dictamen prueba la siguiente reserva elegible. Cada ejecución exterior que propaga un fallo de revisión conserva sus tokens y la marca técnica. El diagnóstico de suite mantiene su contrato de respuesta JSON y su validador propio.
+El motor registra `commit_producto` en la métrica del intento de desarrollo que confirma cambios. Selección y preflight consideran los commits del mismo ID que pertenecen a la historia actual, junto con el cierre y la emisión del dictamen. Así se conserva el objetivo cuando el arnés falla tras producir varios commits. La firma del paso usa la misma comprobación de vigencia para reconocer una reevaluación válida.
+
+El transporte entrega la respuesta de Hades para reconocer su declaración formal fuera de citas y ejemplos. La huella pertenece a la cabecera del veredicto. Al construir el mandato se omite de la huella de producto el único archivo efímero que la CLI retirará al terminar. La evidencia de pruebas conserva el árbol exacto. La salida normal sin dictamen prueba la siguiente reserva elegible. Cada ejecución exterior que propaga un fallo de revisión conserva sus tokens y la marca técnica. El diagnóstico de suite mantiene su contrato de respuesta JSON y su validador propio.
 
 ## Impacto y comprobación
 

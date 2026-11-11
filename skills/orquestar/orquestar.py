@@ -501,7 +501,7 @@ def construir_prompt_paso(root, paso, arg):
     return instruccion_agente + prompt_cuerpo + corregir + extra + nota_fuente
 
 
-def construir_prompt_agente(root, rol, prompt, reanudacion=False):
+def construir_prompt_agente(root, rol, prompt, reanudacion=False, mandato_temporal=None):
     """Construye el mandato para un rol con --agente citando la versión activa instalada."""
     version_dir = get_active_version_dir()
     paso, iid = os.environ.get("ORQUESTAR_PASO", ""), os.environ.get("ORQUESTAR_ID", "")
@@ -548,8 +548,8 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False):
             pass
     if (rol == 'hades' and paso in DESARROLLO and (root / '.git').exists()
             and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'):
-        producto = huella_producto(root, arbol(root), backlog_dirs(root))
-        cabecera += (f'En /review-code incluye en el informe la línea «Producto revisado: {producto}» '
+        producto = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
+        cabecera += (f'En /review-code incluye tras el veredicto la línea «Producto revisado: {producto}» '
                      'si has revisado el producto de este árbol. Declara el veredicto formal en tu respuesta final.\n\n')
     return cabecera + prompt
 
@@ -1401,7 +1401,10 @@ def firma(root, docs, paso=None, arg=''):
     dictamenes = []
     if arg and paso in DESARROLLO:
         for tipo in ('spec', 'test', 'code'):
-            motivo = motivo_informe(root / f'docs/review/{tipo}_reviews/{arg}-{tipo}-review.md')
+            if tipo == 'code':
+                motivo = motivo_revision(root, arg, fichero_de(root, arg), backlog_dirs(root))
+            else:
+                motivo = motivo_informe(root / f'docs/review/{tipo}_reviews/{arg}-{tipo}-review.md')
             dictamenes.append(motivo if motivo in ('', 'informe rechazado') else None)
     contenido = b''
     if rutas:
@@ -2260,7 +2263,7 @@ def acceso_suscripcion_denegado(harness, salida):
     return harness == 'claude' and 'Your organization has disabled Claude subscription access for Claude Code' in salida
 
 
-def agente(root, rol, prompt):
+def agente(root, rol, prompt, mandato_temporal=None):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     invocacion = uuid.uuid4().hex
 
@@ -2294,7 +2297,8 @@ def agente(root, rol, prompt):
         hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
         sesion = buscar_sesion_agente(root, rol, iid, harness)
         es_reanudacion = bool(sesion)
-        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
+        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion,
+                                               mandato_temporal=mandato_temporal)
         base = base_comando_agente(harness, prompt_texto, sesion=sesion)
         if not base:
             sys.exit(f'Arnés no soportado para roles: {harness}')
@@ -2322,7 +2326,7 @@ def agente(root, rol, prompt):
             cede = ''
         if (es_reanudacion and codigo != 0 and espera_cuota(salida) is None
                 and not acceso_suscripcion_denegado(harness, salida) and not m.get('timeout')):
-            prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
+            prompt_fresh = construir_prompt_agente(root, rol, prompt, mandato_temporal=mandato_temporal)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
             cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
             entrada_fresh = None if harness == 'agy' else prompt_fresh
@@ -3588,6 +3592,8 @@ def main():
         try:
             if not prompt or not prompt.strip():
                 sys.exit('Falta el mandato: --prompt, --prompt-file o entrada estándar.')
+            if borrar_prompt_file:
+                return agente(root, a.agente, prompt, mandato_temporal=ruta_prompt_file.name)
             return agente(root, a.agente, prompt)
         finally:
             if borrar_prompt_file and ruta_prompt_file and ruta_prompt_file.exists():
@@ -3841,6 +3847,10 @@ def bucle(a, root):
                     ausente = True
                     break
                 codigo, m, salida = resultado
+                if paso in DESARROLLO:
+                    head = git('rev-parse', 'HEAD')
+                    if head and head != env['ORQUESTAR_BASE']:
+                        m['commit_producto'] = head
                 intervencion.notificar_reanudacion(root, SimpleNamespace(**globals()), arg)
                 intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env['ORQUESTAR_BASE'], salida)
                 if cede and cfg_actual is not cfg_rol:

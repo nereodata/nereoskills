@@ -37,7 +37,9 @@ Si Hades agota los perfiles autorizados sin emitir dictamen, cada intento sin av
 
 Ante un error del arnés, desarrollo continúa al paso siguiente si la ficha está completada, hay un commit nuevo, el árbol está limpio y la aprobación canónica cubre el producto confirmado. El trabajo parcial se conserva durante la recuperación del arnés.
 
-Hades incluye en la revisión de código la línea `Producto revisado: <huella>` que recibe en el mandato. El selector y el preflight comprueban el producto del ID al completarlo. Para informes históricos usan el producto que había al emitirse el veredicto. Añadir una nota conserva la fecha de esa aprobación. Si quedó caducada, al relanzar se selecciona `revisar-tarea`.
+Hades incluye la línea `Producto revisado: <huella>` justo después del veredicto de código. La huella cubre los mandatos rastreados. El archivo temporal que la CLI retira al terminar queda fuera de la huella y sigue contando para la evidencia exacta de las pruebas.
+
+Al confirmar cambios durante un paso de desarrollo, el bucle registra el último commit del intento para ese ID en las métricas. El selector y el preflight recuperan ese objetivo al relanzar, aunque el paso haya fallado después de marcar la ficha como completada. Un paso de otro ID conserva la aprobación anterior. Para informes históricos se consulta el commit que emitió el veredicto. Las citas y las notas de seguimiento conservan la acreditación original. Si la aprobación ha caducado, el selector pide `revisar-tarea`. Una reevaluación vigente cuenta como avance incluso en el último intento.
 
 ```mermaid
 flowchart TD

@@ -1,6 +1,7 @@
 """Identidad operativa de versiones y acreditación de revisiones de cierre."""
 
 import hashlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -28,26 +29,56 @@ def carpetas_maestras(root, cfg):
     return tuple(base / folders.get(tipo, master.get(tipo, tipo + '/')) for tipo in ('tasks', 'bugs'))
 
 
-def huella_producto(root, arbol, carpetas):
+def huella_producto(root, arbol, carpetas, mandato_temporal=None):
     """Identifica rutas, modos y objetos Git del producto sin los documentos de seguimiento."""
     excluidos = tuple(p.relative_to(root).as_posix().encode() + b'/' for p in carpetas) + (b'docs/review/',)
     entradas = subprocess.check_output(['git', 'ls-tree', '-rz', '--full-tree', arbol], cwd=root)
     producto = hashlib.sha256()
+    temporal = os.fsencode(mandato_temporal) if mandato_temporal is not None else None
     for entrada in entradas.split(b'\0'):
-        if entrada and not entrada.split(b'\t', 1)[1].startswith(excluidos):
+        ruta = entrada.partition(b'\t')[2]
+        if entrada and ruta != temporal and not ruta.startswith(excluidos):
             producto.update(entrada + b'\0')
     return producto.hexdigest()
 
 
+def lineas_del_informe(texto):
+    """Conserva las declaraciones del informe fuera de citas y ejemplos de código."""
+    lineas = texto.strip('\r\n').splitlines()
+    cerco = r' {0,3}(`{3,}|~{3,})'
+    def cierra(linea, marca):
+        """CommonMark permite cerrar con el mismo signo y longitud igual o mayor."""
+        return re.fullmatch(r' {0,3}' + marca + marca[0] + r'*[ \t]*', linea)
+
+    if len(lineas) >= 3 and (inicio := re.fullmatch(cerco + r'(?:markdown|md)?\s*', lineas[0], re.I)):
+        if cierra(lineas[-1], inicio[1]) and not any(cierra(l, inicio[1]) for l in lineas[1:-1]):
+            lineas = lineas[1:-1]
+    abierto = ''
+    for linea in lineas:
+        marca = re.match(cerco, linea)
+        if abierto:
+            if cierra(linea, abierto):
+                abierto = ''
+        elif marca:
+            abierto = marca[1]
+        elif not linea.startswith(('    ', '\t')) and not linea.lstrip().startswith('>'):
+            yield linea.strip().replace('**', '')
+            continue
+        yield None
+
+
 def declaracion(texto):
-    """Extrae el primer veredicto formal y la huella de producto declarada por el revisor."""
-    for line in texto.splitlines():
-        line = line.strip().replace('**', '')
+    """Lee el veredicto y la huella opcional que lo acompaña en la cabecera."""
+    lineas = iter(lineas_del_informe(texto))
+    for line in lineas:
+        if not line:
+            continue
         formal = re.match(r'^(?:[-#]+\s*)?Veredicto(?: final)?:\s*(?:✅\s*)?(APROBADO|RECHAZADO|N/A)(?=$|[\s.,;—(])', line, re.I)
         simple = re.fullmatch(r'(APROBADO|RECHAZADO|N/A)[.]?', line, re.I)
         if formal or simple:
-            huella = re.search(r'(?im)^Producto revisado:[ \t]*([^\r\n]*)$', texto)
-            return (formal or simple)[1].upper(), huella[1].strip() if huella else None
+            siguiente = next((l for l in lineas if l != ''), None)
+            huella = re.fullmatch(r'Producto revisado:\s*(.*)', siguiente or '', re.I)
+            return (formal or simple)[1].upper(), huella[1] if huella else None
     return '', None
 
 
@@ -65,6 +96,18 @@ def maestro_por_id(iid, carpetas):
             cabecera = re.match(r'^---\s*\n(.*?)\n---', path.read_text(encoding='utf-8'), re.S)
             if cabecera and (load_yaml(cabecera[1]) or {}).get('id') == iid:
                 return path
+    return None
+
+
+def commit_del_intento(root, iid):
+    """Recupera el último HEAD atribuido al ID que pertenece a la historia actual."""
+    for fila in reversed(leer_registros(root, tolerar_ultima=True)):
+        commit = fila.get('commit_producto')
+        if (fila.get('tipo') == 'paso' and fila.get('id') == iid and isinstance(commit, str)
+                and re.fullmatch(r'[a-f0-9]{40}|[a-f0-9]{64}', commit)
+                and subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'HEAD'],
+                                   cwd=root, capture_output=True).returncode == 0):
+            return commit
     return None
 
 
@@ -91,7 +134,7 @@ def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
             if blob.returncode:
                 break
             previo = declaracion(blob.stdout.decode('utf-8'))
-            if previo[0] != actual[0] or (actual[1] is not None and previo[1] != actual[1]):
+            if previo != actual:
                 break
             emision = commit
         if objetivo is None:
@@ -99,16 +142,18 @@ def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
                 """^status:[[:space:]]*['"]?completed['"]?([[:space:]]|$)""", '--', ficha.relative_to(root).as_posix()],
                 cwd=root, text=True).strip()
             objetivo = cierre or 'HEAD'
-            if emision and subprocess.run(['git', 'merge-base', '--is-ancestor', objetivo, emision],
-                                          cwd=root).returncode == 0:
-                objetivo = emision
+            referencia_informe = emision or (historial[0].decode('ascii') if historial else None)
+            for posterior in (referencia_informe, commit_del_intento(root, iid)):
+                if posterior and subprocess.run(['git', 'merge-base', '--is-ancestor', objetivo, posterior],
+                                               cwd=root).returncode == 0:
+                    objetivo = posterior
         if actual[1] is not None:
             vigente = actual[1] == huella_producto(root, objetivo, carpetas)
         elif emision:
             vigente = (emision == objetivo or
                        huella_producto(root, emision, carpetas) == huella_producto(root, objetivo, carpetas))
         else:
-            vigente = not confirmar
+            vigente = not confirmar and not historial
     except (OSError, subprocess.CalledProcessError, UnicodeError):
         return 'no se pudo acreditar el producto revisado'
     return '' if vigente else 'informe anterior al cambio de producto'
@@ -128,7 +173,8 @@ def motivo_informe(path):
     if veredicto.upper() == 'RECHAZADO':
         return 'informe rechazado'
     if veredicto.upper() == 'N/A':
-        if re.search(r'(?im)^\s*Motivo:\s*[^\n]*(?:sin cambios de c[oó]digo|sin c[oó]digo|no hay cambios de c[oó]digo)', texto):
+        if any(re.match(r'Motivo:\s*.*(?:sin cambios de c[oó]digo|sin c[oó]digo|no hay cambios de c[oó]digo)',
+                        linea or '', re.I) for linea in lineas_del_informe(texto)):
             return ''
         return 'N/A sin justificación de ausencia de código'
     return 'informe sin veredicto formal'

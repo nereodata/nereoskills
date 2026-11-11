@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -390,10 +391,12 @@ class ProgresoTests(unittest.TestCase):
     def test_mandato_efimero_fuera_de_huella_pero_dentro_de_evidencia(self):
         """D2: la CLI distingue el mandato temporal de un mandato de producto rastreado."""
         mandato = self.root / 'mandato temporal.txt'
-        for temporal in (True, False):
-            with self.subTest(temporal=temporal):
-                mandato.write_text('Revisar el producto', encoding='utf-8')
-                if not temporal:
+        huellas_rastreadas = []
+        for temporal, contenido in ((True, 'Revisar el producto'), (False, 'Primera revisión'),
+                                    (False, 'Segunda revisión')):
+            with self.subTest(temporal=temporal, contenido=contenido):
+                mandato.write_text(contenido, encoding='utf-8')
+                if not temporal and not huellas_rastreadas:
                     self.commit('mandato versionado')
                 exacto = motor.arbol(self.root)
                 respuestas = []
@@ -409,7 +412,11 @@ class ProgresoTests(unittest.TestCase):
                 posterior = motor.arbol(self.root)
                 self.assertEqual(exacto != posterior, temporal)
                 huella = motor.huella_producto(self.root, posterior, motor.backlog_dirs(self.root))
-                self.assertIn(f'Producto revisado: {huella}', respuestas[0])
+                declarada, = re.findall(r'Producto revisado: ([0-9a-f]{64})', respuestas[0])
+                if not temporal:
+                    huellas_rastreadas.append(declarada)
+                self.assertEqual(declarada, huella)
+        self.assertEqual(len(set(huellas_rastreadas)), 2)
 
     def test_nota_no_renueva_aprobacion_pero_dictamen_del_producto_si(self):
         self.comprobar_reevaluacion(con_huella=False)
@@ -442,8 +449,21 @@ class ProgresoTests(unittest.TestCase):
         self.assertTrue(motor.cierre_revisado(self.root, 'bug-fix', self.iid, base))
         self.assertTrue(motor.cierre_revisado(self.root, 'revisar-tarea', self.iid, base))
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
-        self.escribir('otro.py', 'otro = True\n')
-        self.commit('otra tarea')
+        otro = 'B-DEMO-0002'
+        self.crear_ficha(otro, 'planned')
+        self.commit(f'planificar {otro}')
+        def corregir_otro(n):
+            self.assertEqual(self.llamadas[-1], ('bug-fix', otro))
+            self.escribir('otro.py', 'otro = True\n')
+            self.crear_ficha(otro, 'completed')
+            self.escribir(f'docs/review/code_reviews/{otro}-code-review.md', veredicto)
+            self.commit(f'corregir {otro}')
+            return 0, 'revisado'
+        self.accion = corregir_otro
+        self.args.max_pasos = 1
+        motor.bucle(self.args, self.root)
+        self.assertEqual(self.llamadas, [('bug-fix', otro)])
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-version', 'v1.1.3'))
         self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
 
     def test_cita_no_emite_dictamen_y_reserva_revisa(self):

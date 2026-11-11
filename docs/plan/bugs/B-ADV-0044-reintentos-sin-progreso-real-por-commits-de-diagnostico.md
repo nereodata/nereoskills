@@ -51,7 +51,7 @@ Construir el hotfix sobre v1.1.2, ejecutar las regresiones y la suite completa a
 - D [EXEC] Revisión independiente de código sobre todo el delta.
 - E [EXEC] Documentar el límite y la persistencia en la guía del orquestador.
 - F [EXEC] Registrar validación de versión y cerrar mediante commit cuando las revisiones estén aprobadas.
-- Verificación dirigida: `python -m unittest skills.orquestar.test_progreso skills.orquestar.test_fallos_arnes skills.orquestar.test_recarga skills.orquestar.test_perfil_fijado.BucleTests tests.test_orquestar.RecuperacionAnalisisTests tests.test_orquestar.DificultadTests tests.test_orquestar.OrquestarRegressionTests tests.test_revision_release skills.orquestar.test_acceso_agente`. La reevaluación incorpora los dos consumidores afectados por H1–H4 (preflight de release y salida de Hades). Cubre avance, cierre revisado, cuota, perfiles y recarga. Higiene mediante `git diff --check` y calidad del delta.
+- Verificación dirigida: `python -m unittest skills.orquestar.test_progreso skills.orquestar.test_fallos_arnes skills.orquestar.test_recarga skills.orquestar.test_perfil_fijado.BucleTests tests.test_orquestar.RecuperacionAnalisisTests tests.test_orquestar.DificultadTests tests.test_orquestar.OrquestarRegressionTests tests.test_revision_release skills.orquestar.test_acceso_agente skills.orquestar.test_agente_prompt`. La reevaluación incorpora los dos consumidores afectados por H1–H4 (preflight de release y salida de Hades). Cubre avance, cierre revisado, cuota, perfiles y recarga. La corrección de D2 incorpora test_agente_prompt para verificar la firma de llamada y la limpieza del archivo temporal de la CLI. Higiene mediante `git diff --check` y calidad del delta.
 
 ## Hallazgo de Hades enrutado
 - Destino: `artemisa`
@@ -94,3 +94,8 @@ En esta misma revisión se reprodujo H3: la primera línea del dictamen literal 
 ## Reanudación del trabajo técnico autorizado
 
 El bloqueo por dos rechazos corresponde al límite del perfil estricto introducido al preparar este hotfix. No hay una decisión ni un recurso del humano pendiente. Se conserva GPT-6 Astra con esfuerzo alto para Artemisa, Hades y Atenea, la dificultad difícil y todos los dictámenes. Se retira el modo estricto añadido durante la preparación y se devuelve la ficha a planned para corregir N5 y N6, completar las regresiones y corregir H1-H3 y D1-D3. No se considera aprobado ningún hallazgo por esta reanudación.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades D rechazó el árbol c311964fe4ef788c496c2f459de194ebbab85075 (7,00/10). H1, H4-H7, D1 y D2 resueltos. Artemisa reanuda H2, H3 y D3 para conservar la huella cuando una nota la desplace o suprima, distinguir citas con continuación Markdown o bloque HTML de un dictamen propio y conservar la precedencia del rechazo ante la restauración WIP de una aprobación del mismo producto. Las 144 pruebas dirigidas pasaron. Véase el informe canónico de código.
