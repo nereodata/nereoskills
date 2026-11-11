@@ -1420,12 +1420,48 @@ class SuiteRecoveryTests(unittest.TestCase):
 
     def evidence(self, text='format: src/app.js: error', command='suite'):
         with (self.root / motor.EVIDENCIAS).open('a', encoding='utf-8') as out:
-            out.write(json.dumps({'arbol': 'a' * 40, 'comando': command, 'codigo': 1,
-                                  'salida': text}) + '\n')
+            out.write(json.dumps({'arbol': self.git('rev-parse', 'HEAD'), 'comando': command,
+                                  'codigo': 1, 'salida': text}) + '\n')
 
     def observe_failure(self, text='format: src/app.js: error', command='suite'):
         self.evidence(text, command)
         return motor.registrar_fallo_suite(self.root, 'v0.1', command)
+
+    def hades(self, destino, decision='Aplicar la migración', terminal=None, codigo=0):
+        """Sustituye solo el proceso externo de diagnóstico y captura el mandato real."""
+        terminal = terminal or {'destino': 'humano', 'pregunta': '¿Puedes renovar el certificado?',
+                                'motivo': 'Solo el titular puede renovarlo.'}
+        respuesta = {'causa': 'Falta la columna moneda', 'destino': destino,
+                     'decision': decision, 'terminal': terminal}
+        if destino == 'humano':
+            respuesta.update(pregunta=terminal['pregunta'], motivo=terminal['motivo'])
+        mandatos = []
+        ejecutar = subprocess.run
+
+        def proceso(args, *pos, **kwargs):
+            if '--agente' not in args:
+                return ejecutar(args, *pos, **kwargs)
+            self.assertEqual(args[args.index('--agente') + 1], 'hades')
+            self.assertEqual(kwargs['env']['ORQUESTAR_ID'], 'B-DEM-0001')
+            mandato = Path(args[args.index('--prompt-file') + 1]).read_text(encoding='utf-8')
+            mandatos.append(mandato)
+            return subprocess.CompletedProcess(args, codigo, json.dumps(respuesta), '')
+
+        self.enterContext(patch.object(subprocess, 'run', side_effect=proceso))
+        return mandatos
+
+    def pedidos(self, n):
+        return (f'ERROR: test_pedidos (integracion.Pedidos.test_pedidos)\n'
+                f'Archivo temporal /tmp/tmp{n}/informe\nsqlite3.OperationalError: no such column: moneda')
+
+    def umbral(self):
+        iid, _ = self.observe_failure(self.pedidos(0))
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        for n in (1, 2):
+            self.complete(iid)
+            self.observe_failure(self.pedidos(n))
+        self.complete(iid)
+        return iid
 
     def complete(self, iid):
         p = motor.fichero_de(self.root, iid)
@@ -1478,7 +1514,7 @@ class SuiteRecoveryTests(unittest.TestCase):
             out.write('\n## Triaje del arreglo\nTrabajo del desarrollador.\n')
         for count in range(1, 4):
             self.complete(iid)
-            same, stop = self.observe_failure(f'new error {count}')
+            same, stop = self.observe_failure(f'run {count}\nformat: src/app.js: error')
             self.assertEqual(same, iid)
             self.assertFalse(stop)
             fm = motor.frontmatter(p)
@@ -1486,28 +1522,82 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.assertEqual(fm['suite_intentos'], str(count if count < 3 else 0))
             self.assertEqual(fm['dificultad'], 'media' if count < 3 else 'dificil')
             self.assertIn('Trabajo del desarrollador.', p.read_text(encoding='utf-8'))
-            self.assertIn(f'new error {count}', p.read_text(encoding='utf-8'))
+            self.assertIn(f'run {count}', p.read_text(encoding='utf-8'))
         self.assertEqual(len(list(p.parent.glob('*.md'))), 1)
         rows = motor.leer_metricas(self.root)
         self.assertEqual(len([r for r in rows if r.get('tipo') == 'promocion']), 1)
 
-    def test_maximum_stops_after_three_failed_fixes_with_last_output(self):
-        iid, _ = self.observe_failure()
-        motor.actualizar_dificultad(self.root, iid, 'dificil')
-        for count in range(1, 4):
+    def test_pending_diagnosis_survives_unavailable_reviewer_without_human_block(self):
+        calls = self.hades('humano', codigo=1)
+        iid = self.umbral()
+        _, stop = self.observe_failure(self.pedidos(3))
+        self.assertTrue(stop)
+        self.assertEqual(len(calls), 1)
+        p = motor.fichero_de(self.root, iid)
+        self.assertNotIn('humano', motor.frontmatter(p).get('pendiente_de', ''))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertIn(iid, calls[0])
+        for n in (1, 2, 3):
+            self.assertIn(f'/tmp/tmp{n}/informe', calls[0])
+        self.assertIn('fix attempt', calls[0])
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        self.assertEqual(self.git('status', '--porcelain'), '')
+
+    def test_causal_groups_resume_budget_and_one_revised_fix(self):
+        calls = self.hades('desarrollador')
+        iid = self.umbral()
+        p = motor.fichero_de(self.root, iid)
+        firma = 'ERROR: test_firma (integracion.Facturas.test_firma)\nValueError: certificado caducado'
+        for n in (0, 1):
+            self.assertEqual(self.observe_failure(firma), (iid, ''))
+            self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(n))
             self.complete(iid)
-            same, stop = self.observe_failure(f'last failure {count}')
-            self.assertEqual(same, iid)
-            self.assertEqual(bool(stop), count == 3)
-            fm = motor.frontmatter(motor.fichero_de(self.root, iid))
-            self.assertEqual(fm['suite_intentos'], str(count))
-            self.assertEqual(fm['dificultad'], 'dificil')
-            self.assertEqual(fm['status'], 'planned' if count < 3 else 'blocked')
-        self.assertIn(iid, stop)
-        self.assertIn('last failure 3', stop)
-        fm = motor.frontmatter(motor.fichero_de(self.root, iid))
-        self.assertEqual(fm['status'], 'blocked')
-        self.assertEqual(fm['pendiente_de'], 'humano')
+        self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
+        self.assertEqual(len(calls), 1)
+        self.assertIn('Aplicar la migración', p.read_text(encoding='utf-8'))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('bug-fix', iid))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.complete(iid)
+        _, stop = self.observe_failure(self.pedidos(4))
+        self.assertTrue(stop)
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertEqual(len(calls), 1)
+        preguntas = motor.listar_preguntas(self.root)
+        self.assertEqual(len(preguntas), 1)
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes renovar el certificado?')
+        self.assertIn('Solo el titular', preguntas[0]['contexto'])
+        self.assertIn(self.pedidos(4).splitlines()[-1], p.read_text(encoding='utf-8'))
+
+    def test_specifier_receives_contradiction_without_question(self):
+        calls = self.hades('especificador', 'Aclarar de quién se hereda la moneda')
+        iid = self.umbral()
+        self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('especificar', iid))
+        self.assertIn('Aclarar de quién', motor.fichero_de(self.root, iid).read_text(encoding='utf-8'))
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertEqual(len(calls), 1)
+
+    def test_immediate_terminal_question_is_justified_and_idempotent(self):
+        calls = self.hades('humano', 'La revocación es irreversible')
+        fallo = 'ERROR: test_firma (integracion.Facturas)\nValueError: certificado revocado'
+        iid, _ = self.observe_failure(fallo)
+        motor.actualizar_dificultad(self.root, iid, 'dificil')
+        for n in (1, 2, 3):
+            self.complete(iid)
+            _, stop = self.observe_failure(fallo)
+            self.assertEqual(bool(stop), n == 3)
+        motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertEqual(len(calls), 1)
+        p = motor.fichero_de(self.root, iid)
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        preguntas = motor.listar_preguntas(self.root)
+        self.assertEqual(len(preguntas), 1)
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes renovar el certificado?')
+        self.assertIn('Solo el titular', preguntas[0]['contexto'])
 
     def test_blocked_and_cancelled_are_not_reopened(self):
         iid, _ = self.observe_failure()
@@ -1598,7 +1688,8 @@ class SuiteRecoveryTests(unittest.TestCase):
         report.write_text('APROBADO', encoding='utf-8')
         self.git('add', '.')
         self.git('commit', '-qm', 'review')
-        self.evidence('final error src/app.js')
+        self.hades('humano')
+        self.evidence('final error src/app.js\nformat: src/app.js: error')
         args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
                                        max_pasos=1, reintentos=2, espera_max=0, cmd=None)
         with (patch.object(motor, 'verificar', return_value=1),
@@ -1617,7 +1708,7 @@ class SuiteRecoveryTests(unittest.TestCase):
             iid, _ = self.observe_failure(command=command)
             for count in (1, 2):
                 self.complete(iid)
-                same, stop = self.observe_failure(f'error {count}', command=command)
+                same, stop = self.observe_failure(f'run {count}\nformat: src/app.js: error', command=command)
                 self.assertEqual(same, iid)
                 self.assertFalse(stop)
                 fm = motor.frontmatter(motor.fichero_de(self.root, iid))
@@ -1631,7 +1722,8 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.complete(iid)
             self.observe_failure()
         self.complete(iid)
-        text = '\U0001f600' * 5000 + '\nlast error src/app.js'
+        self.hades('humano')
+        text = '\U0001f600' * 5000 + '\nlast error src/app.js\nformat: src/app.js: error'
         _, stop = self.observe_failure(text)
         with (patch.object(motor, 'telegram', return_value=('fake', ['123'], {'version'})),
               patch.object(motor, 'enviar', return_value=True) as send,

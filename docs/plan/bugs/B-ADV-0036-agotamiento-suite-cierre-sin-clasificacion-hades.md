@@ -107,11 +107,11 @@ concreta requerida. No se reinicia el ciclo de forma ilimitada.
   destinos, del umbral sin bloqueo humano y de grupos sucesivos de fallos.
 - Subfase C2: Corrección — `[EXEC]`; sustituir la escalada directa por el
   diagnóstico de Hades y aplicar su salida de forma trazable.
-- Subfase D: QA — `[PENDIENTE]`; revisión de código y del contrato de parada
+- Subfase D: QA — `[EXEC]`; revisión de código y del contrato de parada
   finita.
 - Subfase E: Documentación — `[EXEC]`; actualizar la guía de recuperación de
   suites rojas y la semántica del contador.
-- Subfase F: Cierre — `[PENDIENTE]`; tras la calidad y verificación completas.
+- Subfase F: Cierre — `[EXEC]`; tras la calidad y verificación completas.
 - Verificación al cierre: pruebas de registro de suite roja y de enrutado de
   Hades en `tests/test_orquestar.py`, porque acreditan que el umbral no asigna
   el humano y que los tres destinos se procesan correctamente.
@@ -232,3 +232,8 @@ El mandato de Hades incluyó el contrato de B-ADV-0006, los ocho criterios de B-
 ## Salida de especificar
 
 Hades aprobó las decisiones y los escenarios de `tests/features/uso_sin_rutas.feature`. La reevaluación del caso de revocación irreversible cerró F-04. El informe está en `docs/review/spec_reviews/B-ADV-0036-spec-review.md`. Artemisa puede retomar `bug-fix` desde este contrato con la base de calidad y el triaje registrados.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-test RECHAZADO 7,5/10. H1: verificar la misma solicitud persistida al retomar y ausencia de aviso humano. H2: exigir historial terminal, blocked y parada efectiva del planificador. H3: usar estrategia y conclusión sobre la misma causa. Artemisa corrige las regresiones y vuelve a revisión.
