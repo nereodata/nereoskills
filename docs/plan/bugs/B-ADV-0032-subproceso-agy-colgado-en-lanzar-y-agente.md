@@ -5,10 +5,9 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 created_at: 2026-11-08
 updated_at: 2026-11-11
-pendiente_de: humano
 ---
 
 # B-ADV-0032: Subproceso de agy colgado tras emitir salida o escribir artefactos bloquea indefinidamente lanzar() y --agente
@@ -89,3 +88,7 @@ pendiente_de: humano
 ¿Qué perfil operativo debe usar Hades: restaurar el acceso a Claude Code o seleccionar una de las reservas ya configuradas?
 C1 pendiente de review-test. La invocacion obligatoria adevv orquestar --agente hades --prompt-file fallo con codigo 1: Your organization has disabled Claude subscription access for Claude Code. No hubo veredicto nuevo y el lanzador no conmuta reservas ante este error. Se conservan RT-01 (prueba portable de sesion POSIX) y RT-02 (timeout real 2 s). RED: 11 tests, 4 fallos esperados, 1 skip POSIX. Compilacion y diff --check verdes; formato/lint omitidos por ausencia de herramientas. Produccion sin modificar; H-01/H-03/H-04 siguen pendientes. Se requiere recurso de acceso o decision de configuracion, no permiso de publicacion.
 Responder: /responder Q-ADV-0001 <respuesta>
+
+
+## Intervención humana Q-ADV-0001
+Q-ADV-0001: Decisión humana de local:Iván Moreno: Continuar con las reservas de Hades ya configuradas, en su orden, usando el motor corregido de B-ADV-0040. Para las pruebas de la conmutación usar dobles locales. Sigue pendiente el dictamen real de review-test.
