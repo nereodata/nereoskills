@@ -5,12 +5,13 @@ type: bug
 weight: 0
 dificultad: dificil
 version: "v1.1.3"
-status: planned
+status: blocked
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Incidente de release/v1.2, B-ADV-0031: al menos 28 ejecuciones repitiendo fallo de acceso de Hades"
+pendiente_de: especificador
 ---
 
 # B-ADV-0044 · Repetición indefinida de un impedimento técnico
@@ -34,3 +35,8 @@ Analizar el origen histórico antes de llamarlo regresión y registrar el commit
 ## Entrega urgente
 
 Construir el hotfix sobre v1.1.2, ejecutar las regresiones y la suite completa al cierre, publicar v1.1.3 e instalar. Integrar después la corrección en release/v1.2 conservando la versión 1.2.0 y su trabajo. El usuario autorizó la rama urgente, el modelo potente y la instalación. El bucle original de Adevv tiene solicitada una parada cooperativa.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades rechazó /review-spec (8,25/10) y asignó dos hallazgos altos al especificador. H1: exigir dos salidas normales con commits limpios que solo reformulen el impedimento en la ficha y el resumen de versión, parada técnica tras el segundo y ninguna tercera invocación. H2: contrastar completed con aprobación canónica anterior al delta y revisión actual pendiente frente a aprobación vigente, con el mismo commit parcial y retorno de error. H3 (medio, resolver): vincular código WIP y prueba al comportamiento del bug. Ejecutar especificar. Triaje, escenarios e informe literal en wip/B-ADV-0044, commit 99dd5a1; base_calidad 4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5. Hades dictaminó sobre los adjuntos por fallo de acceso a disco.
