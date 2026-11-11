@@ -1,38 +1,51 @@
-**Veredicto:** N/A
+**Veredicto: N/A**
+
+Motivo: sin cambios de código de producción; el delta contiene exclusivamente una prueba y documentación. Justificación formal del ejecutor, basada en el alcance confirmado por Hades.
 
 # B-ADV-0041 · Revisión de código
 
-Revisor: Hades. Skill aplicada: `/review-code`, conforme a las instrucciones adjuntas.
+Revisor: Hades. Skill aplicada: `/review-code`, según el rol y las instrucciones íntegros adjuntos.
+
+Destino canónico: `docs/review/code_reviews/B-ADV-0041-code-review.md`.
 
 ## Alcance
 
-Revisión independiente del delta completo proporcionado entre `76f434ef7e9b6a8076851df33ca8e62892a5b4f9` y `39cbc7d`.
+Revisión independiente del delta completo aportado de los commits `39cbc7d` y `1e8e16a`, con base `76f434ef7e9b6a8076851df33ca8e62892a5b4f9` y HEAD `1e8e16a`.
 
-El delta contiene cinco archivos:
+Los cinco archivos del delta son:
 
-- `tests/test_orquestar.py`: captura binaria de `tasklist` y comparación del PID codificado en ASCII.
-- `docs/plan/bugs/B-ADV-0041-suite-roja-al-cerrar-version.md`: estado, triaje y resultado.
-- `docs/review/code_reviews/B-ADV-0041-code-review.md`: dictamen anterior.
-- `docs/review/test_reviews/B-ADV-0041-test-review.md`: revisión de pruebas anterior.
-- `docs/review/versions/v1.1.2-revision.md`: registro de la corrección y sus evidencias.
+- `tests/test_orquestar.py`.
+- `docs/plan/bugs/B-ADV-0041-suite-roja-al-cerrar-version.md`.
+- `docs/review/code_reviews/B-ADV-0041-code-review.md`.
+- `docs/review/test_reviews/B-ADV-0041-test-review.md`.
+- `docs/review/versions/v1.1.2-revision.md`.
 
-No existen cambios de código de producción, build, CI, configuración ni dependencias. Los documentos registran la intervención sin modificar instrucciones operativas del producto. Procede **N/A**, conforme a la excepción expresamente autorizada para este paso y al triaje que omite C2. No se repite `/review-test`.
+El cambio ejecutable pertenece exclusivamente a una prueba. Los cuatro documentos registran triaje, resultado, revisiones y evidencias; no introducen instrucciones operativas nuevas del producto.
+
+No hay cambios de producción, build, CI, configuración ni dependencias. Procede **N/A**, conforme al alcance de `/review-code`, al triaje que omite C2 y a la instrucción expresa del paso orquestado. La omisión de diseño B es coherente con este alcance.
+
+No se repite `/review-test`; su dictamen existente, APROBADO con media 9,25/10 y sin hallazgos, se recibe como contexto.
 
 ## Análisis estático y evidencia
 
-Se reutiliza la evidencia aportada para el árbol `31563deb50a8609300dc6428613c10e3d6f8f834`:
+Se acepta como evidencia aportada de la verificación sobre HEAD actual y árbol limpio:
 
-- `python -m unittest tests.test_orquestar.SubprocesoColgadoTests`: 12 pruebas, 11,581 s, OK; una omitida por ser POSIX.
-- `git diff --check`: código de salida 0.
-- `python -m py_compile tests/test_orquestar.py`: código de salida 0.
+| Comprobación | Resultado aportado |
+|---|---|
+| `python -m unittest tests.test_orquestar.SubprocesoColgadoTests` | 12 pruebas en 12,728 s; OK, una omitida por POSIX |
+| `git diff --check` | Salida 0 |
+| `python -m py_compile tests/test_orquestar.py` | Salida 0 |
+| Calidad sin escritura con la base indicada | Formato y lint omitidos por ausencia de herramientas |
+| Tipado | No configurado |
+| Auditoría de dependencias nuevas | N/A: no cambian dependencias |
 
-Según la información recibida, la calidad sin escritura sobre el árbol y la base indicada omite formato y lint por ausencia de herramientas. Estas omisiones están justificadas y **no equivalen a comprobaciones ejecutadas en verde**. Tipado no configurado; sin dependencias nuevas que auditar.
+Las omisiones de formato y lint se registran como justificadas según el material recibido; **no equivalen a comprobaciones ejecutadas en verde**.
 
-No se relanzaron comprobaciones ni la suite completa.
+No se relanzaron pruebas, calidad ni suite completa. No existe código de producción modificado que requiera comprobaciones adicionales dentro de esta revisión.
 
 ## Puntuaciones
 
-N/A: no existe código de producción modificado que puntuar.
+N/A en corrección, seguridad, conformidad, calidad, eficiencia y documentación: no existe código de producción modificado que puntuar. No se calcula media.
 
 ## Hallazgos
 
@@ -40,8 +53,10 @@ Sin hallazgos dentro del alcance de `/review-code`.
 
 ## Limitación de acceso y entrega
 
-El ejecutor de comandos y el acceso alternativo mediante Node fallaron con `registered Core launch requires an installed app`. No fue posible leer del disco el agente ni la skill, contrastar el checkout o guardar el informe. Se utilizaron sus instrucciones y el delta completo incluidos en la solicitud.
+El ejecutor de comandos falló con `registered Core launch requires an installed app`. El acceso alternativo mediante Node también falló al iniciar su entorno por la misma causa.
 
-Esta limitación del ejecutor no demuestra un fallo del producto ni una configuración inválida. El dictamen corresponde exclusivamente al material proporcionado; la evidencia se acepta como aportada, sin verificación directa.
+No fue posible leer del disco el rol y la skill, contrastar el checkout ni guardar el informe canónico. Se utilizaron el rol, la skill, el delta completo y las evidencias adjuntos. La evidencia se acepta como aportada, sin verificación directa.
 
-No se modificaron implementación, estados ni archivos. Este informe se emite íntegro para transcripción exacta en `docs/review/code_reviews/B-ADV-0041-code-review.md`.
+La limitación del ejecutor no constituye un defecto del producto ni demuestra una configuración inválida. No falta material imprescindible para emitir este dictamen N/A sobre el delta suministrado.
+
+No se modificaron implementación, estados ni archivos. Este informe se entrega íntegro en stdout para su transcripción en la ruta canónica indicada.
