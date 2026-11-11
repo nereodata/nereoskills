@@ -5,10 +5,9 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.2"
-status: blocked
+status: planned
 created_at: 2026-11-09
 updated_at: 2026-11-11
-pendiente_de: humano
 ---
 
 # B-ADV-0033: El orquestador escala al humano hallazgos de Hades destinados al especificador
@@ -94,3 +93,7 @@ pendiente_de: humano
 ¿Puedes habilitar el acceso de Claude Code o configurar Hades con uno de sus arneses de reserva operativo para poder ejecutar la revisión obligatoria?
 RT-01 añadido. RED del triaje: 5 tests, 7 fallos de subcasos esperados; producción sin modificar. Hades no emite dictamen: Your organization has disabled Claude subscription access for Claude Code. El motor no conmuta a reservas ante este fallo y sigue encontrando Claude fuera del PATH. No existe valor por defecto seguro para habilitar una suscripción o cambiar la configuración de roles; hace falta un recurso operativo de revisión. Tras resolver: repetir review-test, corregir H-01/H-02 y solicitar review-code. Delta y evidencia documentados en ficha y revisión v1.1.2.
 Responder: /responder Q-ADV-0002 <respuesta>
+
+
+## Intervención humana Q-ADV-0002
+Q-ADV-0002: Decisión humana de 7495519376: Ya no tengo cuenta de claude. ¿No hay forma de hacer las pruebas con mocks? ¿Necesitamos tener llms para las pruebas? No deberíamos, no?
