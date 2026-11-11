@@ -1,18 +1,18 @@
 ---
 id: T-ADV-0033
-title: "Delimitar la autonomía del arnés para preservar el ciclo de revisión de Adevv"
+title: "Entregar el contexto vigente del paso y preservar el ciclo de revisión de Adevv"
 type: funcional
-weight: 100
+weight: 60
 dificultad: media
-version: ""
-status: backlog
+version: "v1.2.0"
+status: planned
 depende_de: []
 origen: "Petición del usuario (2026-11-05): mantener la iniciativa y la paralelización del arnés evitando revisiones paralelas al ciclo controlado por Adevv"
 created_at: 2026-11-05
-updated_at: 2026-11-05
+updated_at: 2026-11-11
 ---
 
-# T-ADV-0033: Delimitar la autonomía del arnés para preservar el ciclo de revisión de Adevv
+# T-ADV-0033 · Entregar el contexto vigente del paso y preservar el ciclo de revisión de Adevv
 
 ## 🎯 Objetivo de Negocio
 
@@ -43,4 +43,10 @@ Hades puede repartir el análisis de una revisión si lo considera útil, conser
 
 ## Alcance y límites
 
-Registrar esta capacidad como una única tarea, sin versión asignada. El diseño decidirá la ubicación común del contrato y cómo evitar duplicaciones, aprovechando la construcción de prompts y las instrucciones existentes. Mantener el texto breve y centrado en responsabilidades; no introducir restricciones generales a subagentes, interceptores específicos por arnés, ni nuevas puertas de aprobación.
+La entrega de v1.2.0 reúne en el mandato las instrucciones del paso y el contrato común de responsabilidades. El diseño decidirá cómo aprovechar los constructores de prompts y las skills existentes.
+
+## Criterios adicionales de v1.2.0
+
+- [ ] **CA-M-7.** Un paso nuevo recibe su objetivo, entradas, autoridad y condición de fin. Las instrucciones de otras fases y los procedimientos excepcionales quedan accesibles bajo demanda.
+- [ ] **CA-M-8.** En una retoma se identifican las decisiones vigentes, el último dictamen aplicable, el hallazgo pendiente y las evidencias necesarias. El historial sigue consultable y las decisiones sustituidas se reconocen como históricas.
+- [ ] **CA-M-9.** Comprobar con un caso equivalente a T-AFN-0139 que el agente puede retomar la tarea con la identidad académica común acordada, sin cargar toda la ficha ni volver a exigir archivos históricos por idioma. Comparar el contexto inicial servido en ese paso antes y después.

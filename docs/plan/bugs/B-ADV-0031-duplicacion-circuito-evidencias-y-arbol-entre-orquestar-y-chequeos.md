@@ -2,13 +2,14 @@
 id: B-ADV-0031
 title: "Duplicación del circuito de lectura/escritura de evidencias y huella de árbol entre orquestar.py y chequeos.py"
 type: bug
-weight: 1500
+weight: 70
 dificultad: media
-version: ""
-status: backlog
+version: "v1.2.0"
+status: planned
+depende_de: []
 origen: "T-ADV-0032; revisar-version v1.1 (docs/review/versions/v1.1-arquitectura.md), H-01 🟡"
 created_at: 2026-11-07
-updated_at: 2026-11-07
+updated_at: 2026-11-11
 ---
 
 # B-ADV-0031: Duplicación del circuito de lectura/escritura de evidencias y huella de árbol entre orquestar.py y chequeos.py
@@ -28,3 +29,9 @@ updated_at: 2026-11-07
 
 ## 📋 Evidencias
 - `docs/review/versions/v1.1-arquitectura.md`, hallazgo H-01.
+
+## Criterios de aceptación de v1.2.0
+
+- [ ] El comando `--verificar`, la evidencia suministrada a Hades y el preflight consultan el mismo historial aplicable, también desde un worktree secundario.
+- [ ] Los tres identifican el último resultado real de la comprobación. Un fallo posterior impide reutilizar el verde anterior y se explica por qué procede ejecutar, esperar o reutilizar.
+- [ ] La identidad respeta las entradas y el entorno acreditables de la etapa. Si faltan datos en registros históricos, se conserva su trazabilidad y se vuelve a ejecutar cuando corresponda.
