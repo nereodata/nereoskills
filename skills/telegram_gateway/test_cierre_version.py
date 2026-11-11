@@ -232,3 +232,47 @@ class CierreTests(unittest.TestCase):
         self.assertEqual(self.git('branch', '--show-current'), 'main')
         self.assertIn(self.git('rev-parse', 'main'), self.git('ls-remote', 'origin', 'refs/heads/main'))
         self.assertEqual(self.git('cat-file', '-t', 'v1.0.0'), 'tag')
+
+    def test_b0037_matriz_telegram_api_sin_revision_no_publica(self):
+        for iid in ('T-ADV-0100', 'B-ADV-0100'):
+            for informe in (None, 'Veredicto: RECHAZADO'):
+                for entrada in ('telegram', 'api'):
+                    with self.subTest(iid=iid, informe=informe, entrada=entrada):
+                        fixture = CierreTests()
+                        fixture.setUp()
+                        try:
+                            fixture.assert_revision_obligatoria(self, iid, informe, entrada)
+                        finally:
+                            fixture.doCleanups()
+
+    def assert_revision_obligatoria(self, test, iid, informe, entrada):
+        """Ejercita cada entrada con todas las demás condiciones válidas."""
+        self.git('branch', '-m', 'hotfix/v1.1.2')
+        for path in self.root.rglob('*.md'):
+            path.write_text(path.read_text(encoding='utf-8').replace('v1.0.0', 'v1.1.2').replace('v1.0', 'v1.1.2'), encoding='utf-8')
+        for name in ('task_config.yaml', 'pyproject.toml'):
+            path = self.root / name
+            path.write_text(path.read_text(encoding='utf-8').replace('1.0.0', '1.1.2'), encoding='utf-8')
+        for kind in ('arquitectura', 'revision'):
+            (self.root / f'docs/review/versions/v1.0-{kind}.md').rename(
+                self.root / f'docs/review/versions/v1.1.2-{kind}.md')
+        (self.root / 'docs/plan/tasks/task.md').unlink()
+        (self.root / 'docs/review/code_reviews/T-DEMO-0001-code-review.md').unlink()
+        folder = 'tasks' if iid.startswith('T-') else 'bugs'
+        self.write(f'docs/plan/{folder}/{iid}.md',
+                   f'---\nid: {iid}\nversion: v1.1.2\nstatus: completed\ndepende_de: []\n---\n')
+        if informe:
+            self.write(f'docs/review/code_reviews/{iid}-code-review.md', informe)
+        self.commit()
+        before = self.snapshot()
+        if entrada == 'telegram':
+            response = self.respond('/cerrar v1.1.2 confirmo')
+        else:
+            with test.assertRaises(ValueError) as error:
+                motor.cargar_cierre_version().release_tools.publicar_version(self.root, 'v1.1.2')
+            response = str(error.exception)
+        for fragment in (iid, 'informe ausente' if informe is None else 'informe rechazado',
+                         'revisar-tarea', 'validar'):
+            test.assertIn(fragment, response)
+        test.assertEqual(before, self.snapshot())
+        self.launcher.assert_not_called()

@@ -84,7 +84,7 @@ parche.
 - base_calidad: c29d8c67bdbdc8d587e78faf2dd2025007113ea8
 - Se conserva hotfix/v1.1.2, rama autorizada ya abierta. No se publica ni etiqueta.
 - A, B, C1, C2, D, E y F: [EXEC], con el alcance descrito arriba.
-- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
+- Verificación al cierre: `python -m unittest tests.test_revision_release tests.test_orquestar.RevisionProductoTests tests.test_orquestar.OrquestarRegressionTests tests.test_orquestar.SuiteRecoveryTests skills.telegram_gateway.test_cierre_version skills.orquestar.test_metricas tests.test_orquestar.HallazgosHadesRoutingTests skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun`. Cobertura de informes, preflight y selector; métricas conservan su agrupación histórica.
 - Calidad: `git diff --check` y `adevv orquestar --calidad --base c29d8c67bdbdc8d587e78faf2dd2025007113ea8`; no hay lint, tipado ni escáner configurados. No cambian dependencias.
 - Delta-first CA3: ya existen informes formales RECHAZADO para B-ADV-0032 y B-ADV-0033, con hallazgos enrutados a artemisa en sus fichas. No se simula aprobación ni se duplica su desarrollo dentro de este bug.
 - DEC: separar identidad operativa completa de versión de la agrupación estadística mayor/menor. vX.Y equivale a vX.Y.0; parches positivos se aíslan.
@@ -155,3 +155,30 @@ parche.
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades /review-spec APROBADO (9/10) en docs/review/spec_reviews/B-ADV-0037-spec-review.md: H1, H2 y H3 resueltos por Atenea, sin nuevos hallazgos. Decision: reanudar desarrollo desde la especificacion corregida; adaptar diseno y tests preliminares de wip/B-ADV-0037 sin sobreescribir los artefactos aprobados. Verificacion acotada: 45 pruebas OK; regresiones nuevas pendientes de adaptar.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-test RECHAZADO: RT-01 Mayor exige observar referencias locales/remotas y artefactos en preflight, cuota y recuperacion antes de revalidar; RT-02 Media exige diagnostico N/A sin justificacion. Ambos para Artemisa; decision: reanudar desarrollo y corregir pruebas sin cambiar especificacion.
+
+
+## Resultado de este intento de desarrollo (2026-11-11)
+
+- Se retomaron diseño y pruebas del WIP sin alterar el feature aprobado.
+- C1: 15 pruebas ejecutadas mediante `--verificar`, 26 fallos de aserción
+  esperados del contrato; sin errores de importación, sintaxis ni fixtures en
+  la última ejecución. La matriz Telegram/API usa ocho repositorios/remotos
+  bare independientes. El transporte de Hades se simula; no hay red real.
+- Compilación de ambas pruebas y `git diff --check`: verdes con `--verificar`.
+  No hay herramientas de lint/tipado configuradas. Suite completa no ejecutada.
+- Hades `/review-test`: RECHAZADO. RT-01 Mayor y RT-02 Media, ambos para
+  Artemisa; informe en `docs/review/test_reviews/B-ADV-0037-test-review.md`.
+  El arnés no pudo acceder al disco; el informe se conserva a partir de stdout
+  y solo acredita revisión estática de los materiales adjuntos.
+- Se ejecutó `--enrutar-hallazgo B-ADV-0037 artemisa`; el comando dejó
+  `status: planned` e indicó terminar el paso. No se solicita intervención humana.
+- C1 pendiente: añadir snapshots locales/remotos/artefactos al preflight y a
+  cuota/recuperación antes de revalidar, y diagnóstico específico N/A sin motivo;
+  luego repetir review-test. Adaptar las fixtures operativas identificadas en
+  el diseño. C2/D/E/F siguen pendientes, sin cambios de producción ni aprobación
+  de código. Documentación pública del comportamiento futuro no se ha aplicado.
