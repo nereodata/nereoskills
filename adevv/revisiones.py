@@ -4,7 +4,7 @@ import hashlib
 import os
 import re
 import subprocess
-from html import escape
+from collections import deque
 from html.parser import HTMLParser
 from itertools import chain
 from pathlib import Path
@@ -97,7 +97,7 @@ class CitasHTML(HTMLParser):
         if not continuacion and ('<' not in linea or codigo_sangrado
                                  or re.match(r' {0,3}(?:>|`{3,}|~{3,})', linea)):
             return linea
-        protegida = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', lambda m: escape(m[0]), linea)
+        protegida = linea.replace(r'\<', r'\&lt;')
         self.visible.clear()
         self.feed(protegida + '\n')
         visible = ''.join(self.visible).rstrip('\n')
@@ -150,13 +150,47 @@ def interrumpe_cita(linea):
             or re.fullmatch(r' {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*', linea))
 
 
+FRAGMENTO = re.compile(CitasHTML.etiqueta + r'|\\[^\w\s]|(?<!`)(?P<marca>`+)(?!`)(?P<codigo>.*?)'
+                       r'(?<!`)(?P=marca)(?!`)', re.I | re.S)
+
+
+def ocultar_codigo_markdown(linea, pendientes):
+    """Oculta los fragmentos delimitados dentro del párrafo antes de interpretar su HTML."""
+    parrafo = [linea]
+    for otra in pendientes:
+        if (not otra.strip() or interrumpe_cita(otra) or re.match(CERCO, otra)
+                or re.match(r' {0,3}(?:>|#{1,6}(?:\s|$)|[-+*]\s|1[.)]\s|=+\s*$)', otra)):
+            break
+        parrafo.append(otra)
+    texto = '\n'.join(parrafo)
+    fin_linea = len(linea)
+    visibles = []
+    desde = 0
+    for marca in FRAGMENTO.finditer(texto):
+        if marca.start() >= fin_linea:
+            break
+        if marca['codigo'] is None:
+            continue
+        visibles.extend((texto[desde:marca.start()], '…'))
+        desde = marca.end()
+        if desde > fin_linea:
+            fin_linea = texto.find('\n', desde)
+            if fin_linea < 0:
+                fin_linea = len(texto)
+    for _ in range(texto.count('\n', 0, fin_linea)):
+        pendientes.popleft()
+    return ''.join(visibles) + texto[desde:fin_linea]
+
+
 def lineas_del_informe(texto):
     """Conserva las declaraciones del informe fuera de citas y ejemplos de código."""
     abierto = ''
     parrafo_citado = False
     citas_html = CitasHTML()
     sangrias = []
-    for original in contenido_del_informe(CitasHTML.inicio_incompleto.sub('&lt;', texto)):
+    pendientes = deque(contenido_del_informe(CitasHTML.inicio_incompleto.sub('&lt;', texto)))
+    while pendientes:
+        original = pendientes.popleft()
         literal = abierto or citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata
         linea, marcador, cambio_lista = contenido_de_lista(original, sangrias, literal)
         if cambio_lista:
@@ -167,6 +201,10 @@ def lineas_del_informe(texto):
         if parrafo_citado and interrumpe_cita(linea):
             parrafo_citado = False
         if not abierto:
+            if ('`' in linea and not (citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata)
+                    and not (interrumpe_cita(linea) or citas_html.etiqueta_aislada.fullmatch(linea)
+                             or re.match(r' {0,3}(?:>|`{3,}|~{3,})| {4}', linea))):
+                linea = ocultar_codigo_markdown(linea, pendientes)
             visible = citas_html.sin_citas(linea)
             if visible is None:
                 if citas_html.bloque or not linea.strip():
