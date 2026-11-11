@@ -4,7 +4,9 @@ import hashlib
 import os
 import re
 import subprocess
+from html import escape
 from html.parser import HTMLParser
+from itertools import chain
 from pathlib import Path
 
 from adevv.registro_metricas import leer_registros
@@ -49,25 +51,39 @@ class CitasHTML(HTMLParser):
     def __init__(self):
         super().__init__()
         self.profundidad = 0
+        self.visible = []
 
     def handle_starttag(self, tag, attrs):
         if tag == 'blockquote':
+            if not self.profundidad:
+                self.visible.append(' ')
             self.profundidad += 1
+        elif not self.profundidad:
+            self.visible.append(self.get_starttag_text())
 
     def handle_endtag(self, tag):
         if tag == 'blockquote' and self.profundidad:
             self.profundidad -= 1
+        elif not self.profundidad:
+            self.visible.append(f'</{tag}>')
 
-    def contiene_cita(self, linea):
-        """Consume una línea si abre, continúa o cierra una cita."""
-        if not (self.profundidad or self.rawdata):
-            if linea.startswith(('    ', '\t')) or linea.lstrip().startswith('>'):
-                return False
-            linea = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', '', linea)
-            if not re.search(r'<blockquote(?=[\s/>]|$)', linea, re.I):
-                return False
-        self.feed(linea + '\n')
-        return True
+    def handle_data(self, data):
+        if not self.profundidad:
+            self.visible.append(data)
+
+    def sin_citas(self, linea):
+        """Retiene el texto propio a ambos lados de una cita, incluso entre líneas."""
+        continuacion = self.profundidad or self.rawdata
+        if not continuacion and ('<blockquote' not in linea.lower() or linea.startswith(('    ', '\t'))
+                                 or re.match(r' {0,3}(?:>|`{3,}|~{3,})', linea)):
+            return linea
+        protegida = re.sub(r'(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)|\\<', lambda m: escape(m[0]), linea)
+        if not continuacion and not re.search(r'<blockquote(?=[\s/>]|$)', protegida, re.I):
+            return linea
+        self.visible.clear()
+        self.feed(protegida + '\n')
+        visible = ''.join(self.visible).rstrip('\n')
+        return visible if visible.strip() else None
 
 
 def lineas_del_informe(texto):
@@ -85,13 +101,17 @@ def lineas_del_informe(texto):
     parrafo_citado = False
     citas_html = CitasHTML()
     for linea in lineas:
+        if not abierto:
+            linea = citas_html.sin_citas(linea)
+            if linea is None:
+                parrafo_citado = False
+                yield None
+                continue
         marca = re.match(cerco, linea)
         contenido = linea.strip()
         if abierto:
             if cierra(linea, abierto):
                 abierto = ''
-        elif citas_html.contiene_cita(linea):
-            parrafo_citado = False
         elif marca:
             abierto = marca[1]
             parrafo_citado = False
@@ -164,8 +184,20 @@ def commit_del_intento(root, iid):
 def palabras_informe(texto):
     """Identifica el cuerpo histórico aunque al restaurarlo se sangre, cite o intercale una nota."""
     cuerpo = []
+    cerco = ''
     for linea in texto.splitlines():
-        contenido = linea.strip().lstrip('>#-* \t').replace('**', '')
+        contenido = linea.strip().lstrip('> \t')
+        marca = re.match(r'(`{3,}|~{3,})', contenido)
+        if cerco:
+            if marca and marca[0].startswith(cerco) and not contenido[marca.end():].strip():
+                cerco = ''
+            else:
+                cuerpo.extend(re.findall(r'\w+', contenido.casefold()))
+            continue
+        if marca:
+            cerco = marca[0]
+            continue
+        contenido = contenido.lstrip('#-* \t').replace('**', '')
         if re.match(r'(?:Producto revisado|Rechazo reevaluado|Veredicto(?: final)?):', contenido, re.I):
             continue
         if not re.fullmatch(r'APROBADO\.?|RECHAZADO\.?|N/A\.?', contenido, re.I):
@@ -173,42 +205,43 @@ def palabras_informe(texto):
     return cuerpo
 
 
-def acreditacion_anterior(root, ruta, historial, texto, carpetas):
-    """Recupera la emisión y su huella a través de ediciones de seguimiento."""
-    veredicto, huella, rechazo_reevaluado = cabecera_informe(texto)
-    emision = None
-    misma_emision = True
-    tras_rechazo = False
-    palabras = palabras_informe(texto)
-    for sha in historial:
+def informes_confirmados(root, ruta, historial):
+    """Lee en orden de emisión las revisiones de la ruta, incluidas sus eliminaciones."""
+    for sha in reversed(historial):
         commit = sha.decode('ascii')
         blob = subprocess.run(['git', 'show', f'{commit}:{ruta}'], cwd=root, capture_output=True)
-        if blob.returncode:
-            misma_emision = False
-            continue
-        historico = blob.stdout.decode('utf-8')
-        previo, anterior, referencia = cabecera_informe(historico)
-        if tras_rechazo:
-            if previo == veredicto:
-                if huella is not None:
-                    producto_anterior = anterior if anterior is not None else huella_producto(root, commit, carpetas)
-                    if huella != producto_anterior:
-                        continue
-                originales = palabras_informe(historico)
-                actuales = iter(palabras)
-                if all(p in actuales for p in originales):
-                    return emision, huella, True
-            continue
-        if previo == 'RECHAZADO':
-            if rechazo_reevaluado:
-                return emision, huella, rechazo_reevaluado != commit
-            tras_rechazo = True
-            continue
-        misma_emision = misma_emision and previo == veredicto and (huella is None or anterior == huella)
-        if misma_emision:
-            emision = commit
-            huella = anterior
-            rechazo_reevaluado = rechazo_reevaluado or referencia
+        yield commit, '' if blob.returncode else blob.stdout.decode('utf-8')
+
+
+def acreditacion_anterior(root, ruta, historial, texto, carpetas):
+    """Atribuye cada edición al producto y la referencia de su emisión original."""
+    buscado = cabecera_informe(texto)[0]
+    previo = emision = huella = referencia = ultimo_rechazo = None
+    aprobaciones = []
+    revocadas = 0
+    for commit, informe in chain(informes_confirmados(root, ruta, historial), [(None, texto)]):
+        veredicto, declarada, reevaluado = cabecera_informe(informe)
+        if veredicto != previo or (declarada is not None and declarada != huella):
+            emision, huella, referencia = commit, declarada, reevaluado
+        elif reevaluado:
+            referencia = reevaluado
+        previo = veredicto
+        if commit and veredicto == 'RECHAZADO':
+            ultimo_rechazo = commit
+            revocadas = len(aprobaciones)
+        elif commit and veredicto == buscado:
+            aprobaciones.append((emision, huella, informe))
+    if ultimo_rechazo and referencia:
+        return emision, huella, referencia != ultimo_rechazo
+    palabras = palabras_informe(texto)
+    for origen, declarada, historico in aprobaciones[:revocadas]:
+        if huella is not None:
+            producto = declarada if declarada is not None else huella_producto(root, origen, carpetas)
+            if producto != huella:
+                continue
+        actuales = iter(palabras)
+        if all(p in actuales for p in palabras_informe(historico)):
+            return emision, huella, True
     return emision, huella, False
 
 

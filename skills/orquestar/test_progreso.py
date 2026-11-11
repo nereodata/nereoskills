@@ -400,6 +400,43 @@ class ProgresoTests(unittest.TestCase):
     def test_restaurar_aprobacion_con_cuerpo_sangrado(self):
         self.comprobar_restauracion('', sangria='\n    ')
 
+    def test_restaurar_aprobacion_sin_lenguaje_del_ejemplo(self):
+        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+        cabecera = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\n'
+        cuerpo = 'Comprobación del doble.\n~~~python\nassert doble(3) == 6\n~~~'
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, cabecera + cuerpo)
+        self.commit('aprobar A con un ejemplo Python')
+        self.escribir(self.informe, cabecera.replace('APROBADO', 'RECHAZADO') + 'Falta corregir el doble.')
+        self.commit('revocar la aprobación')
+        rechazo = self.git('rev-parse', 'HEAD')
+        restaurado = cuerpo.replace('~~~python', '~~~')
+        self.escribir(self.informe, cabecera + restaurado)
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+        self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+        self.escribir(self.informe, cabecera + f'Rechazo reevaluado: {rechazo}\n' + restaurado)
+        self.commit('reevaluar el último rechazo')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def test_edicion_historica_sin_huella_conserva_el_producto_de_origen(self):
+        carpetas = motor.backlog_dirs(self.root)
+        huella_a = motor.huella_producto(self.root, 'HEAD', carpetas)
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_a}')
+        self.commit('aprobar A sin explicación')
+        self.escribir('producto.py', 'def doble(n):\n    return 2 * n\n')
+        self.escribir(self.informe, '**Veredicto:** APROBADO')
+        self.commit('introducir B y retirar la huella de la aprobación anterior')
+        huella_b = motor.huella_producto(self.root, 'HEAD', carpetas)
+        self.assertNotEqual(huella_a, huella_b)
+        self.escribir(self.informe, f'**Veredicto:** RECHAZADO\nProducto revisado: {huella_b}')
+        self.commit('rechazar B')
+        self.escribir(self.informe, f'**Veredicto:** APROBADO\nProducto revisado: {huella_b}\nHe comprobado el doble.')
+        self.commit('aprobar B con explicación propia')
+        self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+        self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
     def test_aprobacion_escueta_de_a_no_invalida_revision_de_b(self):
         carp = motor.backlog_dirs(self.root)
         huella_a = motor.huella_producto(self.root, 'HEAD', carp)
@@ -613,13 +650,19 @@ class ProgresoTests(unittest.TestCase):
         self.assertEqual(self.revisores, [('claude', 'principal'), ('codex', 'reserva')])
 
     def test_rechazo_propio_despues_de_encabezado_citado(self):
-        """D4: el rechazo del principal termina la invocación antes de la reserva."""
+        self.comprobar_rechazo_del_principal('> # Informe anterior\n**Veredicto:** RECHAZADO')
+
+    def test_rechazo_propio_antes_de_cita_html_en_la_misma_linea(self):
+        self.comprobar_rechazo_del_principal(
+            '**Veredicto:** RECHAZADO. El informe anterior decía <blockquote>APROBADO</blockquote>.')
+
+    def comprobar_rechazo_del_principal(self, dictamen):
+        """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
             'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
         self.llamadas.append(('bug-fix', self.iid))
         def respuesta(harness):
-            texto = ('> # Informe anterior\n**Veredicto:** RECHAZADO' if harness == 'claude'
-                     else '**Veredicto:** APROBADO')
+            texto = dictamen if harness == 'claude' else '**Veredicto:** APROBADO'
             return 0, {'modelos': {harness: {'entrada': 7}}}, texto
         self.assertEqual(self.revisar(respuesta), 0)
         revisores = [f for f in motor.leer_metricas(self.root) if f.get('rol') == 'hades']
