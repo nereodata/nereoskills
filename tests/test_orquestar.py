@@ -1608,6 +1608,75 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.assertEqual(self.observe_failure(salida), (iid, ''))
             self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(recaidas))
 
+    def test_group_promotion_preserves_other_groups_level_and_budget(self):
+        iid, _ = self.observe_failure(self.pedidos(0))
+        p = motor.fichero_de(self.root, iid)
+        for n in (1, 2):
+            self.complete(iid)
+            self.observe_failure(self.pedidos(n))
+        for n in range(4):
+            self.complete(iid)
+            self.observe_failure(f'run {n}\nfirma: certificado revocado')
+        self.assertEqual(motor.frontmatter(p)['dificultad'], 'dificil')
+        self.observe_failure(self.pedidos(4))
+        fm = motor.frontmatter(p)
+        self.assertEqual((fm['dificultad'], fm['suite_dificultad'], fm['suite_intentos']), ('media', 'media', '2'))
+        self.complete(iid)
+        self.observe_failure(self.pedidos(5))
+        fm = motor.frontmatter(p)
+        self.assertEqual((fm['dificultad'], fm['suite_intentos']), ('dificil', '0'))
+
+    def test_destination_commit_failure_resumes_with_original_verdict(self):
+        calls = self.hades('humano')
+        iid, _ = self.umbral()
+        self.complete(iid)
+        p = motor.fichero_de(self.root, iid)
+        run = subprocess.run
+
+        def fallo(args, *pos, **kwargs):
+            if args[:2] == ['git', 'commit'] and any('aplicar diagnóstico de la suite' in arg for arg in args):
+                raise subprocess.CalledProcessError(1, args, stderr=b'commit rechazado')
+            return run(args, *pos, **kwargs)
+
+        with patch.object(subprocess, 'run', side_effect=fallo):
+            with self.assertRaises((motor.diagnostico_suite.DiagnosticoPendiente, subprocess.CalledProcessError)):
+                self.observe_failure(self.pedidos(3))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('diagnosticar-suite', iid))
+        pregunta, = motor.listar_preguntas(self.root)
+        self.assertEqual(pregunta['pregunta'], '¿Puedes autorizar la migración de moneda?')
+        _, motivo = motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
+        self.assertIn(pregunta['pregunta'], motivo)
+        self.assertEqual(motor.listar_preguntas(self.root), [pregunta])
+        self.assertEqual(len(calls), 1)
+        self.assertIn('aplicar diagnóstico de la suite', self.git('log', '-1', '--format=%s'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertEqual(p.read_text(encoding='utf-8').count('## Conclusión del diagnóstico'), 1)
+        self.assertEqual(motor.estado(self.root, 'docs')[0], 'PARAR')
+
+    def test_destination_add_failure_resumes_developer_strategy_once(self):
+        calls = self.hades('desarrollador')
+        iid, _ = self.umbral()
+        self.complete(iid)
+        p = motor.fichero_de(self.root, iid)
+        run = subprocess.run
+
+        def fallo(args, *pos, **kwargs):
+            if args[:2] == ['git', 'add'] and any(arg.endswith('-revision.md') for arg in args):
+                raise subprocess.CalledProcessError(1, args, stderr=b'add rechazado')
+            return run(args, *pos, **kwargs)
+
+        with patch.object(subprocess, 'run', side_effect=fallo):
+            with self.assertRaises((motor.diagnostico_suite.DiagnosticoPendiente, subprocess.CalledProcessError)):
+                self.observe_failure(self.pedidos(3))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('diagnosticar-suite', iid))
+        self.assertEqual(motor.registrar_fallo_suite(self.root, 'v0.1', 'suite'), (iid, ''))
+        self.assertEqual(len(calls), 1)
+        self.assertFalse(motor.listar_preguntas(self.root))
+        self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('bug-fix', iid))
+        self.assertIn('aplicar diagnóstico de la suite', self.git('log', '-1', '--format=%s'))
+        self.assertEqual(self.git('status', '--porcelain'), '')
+        self.assertEqual(p.read_text(encoding='utf-8').count('## Hallazgo de Hades enrutado'), 1)
+
     def test_causal_groups_resume_budget_and_one_revised_fix(self):
         calls = self.hades('desarrollador')
         iid, intentos = self.umbral()

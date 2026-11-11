@@ -253,3 +253,8 @@ El historial JSON del cierre conserva el presupuesto por causa, los commits, las
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades /review-code RECHAZADO (7,67/10). H1: conservar el nivel y presupuesto propios de A al volver después de promocionar B. H2: mantener pendiente una transición cuyo commit falla y retomarla con el mismo dictamen sin duplicar destino ni pregunta. Ambos altos para Artemisa, resolver y aportar evidencia en SuiteRecoveryTests.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades aprueba las regresiones de H1/H2 (8,75/10). Hallazgo medio para Artemisa: complementar el fallo de commit del destino humano con un fallo de git add al aplicar la estrategia del desarrollador. Se implementa y verifica en este paso.

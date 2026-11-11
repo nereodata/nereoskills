@@ -2,6 +2,16 @@
 
 # B-ADV-0036 · Revisión de pruebas
 
+## Reanudación tras los hallazgos de código H1 y H2
+
+Hades aprobó las dos regresiones con **8,75/10** (cobertura 8, aserciones 9, rojo correcto 9, estabilidad 9). El rojo dirigido reprodujo los dos fallos en 7,568 s. Al volver a A, la prueba obtuvo `dificil/0` en lugar de `media/2`. Tras fallar el commit del destino humano, el planificador eligió la parada antes de confirmar el diagnóstico. Las aserciones posteriores al fallo comprueban el commit, el árbol limpio, el dictamen único y la pregunta única.
+
+El dictamen se emitió por stdout mediante la reserva autorizada. Hades evaluó el delta y las fixtures adjuntos al mandato. Sus intentos de leer el repositorio fallaron con «registered Core launch requires an installed app». Reutilizó la evidencia roja y la compilación dirigida del árbol `d0814970a0`. Formato y lint se omitieron por ausencia de herramientas. El proyecto carece de tipador configurado.
+
+Hades asignó a Artemisa un hallazgo medio: complementar la cobertura del fallo de commit con un fallo de `git add` al aplicar una estrategia de desarrollo. La tercera regresión añadida tras el dictamen exige reanudar el diagnóstico antes del arreglo y confirmar la estrategia una sola vez. El dictamen anterior a esa adición abarca las dos primeras regresiones.
+
+## Revisión inicial de las pruebas del diagnóstico
+
 Hades aprobó la revisión de H1–H3 con 8,75/10. Puntuó cobertura con 8/10 y aserciones, rojo correcto y estabilidad con 9/10 cada una. La reserva autorizada revisó el delta, las fixtures completas, los criterios y la salida real adjuntos al mandato. El acceso local devolvió «registered Core launch requires an installed app». La ejecución aportada fue de 19 pruebas en 47,725 s, con cuatro fallos funcionales. La compilación dirigida pasó. El proyecto carece de tipador y omitió formato y lint por ausencia de herramientas.
 
 Hades dio por resueltos la reanudación con la misma solicitud, la ausencia de aviso humano al fallar el revisor, el historial y la parada efectiva de ambos terminales, y la coherencia entre la causa y la intervención. No encontró hallazgos críticos ni altos. Asignó a Artemisa dos hallazgos medios:
