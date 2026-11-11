@@ -34,3 +34,19 @@ explícita. No se contradice ninguna DEC ni se añade dependencia.
 Las regresiones previas se conservan. La nueva regresión POSIX crea un hijo real
 con pipes heredados y comprueba que queda ausente o zombi (sin ejecución), tanto
 por timeout como por gracia tras JSON; se omite explícitamente en Windows.
+
+## Reanudación H-01/H-03/H-04
+
+La captura JSON supervisa proceso y lectores hasta su cierre conjunto. Si el padre
+sale con pipes heredados abiertos, conserva la gracia JSON y el timeout, y aplica
+una gracia de cierre desde su salida incluso sin JSON ni timeout configurado.
+La captura por líneas mantiene el temporizador durante p.wait(), también tras EOF
+o excepción; solo lo cancela después de esa espera.
+
+Un sentinel privado distingue el timeout omitido en lanzar() de None explícito
+(desactivado). ejecutar() y agente() propagan siempre el valor resuelto; los
+llamantes directos sin argumento siguen consultando el entorno. No cambian los
+consumidores enumerados ni se invalida ninguna prueba; ninguna DEC contradicha.
+Los plazos siguen en segundos monotónicos y el sondeo en 20 ms. Se añaden
+regresiones dentro de SubprocesoColgadoTests, incluida la salida inmediata del
+padre en POSIX (skip explícito en Windows) y supervisión con streams controlados.

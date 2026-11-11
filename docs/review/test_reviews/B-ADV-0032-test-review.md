@@ -1,3 +1,75 @@
+# Revisión de tests: B-ADV-0032
+
+**Veredicto: RECHAZADO**
+
+**Destino del informe:** `docs/review/test_reviews/B-ADV-0032-test-review.md`
+**Revisor:** Hades
+**Alcance:** exclusivamente `tests.test_orquestar.SubprocesoColgadoTests`, delta de reanudación y regresiones previas del bug. No se ha revisado producción.
+
+## Evidencia y límites
+
+Revisión estática de las instrucciones, ficha y pruebas adjuntas. Se acepta la evidencia RED comunicada mediante `adevv orquestar --verificar`: 10 tests, cuatro fallos de aserción esperados en los cuatro tests nuevos y un skip POSIX explícito; duración de 5,901 s. No se han repetido pruebas ni utilizado herramientas.
+
+La ejecución RED acredita que las pruebas se cargan y alcanzan sus aserciones en ese entorno. No se atribuye una comprobación independiente de compilación. No hay lint ni tipado configurados.
+
+La validación real POSIX sigue pendiente en **B-ADV-0038**; no se declara ejecutada. Los adjuntos no incluyen el diseño ni el informe previo completos: la reevaluación de H-01/H-03/H-04 utiliza los requisitos y resúmenes recogidos en la ficha.
+
+## Puntuaciones
+
+| Criterio | Puntuación | Evaluación |
+|---|---:|---|
+| Cobertura | 7/10 | Falta proteger el aislamiento POSIX del segundo camino de captura exigido por H-01. |
+| Aserciones | 9/10 | Comprueban resultados, métricas, conservación de salida, terminación y precedencia de configuración. |
+| Rojo correcto | 9/10 | Los cuatro fallos comunicados corresponden a comportamientos del delta, sin errores de carga o fixtures. |
+| Estabilidad | 8/10 | Uso razonable de eventos y dobles; persiste un margen de arranque demasiado corto en una regresión real. |
+| **Media** | **8,25/10** | **Existe un hallazgo ALTA que impide aprobar.** |
+
+## Reevaluación de hallazgos previos
+
+| Hallazgo | Estado en las pruebas | Evidencia |
+|---|---|---|
+| **H-01: terminar descendientes y supervisar pipes tras salir el padre** | **Persiste parcialmente** | El nuevo test simula padre terminado con streams abiertos y exige cierre forzado exitoso. La prueba POSIX combina padre vivo/salido y presencia/ausencia de JSON, pero solo recorre la captura JSON de `agy`. No protege el aislamiento del camino por líneas. |
+| **H-03: distinguir timeout omitido y desactivado** | **Resuelto en el alcance probado** | Se contrasta `timeout=None` explícito con argumento omitido bajo el mismo entorno; otro test exige que el cero del perfil llegue como `None` a `lanzar()`. |
+| **H-04: mantener timeout durante la espera posterior al EOF** | **Resuelto en el alcance probado** | El doble entrega EOF inmediatamente, mantiene bloqueada la espera y exige que intervenga la terminación, con código 124 y métrica `timeout`. |
+
+Las regresiones previas conservan comprobaciones de métricas y respuesta tras JSON final, timeout antes del JSON, configuración no finita y propagación de entrada/timeout desde `agente()`. Esta última también comprueba una única invocación al reanudar una sesión que termina por timeout.
+
+## Hallazgos nuevos
+
+### RT-01 — 🟠 ALTA: H-01 no queda protegido en el camino de captura por líneas
+
+**Para:** desarrollador / Artemisa
+**Destino:** resolver en B-ADV-0032
+
+**Localización:** `test_eof_no_cancela_timeout_antes_de_esperar_proceso`, `test_terminacion_posix_dirigida_al_grupo_aislado` y `test_descendiente_real_no_sobrevive_al_timeout_ni_a_gracia_json`.
+
+La ficha exige aislar **ambos `Popen`** en una sesión POSIX propia. La prueba real de descendientes siempre utiliza `harness='agy'` con `--output-format json`. El test de `codex` sustituye `Popen` y no comprueba cómo se crea el proceso. El test de terminación comprueba `killpg(pid, SIGKILL)`, pero tampoco acredita que ese PID identifique un grupo aislado.
+
+Por tanto, las pruebas podrían aprobar aunque el camino por líneas omitiera crear su sesión: H-04 quedaría cubierto, pero la terminación del grupo de ese camino seguiría sin protección.
+
+**Corrección requerida:** añadir, dentro de esta clase, una prueba del camino por líneas que compruebe la creación de la sesión POSIX propia. Puede hacerse de forma portable simulando POSIX e inspeccionando los argumentos de `Popen`. La prueba debe fallar si se elimina ese aislamiento únicamente de dicho camino.
+
+La ejecución real POSIX continúa bajo B-ADV-0038; este hallazgo no solicita declararla ejecutada ni ampliar la suite.
+
+### RT-02 — 🟡 MEDIA: el timeout de 0,2 s incluye el arranque del intérprete
+
+**Para:** desarrollador / Artemisa
+**Destino:** resolver en B-ADV-0032
+
+**Localización:** `test_lanzar_agy_corta_por_timeout_cuando_proceso_se_cuelga_antes_del_json`.
+
+La prueba inicia un intérprete real, limita toda la ejecución a 0,2 s y exige recuperar `escribiendo informes...`. En un host cargado, especialmente Windows, el proceso puede agotar ese plazo antes de emitir la línea. El test fallaría por velocidad de arranque aunque el timeout funcionase correctamente.
+
+**Corrección requerida:** ampliar el margen de este caso para permitir el arranque y la emisión de la línea, manteniéndolo claramente por debajo de los 60 s de bloqueo del hijo. Conservar las aserciones de código 124, timeout, error y salida parcial.
+
+## Cierre
+
+La revisión queda **RECHAZADA por RT-01**. Las aserciones nuevas de H-03 y H-04 discriminan los comportamientos requeridos; falta proteger el aislamiento POSIX del camino de captura por líneas. No se solicita revisar producción, ejecutar la suite completa ni ampliar el alcance a otros bugs.
+
+---
+
+## Informes anteriores
+
 # B-ADV-0032 — Reevaluación de RT-01
 
 **Veredicto: APROBADO. Media: 8,50/10. Sin hallazgos ALTA ni CRÍTICA.**

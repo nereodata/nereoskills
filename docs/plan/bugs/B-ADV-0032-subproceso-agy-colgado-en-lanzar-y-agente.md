@@ -71,3 +71,14 @@ updated_at: 2026-11-11
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades review-code RECHAZADO. H-01 persiste ALTA: padre JSON sale pero descendiente conserva pipes; vigilar streams y terminar grupo. H-03 MEDIA resolver: distinguir timeout ausente y desactivado al propagar perfil y entorno. H-04 ALTA: temporizador de captura por lineas se cancela antes de esperar proceso tras EOF. Todos para desarrollador/artemisa. Decision: reanudar desarrollo y ampliar solo SubprocesoColgadoTests; sin pregunta humana. H-02 resuelto; evidencia POSIX pendiente registrada en B-ADV-0038.
+
+### Reanudación H-01/H-03/H-04
+
+- Se conserva base_calidad y la rama hotfix activa. A/B/C1/C2/D/E/F mantienen el alcance del triaje previo.
+- C1 añade supervisión tras salida del padre, EOF anterior a salida y precedencia de timeout desactivado; solo SubprocesoColgadoTests.
+- RED de reanudación: 10 tests, 4 fallos esperados (propagación None, EOF/wait, padre salido, entorno), 1 skip POSIX; 5,901 s. Ejecutado mediante --verificar antes de corregir producción.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades review-test RECHAZADO 8,25. RT-01 ALTA para desarrollador: verificar start_new_session en Popen de captura por lineas. RT-02 MEDIA resolver: ampliar timeout de 0,2s de prueba real para tolerar arranque. RED: 10 tests, 4 fallos esperados y 1 skip POSIX; produccion sin corregir. El motor ordena parar por dos rechazos consecutivos. Decision: reanudar Artemisa con perfil superior; sin pregunta humana.

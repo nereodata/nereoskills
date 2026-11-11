@@ -2030,6 +2030,78 @@ class SubprocesoColgadoTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_padre_salido_con_pipes_abiertos_agota_gracia(self):
+        """El cierre del padre no abandona al descendiente que mantiene los pipes."""
+        cerrado = motor.threading.Event()
+        proceso = MagicMock(returncode=0)
+        proceso.poll.return_value = 0
+        proceso.stdout.fileno.side_effect = ValueError
+        proceso.stderr.fileno.side_effect = ValueError
+        partes = [b'{"status":"SUCCESS","response":"ok"}\n']
+
+        def leer_out(*args):
+            if partes:
+                return partes.pop()
+            cerrado.wait(5)
+            return b''
+
+        def leer_err(*args):
+            cerrado.wait(5)
+            return b''
+
+        proceso.stdout.read.side_effect = leer_out
+        proceso.stderr.read.side_effect = leer_err
+        try:
+            with (patch.object(motor.subprocess, 'Popen', return_value=proceso),
+                  patch.object(motor, '_terminar_arbol_proceso', side_effect=lambda p: cerrado.set()) as terminar):
+                codigo, salida, _, timeout, forzado = motor._ejecutar_captura_json(
+                    ['agy'], self.root, 'agy', timeout=1, gracia_cierre=0.05)
+            terminar.assert_called_once_with(proceso)
+            self.assertEqual(codigo, 0)
+            self.assertIn('SUCCESS', salida)
+            self.assertFalse(timeout)
+            self.assertTrue(forzado)
+        finally:
+            cerrado.set()
+
+    def test_eof_no_cancela_timeout_antes_de_esperar_proceso(self):
+        """Recibir EOF mantiene protegido el wait final por el mismo timeout."""
+        terminado = motor.threading.Event()
+        proceso = MagicMock(returncode=0)
+        proceso.__enter__.return_value = proceso
+        proceso.stdout = []
+        proceso.wait.side_effect = lambda *a, **kw: terminado.wait(1)
+        proceso.__exit__.side_effect = lambda *a: proceso.wait()
+        with (patch.object(motor.subprocess, 'Popen', return_value=proceso),
+              patch.object(motor, '_terminar_arbol_proceso', side_effect=lambda p: terminado.set()),
+              patch('builtins.print')):
+            codigo, metricas, _ = motor.lanzar(['codex'], self.root, 'codex', timeout=0.05)
+        self.assertTrue(terminado.is_set(), 'Se canceló el timeout antes de esperar al proceso')
+        self.assertEqual(codigo, 124)
+        self.assertTrue(metricas.get('timeout'))
+
+    def test_timeout_explicito_desactivado_no_recupera_entorno(self):
+        """None explícito desactiva; omitir el argumento conserva el entorno."""
+        respuesta = (0, '{"status":"SUCCESS","response":"ok"}', '', False, False)
+        with (patch.object(motor, '_ejecutar_captura_json', return_value=respuesta) as captura,
+              patch('builtins.print')):
+            motor.lanzar(['agy', '--output-format', 'json'], self.root, 'agy',
+                         env={'ORQUESTAR_TIMEOUT_S': '60'}, timeout=None)
+            self.assertIsNone(captura.call_args.kwargs['timeout'])
+            motor.lanzar(['agy', '--output-format', 'json'], self.root, 'agy',
+                         env={'ORQUESTAR_TIMEOUT_S': '60'})
+            self.assertEqual(captura.call_args.kwargs['timeout'], 60)
+
+    def test_ejecutar_propaga_timeout_desactivado_del_perfil(self):
+        """El perfil con cero prevalece sobre el entorno durante el paso."""
+        with (patch.object(motor, 'comando', return_value=['agy']),
+              patch.object(motor, 'arnes', return_value='agy'),
+              patch.object(motor, 'lanzar', return_value=(0, {}, '')) as lanzar):
+            motor.ejecutar(MagicMock(), self.root, 'mandato',
+                           env={'ORQUESTAR_TIMEOUT_S': '60'}, rol={'timeout_s': 0})
+        self.assertIn('timeout', lanzar.call_args.kwargs)
+        self.assertIsNone(lanzar.call_args.kwargs['timeout'])
+
     def test_timeout_no_finito_conserva_valor_seguro(self):
         """Una configuración inválida no desactiva el timeout del agente."""
         for valor in ('inf', '-inf', 'nan'):
@@ -2055,8 +2127,8 @@ class SubprocesoColgadoTests(unittest.TestCase):
     @unittest.skipUnless(os.name == 'posix', 'Requiere grupos de procesos POSIX reales')
     def test_descendiente_real_no_sobrevive_al_timeout_ni_a_gracia_json(self):
         """Mata al hijo que hereda pipes sin alcanzar al grupo del invocador."""
-        for json_final in (False, True):
-            with self.subTest(json_final=json_final):
+        for json_final, padre_sale in ((False, False), (True, False), (False, True), (True, True)):
+            with self.subTest(json_final=json_final, padre_sale=padre_sale):
                 pid_file = self.root / 'hijo.pid'
                 grupo_file = self.root / 'grupo.pid'
                 grupo_invocador = os.getpgrp()
@@ -2066,7 +2138,7 @@ class SubprocesoColgadoTests(unittest.TestCase):
                     f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
                     f'Path({str(grupo_file)!r}).write_text(str(os.getpgrp())); '
                     f'print({("{\"status\":\"SUCCESS\",\"response\":\"ok\"}" if json_final else "iniciado")!r}, flush=True); '
-                    'time.sleep(60)'
+                    + ('sys.exit(0)' if padre_sale else 'time.sleep(60)')
                 )
                 inicio = time.monotonic()
                 try:
