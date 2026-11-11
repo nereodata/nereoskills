@@ -5,13 +5,12 @@ type: bug
 weight: 1
 dificultad: dificil
 version: "v1.1.3"
-status: blocked
+status: planned
 depende_de: []
-perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
+perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}}
 created_at: 2026-11-11
 updated_at: 2026-11-11
 origen: "Incidente de release/v1.2, B-ADV-0031: al menos 28 ejecuciones repitiendo fallo de acceso de Hades"
-pendiente_de: humano
 ---
 
 # B-ADV-0044 · Repetición indefinida de un impedimento técnico
@@ -91,3 +90,7 @@ En esta misma revisión se reprodujo H3: la primera línea del dictamen literal 
 - Cola de la última salida:
 
     (el arnés no produjo salida)
+
+## Reanudación del trabajo técnico autorizado
+
+El bloqueo por dos rechazos corresponde al límite del perfil estricto introducido al preparar este hotfix. No hay una decisión ni un recurso del humano pendiente. Se conserva GPT-6 Astra con esfuerzo alto para Artemisa, Hades y Atenea, la dificultad difícil y todos los dictámenes. Se retira el modo estricto añadido durante la preparación y se devuelve la ficha a planned para corregir N5 y N6, completar las regresiones y corregir H1-H3 y D1-D3. No se considera aprobado ningún hallazgo por esta reanudación.
