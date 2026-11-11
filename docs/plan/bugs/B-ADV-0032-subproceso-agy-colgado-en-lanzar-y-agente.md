@@ -5,7 +5,7 @@ type: bug
 weight: 20
 dificultad: media
 version: "v1.1.1"
-status: completed
+status: planned
 created_at: 2026-11-08
 updated_at: 2026-11-10
 ---
@@ -50,3 +50,10 @@ updated_at: 2026-11-10
 - Subfase E: Documentación — `[EXEC]`; changelog de la versión parche.
 - Subfase F: Cierre — `[PENDIENTE]`; tras calidad y revisión.
 - Verificación al cierre: `python -m unittest tests.test_orquestar.SubprocesoColgadoTests`, porque ejercita procesos reales que se cuelgan y la propagación de timeout.
+
+- base_calidad: 9a143486c663f2afe2bbe4e7ef3a30743c65532a (padre del commit de corrección 314f3d8; recuperada para la revisión formal pendiente).
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades RECHAZADO en docs/review/code_reviews/B-ADV-0032-code-review.md. H-01 ALTA para desarrollador: POSIX mata solo al padre, debe aislar y terminar el grupo y verificar descendiente real dentro de SubprocesoColgadoTests. H-02 MEDIA para desarrollador, resolver: rechazar inf/nan y conservar timeout seguro. Decisión: Artemisa reanuda desarrollo; no se requiere recurso ni decisión humana.
