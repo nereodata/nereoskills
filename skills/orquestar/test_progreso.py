@@ -893,6 +893,37 @@ class ProgresoTests(unittest.TestCase):
     def test_preflight_tras_apertura_literal_en_una_linea(self):
         self.comprobar_informe_pendiente(self.informe_con_apertura_literal(' '), 'informe rechazado')
 
+    def informe_con_dos_ejemplos(self, separador):
+        return (f'El primer ejemplo es <code>uno{separador}</code>. Segundo ejemplo: <code>`</code>`\n'
+                'Veredicto: APROBADO\n</code>' + self.rechazo_exterior)
+
+    def test_rechazo_tras_dos_ejemplos_html(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_dos_ejemplos('\n'))
+
+    def test_preflight_tras_dos_ejemplos_html(self):
+        self.comprobar_informe_pendiente(self.informe_con_dos_ejemplos('\n'), 'informe rechazado')
+
+    def test_rechazo_tras_dos_ejemplos_en_una_linea(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_dos_ejemplos(''))
+
+    def test_preflight_tras_dos_ejemplos_en_una_linea(self):
+        self.comprobar_informe_pendiente(self.informe_con_dos_ejemplos(''), 'informe rechazado')
+
+    def informe_con_encabezado(self, separador):
+        return f'## El separador `{separador}**Veredicto:** RECHAZADO\nAfecta a `lector`.'
+
+    def test_rechazo_tras_encabezado_con_acento(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_encabezado('\n'))
+
+    def test_preflight_tras_encabezado_con_acento(self):
+        self.comprobar_informe_pendiente(self.informe_con_encabezado('\n'), 'informe rechazado')
+
+    def test_rechazo_tras_encabezado_y_linea_vacia(self):
+        self.comprobar_rechazo_del_principal(self.informe_con_encabezado('\n\n'))
+
+    def test_preflight_tras_encabezado_y_linea_vacia(self):
+        self.comprobar_informe_pendiente(self.informe_con_encabezado('\n\n'), 'informe rechazado')
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
