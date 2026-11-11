@@ -109,3 +109,18 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades D, árbol 45f708880b084d9ebddbf88a5a092b9a06c41c98, RECHAZADO 7,00/10. H2 resuelto. D3 exige mantener pendiente una aprobación revocada incluso con cambios de presentación o seguimiento. H3 exige respetar la apertura HTML de blockquote multilínea. D4 exige reconocer el rechazo propio inmediatamente después de un encabezado Markdown citado. Reanudar desarrollo con esas tres reproducciones y reevaluar C1/D. Las 149 pruebas del triaje pasaron en 170,668 s. Detalles en docs/review/code_reviews/B-ADV-0044-code-review.md.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 APROBADO 9,25/10, árbol ce8f66c2a349515fe8bd836a48a9133bbd2a261b. Cuatro rojos reproducen D3, H3 y D4 y tres controles pasan. Artemisa añade la comprobación de llamada efectiva N7 y corrige los tres defectos de producto antes de la revisión D.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: C1 rechazado por N8 (9,00/10): distinguir una referencia a R1 de otra a R2, dos rechazos reales del mismo producto, manteniendo el caso del SHA de aprobación y un HEAD administrativo posterior. N7 resuelto. Reanudar desarrollo y reevaluar las pruebas antes de D.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: D RECHAZADO 6,83/10, árbol 8923fe8e39557265a1ca358caa8cc80d6fd785b3. D4 resuelto. Reanudar C2 con cuatro reproducciones de Hades: D3 conserva el cuerpo histórico con sangría al identificar restauraciones; H3 reconoce la apertura HTML multilínea de blockquote tras texto introductorio; D5 conserva la referencia al último rechazo de la emisión aprobada cuando una nota la desplaza; D6 distingue el producto A del B en la restauración histórica de aprobaciones escuetas. C1 aprobada 9,50/10 sin pendientes. Las 154 pruebas del triaje pasaron en 265,674 s. Ver informe canónico de código para entradas y resultados.

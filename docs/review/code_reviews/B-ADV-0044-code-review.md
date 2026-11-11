@@ -1,71 +1,54 @@
 **Veredicto:** RECHAZADO
-Producto revisado: ba15b9a535f826667efe4fe5161ba2f6bb4a02a64b2a5d1e670d833c04cdab8c
+Producto revisado: e50708ae4f3aa13fb7bb180a592ccc043c1c126bed2f9a837fa4486f2994b0ac
+Rechazo reevaluado: 6a4dd527fcd249ac06dca44a702bb7779aa8a8e5
 
-# B-ADV-0044 · Reevaluación independiente de código
+# B-ADV-0044 · Reevaluación independiente de código D
 
-Media **7,00/10**. Paso `bug-fix`, rama `hotfix/v1.1.3`. Delta desde la ronda D del árbol `c311964fe4ef788c496c2f459de194ebbab85075` hasta `45f708880b084d9ebddbf88a5a092b9a06c41c98`. H2 queda resuelto. Persisten D3 y H3 por dos entradas que producen un cierre o un dictamen indebidos. La corrección de H3 también oculta un rechazo propio en el caso D4.
+**Media 6,83/10.** Rama `hotfix/v1.1.3`. Revisé el delta desde `45f708880b084d9ebddbf88a5a092b9a06c41c98` hasta el árbol de evidencia `8923fe8e39557265a1ca358caa8cc80d6fd785b3` y comprobé la huella de producto de la cabecera. **D4 está resuelto. D3 y H3 persisten en dos entradas concretas.** La nueva reconstrucción del historial también invalida dos aprobaciones legítimas. Los cuatro hallazgos abiertos corresponden al **desarrollador (Artemisa)**, con destino **`resolver` en C2**.
 
-## Hallazgos anteriores que persisten
+## Hallazgos anteriores
 
-**D3 🔴 · Una línea vacía permite cerrar con una aprobación revocada.** Estado **persiste**. Para `desarrollador`, destino `resolver`. En un repositorio temporal confirmé la aprobación de A y después su rechazo, ambos con la huella de A. Restauré la primera aprobación en el WIP. La copia exacta produjo el motivo «aprobación restaurada anterior al rechazo» y dejó el ID pendiente. Añadí únicamente una línea vacía al final del mismo fichero. Con el mismo HEAD y producto, `motivo_revision` devolvió la cadena vacía y `pendientes_cierre` devolvió `[]`. En `adevv/revisiones.py:141`, la búsqueda con `--find-object` identifica el blob completo. Un salto de línea adicional cambia ese objeto y basta para que la coincidencia de la huella del producto levante el rechazo. La corrección debe conservar la precedencia del rechazo ante cambios de presentación o seguimiento y seguir admitiendo el informe que documenta una reevaluación posterior de A.
+**D3 🔴 · Persiste. La sangría permite cerrar con una aprobación revocada.** En un repositorio Git temporal confirmé la aprobación de A y después su rechazo con la misma huella. Restaurar la aprobación exacta en el WIP dejó el ID pendiente. Al insertar una línea vacía y cuatro espacios delante del único párrafo, `Primera evaluación de A.`, `pendientes_cierre` pasó a devolver `[]`. La cabecera, las palabras, el producto y el historial eran los mismos. En `adevv/revisiones.py:104` la línea sangrada se excluye de las declaraciones y en `adevv/revisiones.py:163` también desaparece de la comparación histórica. La solución debe conservar ese texto al identificar una copia revocada y seguir exigiendo una declaración propia para emitir un veredicto. Las variantes de C1 de línea vacía y nota añadida ya pasan.
 
-**H3 🟠 · Una cita HTML con la apertura en dos líneas se registra como dictamen propio.** Estado **persiste**. Para `desarrollador`, destino `resolver`. Ante una respuesta técnica que dice «No pude revisar», incluye el fragmento siguiente y termina con «Sigue pendiente», `declaracion` devolvió `('APROBADO', None)`.
+**H3 🟠 · Persiste. Una cita HTML abierta después de texto se atribuye a Hades.** Pasé esta respuesta técnica al lector del árbol revisado:
 
-```html
-<blockquote
- cite="informe-anterior">
+```text
+No pude revisar. El informe anterior dice: <blockquote
+ cite="archivo">
 **Veredicto:** APROBADO
 </blockquote>
+Sigue pendiente.
 ```
 
-En `adevv/revisiones.py:65` se detecta el comienzo de la etiqueta, pero el contador solo aumenta cuando el cierre `>` está en esa misma línea. Con retorno 0, `agente` registra la aprobación y omite la reserva autorizada. La corrección debe mantener el estado de la cita durante la apertura multilínea. La continuación de párrafo Markdown, el bloque HTML con apertura en una línea y el informe íntegro de la reserva ya están cubiertos por el verde dirigido.
+`declaracion` devolvió `('APROBADO', None)`. En `adevv/revisiones.py:63`, el lector solo inicia el análisis HTML si el primer carácter de la línea tras la sangría es `<`. Con retorno 0, `agente` registra esa aprobación y omite la reserva autorizada. Debe reconocer la apertura tras el texto introductorio y mantener el estado de la cita hasta su cierre. La apertura multilínea al principio de línea que reprodujo C1 ya funciona.
 
-## Hallazgo nuevo
+**D4 · Resuelto.** Ante `> # Acta` seguido inmediatamente del rechazo formal, el lector devolvió `('RECHAZADO', None)`. La regresión dirigida acredita que las métricas atribuyen el rechazo al principal y que se realizó una sola llamada efectiva.
 
-**D4 🟠 · Un encabezado citado oculta el rechazo propio que viene después.** Para `desarrollador`, destino `resolver`. Pasé a `declaracion` las dos líneas siguientes. Devolvió `('', None)`.
+## Hallazgos nuevos de producto
 
-```markdown
-> # Informe anterior
-**Veredicto:** RECHAZADO
-```
+**D5 🟠 · Una nota posterior invalida una reevaluación vigente.** Confirmé una reevaluación de A con su huella, el SHA correcto del último rechazo y el mismo cuerpo de la aprobación original. El preflight devolvió `[]`. Añadí únicamente `Nota de seguimiento.` entre la huella y la referencia al rechazo. El mismo ID pasó a figurar como «aprobación restaurada anterior al rechazo». En `adevv/revisiones.py:182` se recuperan del informe histórico el veredicto y la huella, pero se pierde la referencia al rechazo que ya había acreditado esa emisión. La corrección debe conservar la acreditación de la reevaluación confirmada a través de esa edición y mantener la precedencia de cualquier rechazo posterior.
 
-El encabezado citado termina en la primera línea. En `adevv/revisiones.py:72`, cualquier línea citada con contenido activa `parrafo_citado`, incluso un encabezado. El filtro consume así la declaración formal de la segunda línea. En `skills/orquestar/orquestar.py:2368`, esa salida con código 0 queda sin dictamen y puede activar una reserva pese al rechazo ya emitido. La corrección debe limitar la continuación implícita a párrafos citados y conservar el veredicto propio posterior a un encabezado.
+**D6 🟠 · Una aprobación escueta de A impide cerrar una revisión nueva de B.** Confirmé una aprobación de A que contenía solo el veredicto y la huella, y después un rechazo de A. Cambié el producto a B y confirmé un informe nuevo con la huella de B y una explicación propia de la corrección. El preflight marcó el ID como «aprobación restaurada anterior al rechazo». En `adevv/revisiones.py:184`, la comparación admite cualquier aprobación histórica con el mismo veredicto. Al eliminar la huella, la aprobación escueta aporta solo las palabras «Veredicto» y «APROBADO», presentes en el informe nuevo. Para resolverlo, la decisión de restauración debe tener en cuenta el producto acreditado y evitar que el vocabulario obligatorio de la cabecera baste para identificar una copia.
 
-## Hallazgos anteriores resueltos
+## Alcance del seguimiento
 
-| Hallazgo | Estado | Evidencia en el alcance revisado |
-|---|---|---|
-| H2 · Edición administrativa de la huella | Resuelto | Al desplazar o suprimir la huella de A se recupera la de su emisión en el historial. En ambas regresiones B sigue pendiente y su aprobación posterior permite el cierre. |
-| H1 · Objetivo tras relanzar | Resuelto | Se conserva el último commit del intento atribuido al ID. |
-| H4 · Reserva tras salida normal sin dictamen | Resuelto | Una salida clasificada como técnica sigue la cadena de reservas. H3 y D4 afectan a la clasificación previa. |
-| H5 · Consumo y promoción | Resuelto | Se conserva el registro del consumo y de los reintentos técnicos sin promoción. |
-| H6 · WIP rastreado e ignorado | Resuelto | Se conserva la instantánea mediante índice temporal. |
-| H7 · Dependencias históricas | Resuelto | Selección y recuperación siguen compartiendo la condición de dependencias pendientes. |
-| D1 · Reevaluación en el último intento | Resuelto | La transición de pendiente a vigente sigue contando como avance. |
-| D2 · Mandato efímero | Resuelto | La exclusión de la huella sigue limitada al mandato temporal que retira la CLI. |
+H1, H2, H4–H7, D1 y D2 **siguen resueltos en sus casos revisados**. Se conservan el objetivo del intento al relanzar, la recuperación de la huella histórica, las reservas y su consumo, el WIP rastreado, el criterio común de dependencias, el avance por reevaluación y la exclusión del mandato efímero. D5 afecta específicamente a la referencia al rechazo añadida en esta ronda.
 
-## Contraste con los seis escenarios
-
-1. **Repetición del impedimento.** El límite de dos intentos por paso e ID y la conservación de métricas, WIP y perfil mantienen su cobertura en los tres pasos. H3 permite que una salida técnica eluda la clasificación de revisión pendiente.
-2. **Seguimiento de análisis.** Se conserva el agotamiento de `work-plan` tras un commit vacío y otro de notas.
-3. **Avance parcial en fichas antiguas.** Se mantienen los controles de WIP, prueba, especificación, dictamen y respuesta incorporada. D4 afecta al reconocimiento del dictamen cuando el rechazo sigue a un encabezado citado.
-4. **Aislamiento y recarga.** Se conserva el presupuesto por ID entre proveedores, su transferencia en la recarga y la tanda nueva del arranque manual.
-5. **Cierre tras retorno erróneo.** H2 conserva la acreditación antigua ante la edición de cabecera. D3 vulnera el requisito de aprobación vigente del que dependen el selector y el preflight. La reproducción se hizo en el WIP.
-6. **Reserva y cuota.** Se conservan la contabilidad y la espera por cuota. H3 puede saltarse la reserva y D4 puede invocarla después de un rechazo válido.
+Los escenarios de repetición de notas, presupuesto de análisis y aislamiento entre IDs conservan el límite por paso, la transferencia en la recarga y la tanda nueva del arranque manual. H3 afecta a la selección de la reserva. D3, D5 y D6 afectan a la barrera de aprobación vigente que comparten selección, recuperación y preflight. **C1 continúa aprobada, 9,50/10, sin hallazgos de pruebas pendientes.** Los cuatro rojos históricos de C1 reprodujeron defectos de producto. Sus entradas exactas pasan en la verificación actual.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Corrección | 5/10 | Se reproducen un cierre con una aprobación revocada, una aprobación citada atribuida al agente y la pérdida de un rechazo propio. |
-| Seguridad | 9/10 | Git recibe argumentos separados. El escaneo de secretos aportado está en verde. |
-| Conformidad | 5/10 | Se mantienen las capas y el stack. Los tres hallazgos incumplen el requisito de revisión propia y vigente. |
-| Calidad | 8/10 | Los consumidores comparten el criterio de cierre. El estado del lector confunde encabezados con párrafos citados. |
-| Eficiencia | 8/10 | La reconstrucción consulta un blob por revisión histórica recorrida y, al llegar a un rechazo, busca el objeto en Git. |
-| Documentación | 7/10 | La guía recoge la recuperación de huellas desplazadas o eliminadas. La garantía de que se requiere una reevaluación para levantar el rechazo excede el comportamiento observado. |
+| Corrección | 5/10 | Se reproducen un cierre indebido, una aprobación citada y dos bloqueos de aprobaciones vigentes. |
+| Seguridad | 9/10 | Git recibe argumentos separados y el escaneo de secretos del delta pasó. |
+| Conformidad | 5/10 | El cambio conserva las capas y la biblioteca estándar. Las decisiones de cierre y atribución incumplen el contrato en los casos descritos. |
+| Calidad | 7/10 | Los consumidores comparten el criterio de cierre. El filtro de declaraciones elimina texto necesario para identificar una restauración. |
+| Eficiencia | 8/10 | La lectura del historial ejecuta un `git show` por revisión recorrida y puede llegar al principio de la historia del informe. |
+| Documentación | 7/10 | La guía explica el presupuesto y la referencia de reevaluación. Su garantía sobre cambios de espaciado excede el comportamiento observado. |
 
 ## Análisis estático y evidencia
 
-Se reutilizó el verde del árbol exacto para las **149 pruebas dirigidas en 170,668 s**, Ruff selectivo, el escaneo de secretos y las dos comprobaciones de diferencias Git. Se ejecutó el módulo de orquestación del proyecto con `--calidad --base 4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` en modo de consulta. Salió con código 0 y comunicó que omitió formato y lint automáticos por falta de herramientas. El proyecto carece de tipado configurado y el delta conserva las dependencias.
+Reutilicé el verde de **154 pruebas dirigidas en 265,674 s**, Ruff selectivo, el escaneo de secretos y las dos comprobaciones de diferencias Git. `adevv orquestar --calidad` terminó con código 0 y omitió formato y lint automáticos por ausencia de herramientas. Ruff sí se ejecutó por separado. El proyecto carece de tipado configurado y este delta conserva las dependencias.
 
-Se comprobó el blob de producción contra el árbol solicitado y se calculó la huella de producto de la cabecera. Las observaciones adicionales se limitaron a dos entradas del lector y a la consulta de cierre en un repositorio Git temporal eliminado al terminar. El efecto sobre la reserva se comprobó por lectura de la rama que consume el veredicto.
+Las comprobaciones adicionales se limitaron al lector de dictámenes y al preflight de cierre en tres repositorios temporales eliminados al terminar. Observé directamente los retornos del lector y del preflight. El efecto de H3 sobre la reserva se determinó siguiendo la rama de `agente` que consume el veredicto.

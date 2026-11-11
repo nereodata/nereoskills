@@ -1,44 +1,36 @@
-**Veredicto:** APROBADO · **9,25/10**
+**Veredicto:** APROBADO · **9,50/10**
 
-# B-ADV-0044 · Reevaluación independiente de pruebas
+# B-ADV-0044 · Reevaluación independiente de pruebas C1
 
-Paso `bug-fix` en `hotfix/v1.1.3`. Árbol revisado `17cea52d88b8d898df5bd6383189525f1e18a013`. Referencia histórica de la revisión de pruebas C1: `118e5e5ed1280b019580d1df22efcd4127a576ea`. El delta de pruebas corresponde a `skills/orquestar/test_progreso.py`, de `2774e2b` a `7a27d4c`.
+**N8 resuelto.** La prueba distingue una aprobación revocada, un rechazo anterior (R1) y el último rechazo del mismo producto (R2). Solo la reevaluación que cita R2 permite pasar a la revisión de versión. No quedan hallazgos de pruebas pendientes.
 
-## Reevaluación de H2, H3 y D3
+Revisé el delta de `skills/orquestar/test_progreso.py` entre `e120182fc99dd933c1c8ea8a171d07a26c49934e` y `8841db1c8976d9e180dbae79e7a0c04bf2e02d08` en `hotfix/v1.1.3`. El archivo local coincide con el blob revisado `7bed01e`.
 
-| Hallazgo de producto | Qué discrimina la prueba | Resultado observado |
+## Reevaluación de N8
+
+La prueba confirma en Git la aprobación, R1 y R2 para el mismo ID y la misma huella. Los dos rechazos tienen textos distintos. Después confirma una nota en el resumen de versión, de modo que `HEAD` queda un commit por delante de R2. En los tres subcasos conserva el cuerpo de la aprobación en el informe de trabajo y cambia únicamente el SHA del campo `Rechazo reevaluado`.
+
+| SHA citado | Paso observado en el árbol actual | Comprobación previa al cierre |
 |---|---|---|
-| H2 · Huella desplazada o eliminada | Tras aprobar A con su huella y confirmar el cambio de código a B, un commit modifica solo el informe. Una variante intercala una nota delante de la huella de A y la otra la borra. Ambas exigen que B siga pendiente en el selector y en el preflight. El control posterior exige huellas distintas y permite el cierre al aprobar expresamente B. | **Persiste** en ambas variantes. El selector devuelve `revisar-version` cuando corresponde `revisar-tarea` para el ID. |
-| H3 · Veredicto citado y reserva | El principal devuelve código 0 y cita una aprobación histórica. Se prueban la continuación de un párrafo citado en Markdown, un bloque HTML y un cerco de tildes. Se exige que el principal quede sin veredicto y que la reserva registre el rechazo de su informe íntegro, entregado entre cercos, en la misma invocación. | **Persiste** con la continuación y con HTML. Las métricas contienen solo la fila de Claude y falta la de Codex. El control con tildes pasa y alcanza las comprobaciones del rechazo y de la invocación. |
-| D3 · Restauración tras un rechazo del mismo producto | Se confirman en orden una aprobación y un rechazo de A con la misma huella. Se restaura en el WIP el texto exacto de la primera aprobación. El selector y el preflight deben mantener la revisión pendiente. Después se confirma un informe distinto que reevalúa el hallazgo sobre A y debe permitir el cierre. | **Persiste**. Al restaurar la copia, el selector adelanta `revisar-version`. El caso aísla la precedencia del rechazo manteniendo fijo el producto. |
+| Aprobación original | `revisar-tarea` para `B-DEMO-0001` | El ID figura entre los pendientes. |
+| R1, rechazo anterior | `revisar-tarea` para `B-DEMO-0001` | El ID figura entre los pendientes. |
+| R2, último rechazo | `revisar-version` | La lista de pendientes está vacía. |
 
-Los cinco fallos reproducen decisiones de producto. Para H2, H3 y D3 corresponde al **desarrollador** resolverlas. En las cinco ramas rojas la ejecución termina en la primera aserción fallida. Los controles posteriores de cierre en H2 y D3 y las comprobaciones posteriores de métricas en las dos variantes rojas de H3 quedan pendientes de ejecución.
+El caso de R1 detecta una regla que acepte cualquier rechazo histórico. El de R2 detecta una regla que exija citar el `HEAD` administrativo. **N7 sigue resuelto**: el caso D4 verifica tanto la única llamada efectiva al proveedor principal como el rechazo registrado en métricas. Los hallazgos de pruebas H1–H4 y N1–N6 conservan su estado de resueltos de la ronda anterior.
 
-## Seguimiento de la revisión de pruebas anterior
+## Evidencia y alcance
 
-| Hallazgos de pruebas de C1 | Estado en este delta |
-|---|---|
-| H1 (perfiles), H2 (cuota), H3 (notas), H4 (informe) | **Resueltos**. Se conservan las pruebas de perfiles, espera y consumo, repetición de notas y ausencia de informe para el ID ejecutado. |
-| N1 (aprobación caducada), N2 (diagnóstico), N3 (índice Git), N4 (cierre por ambas entradas) | **Resueltos**. Se conservan sus aserciones y datos de prueba. |
-| N5 (mandato rastreado), N6 (cambio atribuido a otro ID) | **Resueltos**. Siguen presentes la comparación de las huellas recibidas por el proveedor y la ejecución atribuida al segundo ID. |
+El verificador cargó en memoria `6a4dd52:adevv/revisiones.py` y ejecutó la prueba actual. Registró **dos fallos de subcaso en una prueba, en 5,045 s**. Tanto al citar la aprobación como al citar R1, el selector adelantó `revisar-version`. En ambos subcasos el fallo ocurrió antes de la aserción de pendientes. El control positivo de R2 pasó.
 
-## Cobertura de los seis escenarios
-
-Los cuatro primeros conservan sus casos de C1: parada tras dos commits de impedimento en los tres pasos, agotamiento de `work-plan` tras un commit vacío y otro administrativo, recuperación del presupuesto de una ficha antigua por cada una de las cinco aportaciones y aislamiento de intentos entre IDs durante la recarga y el arranque manual. En el quinto, H2 y D3 refuerzan la condición de aprobación vigente que usa el cierre. Se conservan los casos del bucle con retorno 1. En el sexto, H3 distingue la cita técnica del dictamen propio de la reserva. Las pruebas del bucle siguen comprobando el consumo de ambos intentos y la espera por cuota.
+Con el árbol actual, **las ocho pruebas dirigidas pasaron en 18,925 s**, incluidas las comprobaciones del selector y del cierre para las tres referencias. Los cuatro rojos de C1 anteriores reprodujeron defectos de producto en D3 (dos restauraciones de una aprobación revocada), H3 (apertura HTML multilínea) y D4 (rechazo propio tras un encabezado citado). Sus reproducciones están en verde en esta ejecución. El dictamen de esta ronda corresponde a las pruebas C1.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 9/10 | Las dos ediciones de huella, las dos formas de cita y la restauración sobre el mismo producto reproducen las variantes pendientes. |
-| Aserciones | 9/10 | Se observa el siguiente paso e ID, la lista de pendientes y la secuencia de proveedores con el veredicto de cada uno. Los controles positivos exigen admitir una reevaluación y el informe íntegro de la reserva. |
-| Rojo correcto | 10/10 | Las cinco reproducciones fallan por el siguiente paso elegido o por la ausencia de la reserva. El sexto caso pasa con la misma preparación de H3. |
-| Estabilidad | 9/10 | Cada caso usa un repositorio Git temporal aislado, textos fijos y proveedores simulados. Las expectativas dependen del orden explícito de los hechos. |
+| Cobertura | 10/10 | El control cubre las tres referencias y separa el último rechazo del último commit. |
+| Aserciones | 9/10 | Cada referencia exige un paso concreto y comprueba por separado los pendientes de cierre. |
+| Rojo correcto | 10/10 | Las dos referencias obsoletas fallan en la decisión del selector histórico y el control válido pasa con la misma preparación. |
+| Estabilidad | 9/10 | El repositorio temporal fija el orden de los commits. La prueba obtiene los SHA de Git y prescinde de fechas y valores de hash predefinidos. |
 
-## Hallazgos nuevos de pruebas
-
-Ninguno.
-
-## Evidencia
-
-La ejecución dirigida aportada para el árbol revisado registra **6 pruebas en 6,235 s, con 5 fallos de aserción, 1 caso en verde y 0 errores**. Se reutilizaron los resultados en verde de Ruff selectivo y `git diff --check`. El resultado de las 124 pruebas de C1 pertenece a su árbol histórico.
+**Hallazgos nuevos de pruebas:** ninguno. Se reutilizó la evidencia aportada de ejecución, Ruff, escaneo de secretos y comprobaciones de diferencias Git.

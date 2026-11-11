@@ -389,6 +389,43 @@ class ProgresoTests(unittest.TestCase):
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
 
     def test_restaurar_aprobacion_con_huella_del_mismo_producto(self):
+        self.comprobar_restauracion('')
+
+    def test_restaurar_aprobacion_con_linea_vacia(self):
+        self.comprobar_restauracion('\n\n')
+
+    def test_restaurar_aprobacion_con_nota_de_seguimiento(self):
+        self.comprobar_restauracion('\n\n11 de noviembre: se archiva el expediente.', confirmar=True)
+
+    def test_reevaluacion_que_conserva_el_texto_identifica_el_ultimo_rechazo(self):
+        """La referencia de cabecera distingue la reevaluación de una copia con notas."""
+        huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
+        cabecera = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\n'
+        cuerpo = 'Primera revisión.'
+        self.crear_ficha(self.iid, 'completed')
+        self.escribir(self.informe, cabecera + cuerpo)
+        self.commit('primera aprobación')
+        aprobacion = self.git('rev-parse', 'HEAD')
+        fallo = cabecera.replace('APROBADO', 'RECHAZADO')
+        self.escribir(self.informe, fallo + 'Defecto observado.')
+        self.commit('primer rechazo')
+        rechazo_anterior = self.git('rev-parse', 'HEAD')
+        self.escribir(self.informe, fallo + 'El defecto se mantiene en la segunda evaluación.')
+        self.commit('segundo rechazo')
+        rechazo = self.git('rev-parse', 'HEAD')
+        self.escribir(self.resumen, 'Se ha archivado el expediente de revisión.')
+        self.commit('seguimiento posterior al rechazo')
+        for referencia, pendiente in ((aprobacion, True), (rechazo_anterior, True), (rechazo, False)):
+            with self.subTest(referencia=referencia):
+                self.escribir(self.informe, cabecera + f'Rechazo reevaluado: {referencia}\n' + cuerpo)
+                if pendiente:
+                    self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
+                    self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
+                else:
+                    self.assertEqual(motor.estado(self.root, 'docs')[1], 'revisar-version')
+                    self.assertEqual(pendientes_cierre(self.root, 'v1.1.3'), [])
+
+    def comprobar_restauracion(self, seguimiento, confirmar=False):
         """D3: solo una nueva revisión puede levantar el rechazo del mismo producto."""
         huella = motor.huella_producto(self.root, 'HEAD', motor.backlog_dirs(self.root))
         anterior = f'**Veredicto:** APROBADO\nProducto revisado: {huella}\nPrimera revisión.'
@@ -397,7 +434,9 @@ class ProgresoTests(unittest.TestCase):
         self.commit('primera aprobación')
         self.escribir(self.informe, anterior.replace('APROBADO', 'RECHAZADO'))
         self.commit('revisión que detecta un defecto')
-        self.escribir(self.informe, anterior)
+        self.escribir(self.informe, anterior + seguimiento)
+        if confirmar:
+            self.commit('restaurar con nota administrativa')
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('revisar-tarea', self.iid))
         self.assertIn(self.iid, ' '.join(pendientes_cierre(self.root, 'v1.1.3')))
         self.escribir(self.informe, anterior.replace('Primera revisión.', 'Reevaluado el hallazgo del rechazo.'))
@@ -519,6 +558,23 @@ class ProgresoTests(unittest.TestCase):
 
     def test_cita_html_no_emite_dictamen(self):
         self.comprobar_reserva_tras_cita('<blockquote>\n**Veredicto:** APROBADO\n</blockquote>')
+
+    def test_apertura_html_multilinea_no_emite_dictamen(self):
+        self.comprobar_reserva_tras_cita('<blockquote\n cite="informe-anterior">\n**Veredicto:** APROBADO\n</blockquote>')
+
+    def test_rechazo_propio_despues_de_encabezado_citado(self):
+        """D4: el rechazo del principal termina la invocación antes de la reserva."""
+        self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
+            'reserva': {'harness': 'codex', 'model': 'reserva'}}}))
+        self.llamadas.append(('bug-fix', self.iid))
+        def respuesta(harness):
+            texto = ('> # Informe anterior\n**Veredicto:** RECHAZADO' if harness == 'claude'
+                     else '**Veredicto:** APROBADO')
+            return 0, {'modelos': {harness: {'entrada': 7}}}, texto
+        self.assertEqual(self.revisar(respuesta), 0)
+        revisores = [f for f in motor.leer_metricas(self.root) if f.get('rol') == 'hades']
+        self.assertEqual([(f['arnes'], f.get('veredicto')) for f in revisores], [('claude', 'RECHAZADO')])
+        self.assertEqual(self.revisores, [('claude', 'principal')])
 
     def comprobar_reserva_tras_cita(self, cita):
         """H3: la cita permite la reserva y su informe íntegro sí aporta dictamen."""

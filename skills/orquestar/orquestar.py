@@ -550,7 +550,9 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False, mandato_tempor
             and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'):
         producto = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
         cabecera += (f'En /review-code incluye tras el veredicto la línea «Producto revisado: {producto}» '
-                     'si has revisado el producto de este árbol. Declara el veredicto formal en tu respuesta final.\n\n')
+                     'si has revisado el producto de este árbol. Si reevalúas un rechazo, identifica en la cabecera '
+                     'su commit con «Rechazo reevaluado: <SHA completo del último rechazo canónico>». '
+                     'Declara el veredicto formal en tu respuesta final.\n\n')
     return cabecera + prompt
 
 

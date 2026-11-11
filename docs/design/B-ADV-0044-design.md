@@ -12,7 +12,7 @@ El motor registra `commit_producto` en la métrica del intento de desarrollo que
 
 El transporte entrega la respuesta de Hades para reconocer su declaración formal fuera de citas y ejemplos. La huella pertenece a la cabecera del veredicto. Al construir el mandato se omite de la huella de producto el único archivo efímero que la CLI retirará al terminar. La evidencia de pruebas conserva el árbol exacto. La salida normal sin dictamen prueba la siguiente reserva elegible. Cada ejecución exterior que propaga un fallo de revisión conserva sus tokens y la marca técnica. El diagnóstico de suite mantiene su contrato de respuesta JSON y su validador propio.
 
-El historial de la ruta canónica permite recuperar una huella desplazada o eliminada durante el seguimiento. Ante un rechazo, Git identifica por su contenido la copia de una aprobación anterior. Una reevaluación sobre el mismo producto puede mantener su huella y documentar una conclusión nueva.
+El historial de la ruta canónica permite recuperar una huella desplazada o eliminada durante el seguimiento. La cabecera de una reevaluación puede identificar el commit del último rechazo tras la línea de producto. Esto permite acreditar una nueva revisión aunque conserve íntegro el texto de la anterior. Para los informes históricos sin esa referencia, el motor reconoce una restauración si las palabras propias del informe revocado reaparecen en el mismo orden, incluso con cambios de marcado, espaciado o notas intercaladas.
 
 ## Impacto y comprobación
 
