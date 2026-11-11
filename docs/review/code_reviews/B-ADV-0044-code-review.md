@@ -1,77 +1,81 @@
 **Veredicto:** RECHAZADO
-Producto revisado: b4abe95ec95346d7e47b3378cb741454a5bb48ac18630de46199a4eb3aaf42d3
-Rechazo reevaluado: e7aa06d5a8a1a10016551d80635a8f3318be18d7
+Producto revisado: 6ef599ea58239e6ae788d01340a16e61c2893bfacaf27a455a16af76ba1bf93b
+Rechazo reevaluado: 216c5fb138d61d642846f16a6139e6649dafc8b0
 
-# B-ADV-0044 · Reevaluación D de D20
+# B-ADV-0044 · Reevaluación D
 
-**Media 7,00/10.** D20 queda resuelto. D21 y D22 impiden aprobar el cambio. En D21 el preflight admite una ficha cuyo revisor la ha rechazado. En D22 el motor invoca a la reserva pese al rechazo del principal. D23 afecta al coste de leer el informe.
+**Media 7,50/10.** D21, D22 y D23 quedan resueltos. D24 y D25 permiten cerrar una ficha con la aprobación que figura dentro de un ejemplo. D26 activa la reserva pese al rechazo expreso del principal.
 
-## Hallazgo anterior
+## Hallazgos anteriores
 
-**D20 · Resuelto en ambos consumidores.** El lector oculta la apertura literal de `pre` con `@click` hasta el acento grave de cierre, incluso cuando el atributo está en la línea siguiente. Las seis pruebas focalizadas acreditan los tres casos siguientes.
-
-| Entrada | `motor.agente` | `pendientes_cierre` |
+| Hallazgo | Dictamen y evidencia | Responsable y destino |
 |---|---|---|
-| D20 · Apertura literal repartida en dos líneas | Una llamada al principal, rechazo registrado | ID pendiente por «informe rechazado» |
-| Control D20 · Mismo literal en una línea | Una llamada al principal, rechazo registrado | ID pendiente por «informe rechazado» |
-| Control D19 · Apertura HTML efectiva con `@click` dentro de un `div` | Una llamada al principal, rechazo exterior registrado | ID pendiente por «informe rechazado» |
-
-D19 conserva su resolución. El informe anterior solo dejó D20 pendiente.
+| D21 · 🟠 Alta | **Resuelto.** Al cerrar el primer `code`, el lector protege el cierre literal del segundo ejemplo. Con el salto de línea y sin él, el principal registra su rechazo en una llamada y el preflight mantiene la ficha pendiente por «informe rechazado». | Artemisa (`desarrollador`), resuelto en C2. |
+| D22 · 🟠 Alta | **Resuelto.** La búsqueda del acento de cierre termina en la propia línea del encabezado. El rechazo del párrafo siguiente llega a los dos consumidores tanto con separación en blanco como sin ella. | Artemisa (`desarrollador`), resuelto en C2. |
+| D23 · 🟡 Media | **Resuelto.** El lector consume las líneas pendientes y reutiliza el párrafo preparado. En la medición aportada, para 300, 600 y 1.200 líneas, las medianas anteriores fueron 0,077490, 0,298481 y 1,193028 s. Las actuales fueron 0,001748, 0,003273 y 0,007283 s. Ambos lectores devolvieron el rechazo en los tres tamaños. | Artemisa (`desarrollador`), resuelto en C2 para la entrada medida. |
 
 ## Hallazgos nuevos
 
-### D21 · 🟠 Alta · Un cierre literal de HTML da por aprobado un informe rechazado
+### D24 · 🟠 Alta · Un número dentro del ejemplo expone una aprobación
 
 ````markdown
-El primer ejemplo es <code>uno
-</code>. Segundo ejemplo: <code>`</code>`
+La salida fue `
+2. ejemplo
 Veredicto: APROBADO
-</code>
+fin`.
 
 **Veredicto:** RECHAZADO
 ````
 
-El segundo ejemplo muestra cómo se escribe la etiqueta de cierre. La aprobación pertenece a ese ejemplo hasta el cierre efectivo de la cuarta línea. En `adevv/revisiones.py:204`, el lector decide si protege los fragmentos Markdown según el estado HTML al **inicio** de la línea. Como el primer `code` sigue abierto en ese instante, entrega toda la segunda línea a `sin_citas`. Tras cerrar el primer ejemplo y abrir el segundo, el analizador interpreta el cierre entre acentos graves como efectivo. Así queda expuesta la aprobación que precede al rechazo propio.
+En `adevv/revisiones.py:170`, el nuevo patrón corta el párrafo ante cualquier marcador ordenado de uno a nueve dígitos. Dentro de un párrafo en curso, `2. ejemplo` es una continuación. El corte deja sin emparejar los acentos que encierran la aprobación. El lector anterior recuperó el rechazo. El actual registró la aprobación en la única llamada al principal y `pendientes_cierre` devolvió `[]` con la ficha completada. Cambiar solo `2. ejemplo` por `paso 2. ejemplo` recuperó el rechazo del principal y el motivo «informe rechazado».
 
-Con el lector de `e7aa06d5`, `declaracion` devolvió `RECHAZADO`. En el árbol revisado, el proveedor principal registró `APROBADO` en una sola llamada y el preflight devolvió `[]` para la ficha completada. Como control, al eliminar únicamente el salto después de `uno`, el principal registró el rechazo en una llamada y el preflight devolvió «informe rechazado».
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Aplicar la regla de interrupción de un párrafo por una lista ordenada al buscar el cierre del fragmento. El caso y el control deben mantener la ficha pendiente por rechazo en una sola llamada.
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Reconocer el contexto Markdown que sigue al cierre HTML dentro de la misma línea. Tanto el caso como el control deben conservar el rechazo del principal y mantener la ficha pendiente por ese motivo.
-
-### D22 · 🟠 Alta · Un acento grave en un encabezado oculta el rechazo del párrafo siguiente
+### D25 · 🟠 Alta · Una continuación sin sangría de un elemento de lista expone su ejemplo
 
 ````markdown
-## El separador `
+- Se recibio `
+Veredicto: APROBADO
+fin`.
+
+**Veredicto:** RECHAZADO
+````
+
+En `adevv/revisiones.py:166`, la búsqueda termina en cuanto falta la sangría del elemento. Las dos líneas de texto continúan el párrafo de la viñeta y cierran el fragmento antes de la línea vacía. El lector anterior devolvió el rechazo. El actual registró la aprobación del ejemplo como dictamen del principal y el preflight devolvió `[]`. Al añadir dos espacios delante de la segunda y la tercera línea, el principal registró el rechazo en una llamada y el preflight devolvió «informe rechazado».
+
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Conservar las continuaciones de párrafo válidas dentro del elemento de lista al emparejar los acentos. Ambas presentaciones deben producir el rechazo del principal y el mismo motivo de cierre pendiente.
+
+### D26 · 🟠 Alta · Preparar el párrafo por adelantado elimina el cierre efectivo de un ejemplo HTML
+
+````markdown
+Se inspecciono `archivo.py`. Salida: <pre>
+Marca literal: `
+</pre>
 **Veredicto:** RECHAZADO
 Afecta a `lector`.
 ````
 
-El encabezado termina al final de la primera línea. Su acento grave queda literal. En `adevv/revisiones.py:157`, `ocultar_codigo_markdown` comprueba si las líneas **siguientes** empiezan otro bloque, pero admite un encabezado como línea inicial de un párrafo multilínea. Empareja el acento del encabezado con el que precede a `lector` y retira también la declaración intermedia.
+En `adevv/revisiones.py:174`, la sustitución se aplica al párrafo completo antes de entregar la primera línea a `CitasHTML`. El código en línea alrededor de `archivo.py` activa esa preparación. La sustitución empareja el acento literal del ejemplo `pre` con el que precede a `lector` y elimina tanto la etiqueta de cierre como el rechazo exterior. La guarda para un `pre` ya abierto en la línea 200 llega después de esa sustitución.
 
-El lector de `e7aa06d5` devolvió `RECHAZADO`. En el árbol revisado, el principal quedó sin dictamen, el motor invocó a la reserva y registró su aprobación simulada. El preflight mantuvo el ID pendiente por «informe sin veredicto formal». Al insertar únicamente una línea vacía después del encabezado, el principal registró el rechazo en una sola llamada y el motivo pasó a «informe rechazado».
+El lector anterior devolvió el rechazo. Con el actual, el principal quedó sin dictamen, se registró la aprobación de la reserva simulada y el preflight diagnosticó «informe sin veredicto formal». Quitar únicamente los acentos de `archivo.py` conservó el rechazo en la única llamada al principal y dejó la ficha pendiente por «informe rechazado».
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Limitar la búsqueda del delimitador a la línea del encabezado. Con y sin línea vacía deben obtenerse el rechazo del principal en una llamada y el diagnóstico «informe rechazado».
+**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Respetar la apertura y el cierre efectivos de `pre` durante la preparación del párrafo. El marcado de un nombre de archivo anterior al ejemplo debe conservar el dictamen y el número de llamadas del control.
 
-### D23 · 🟡 Media · El lector recorre repetidamente el resto del mismo párrafo
+## Evidencia, análisis estático y límites
 
-En `adevv/revisiones.py:160`, cada línea con código en línea vuelve a recorrer y concatenar el resto del párrafo, incluso si su fragmento se cierra en esa misma línea. En una medición local en memoria repetí la línea «Se comprobo `archivo.py`.», seguida al final del párrafo por una línea vacía y un rechazo. Con 300, 600 y 1.200 líneas, `declaracion` tardó respectivamente 0,078 s, 0,325 s y 1,251 s. El lector anterior tardó unos 0,003 s con 1.200 líneas. Los dos devolvieron el rechazo. El recorrido de los sufijos explica el crecimiento cuadrático y también afecta a las consultas que releen informes históricos.
+Antes de escribir este informe comprobé que el contenido del árbol de trabajo coincidía con el árbol Git `cdcee1cb4fbd493365a05c9bd46aa630ffb27472` y recalculé la huella de la cabecera. Desde `e0adec49b5a340d171503744fa1362fa09c4f37a`, el único archivo de producción modificado es `adevv/revisiones.py`. El alcance de D comprende el lector y las decisiones de sus consumidores. C1 ya estaba aprobada.
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2 al corregir los límites de D21 y D22. Evitar reconstruir el párrafo por cada línea y conservar la lectura de los fragmentos que sí continúan en la línea siguiente.
+Reutilicé las ocho pruebas focalizadas en verde (5,456 s), las 210 del triaje (233,099 s) y la medición local de D23 (mediana de tres ejecuciones). Para D24–D26 comparé ambos lectores en memoria. Ejercité las entradas nuevas y sus controles con `motor.agente`, proveedores simulados y `pendientes_cierre` en repositorios Git temporales, confirmando el informe del principal junto con la ficha completada. La comprobación cubre la selección de proveedor, sus métricas y la decisión de cierre. La suite completa corresponde al cierre de versión.
 
-## Evidencia, calidad y límites
-
-El contenido rastreado del árbol de trabajo coincidía con el árbol Git `e0adec49b5a340d171503744fa1362fa09c4f37a` antes de escribir el informe. Recalculé la huella de producto indicada en la cabecera. El delta desde el rechazo cambia un único archivo de producción, `adevv/revisiones.py`. Los demás cambios corresponden a las pruebas de D20 y al seguimiento.
-
-Reutilicé los resultados del árbol exacto: seis pruebas focalizadas en 4,052 s y las 202 pruebas del triaje en 226,766 s. Para D21 y D22 comparé ambos lectores en memoria y ejercité las entradas nuevas y sus controles con proveedores simulados y repositorios Git temporales. El preflight leyó el informe canónico confirmado junto con la ficha completada. Los tiempos de D23 corresponden a una medición local del lector.
-
-La comprobación sin escritura `adevv orquestar --calidad --base 4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` consta con código 0. El motor omitió formato y lint por ausencia de herramientas detectadas. Por separado pasaron Ruff selectivo (`E9,F63,F7,F82`), `git diff --check` y el escaneo de secretos del delta. El proyecto carece de tipador declarado y esta ronda conserva las dependencias. El alcance dirigido permite dictaminar los defectos reproducidos.
+Sobre la base `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` constan en verde `git diff --check`, el escaneo de patrones de secretos y Ruff selectivo (`E9,F63,F7,F82`). La orden de calidad terminó con código 0 y omitió sus etapas de formato y lint por ausencia de herramientas detectadas. El proyecto carece de tipador declarado. Esta ronda conserva las dependencias.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Corrección | 5/10 | D21 admite un cierre rechazado y D22 sustituye el dictamen del principal. |
-| Seguridad | 9/10 | El lector procesa texto local y el escaneo de secretos pasó. |
-| Conformidad | 6/10 | D20 cumple el diseño. D21 y D22 incumplen la atribución del dictamen exigida para el cierre y la reserva. Se conservan las capas y dependencias previstas. |
-| Calidad | 6/10 | El tratamiento de los delimitadores depende de decisiones tomadas por línea y por párrafo que discrepan en los dos límites reproducidos. |
-| Eficiencia | 6/10 | D23 introduce trabajo cuadrático para un párrafo con fragmentos cortos. |
-| Documentación | 10/10 | La guía y el diseño describen el dictamen propio, la aprobación vigente y la condición para invocar la reserva. |
+| Corrección | 5/10 | Dos entradas permiten cerrar una ficha rechazada y otra sustituye el rechazo por el dictamen de la reserva. |
+| Seguridad | 9/10 | El lector opera sobre texto local y el escaneo de secretos del delta pasó. |
+| Conformidad | 6/10 | Los tres casos incumplen la atribución del dictamen propio exigida por el diseño. El cambio conserva las capas y dependencias previstas. |
+| Calidad | 6/10 | La delimitación del párrafo y el estado de listas y ejemplos HTML producen decisiones incompatibles en las entradas reproducidas. |
+| Eficiencia | 9/10 | La lectura del párrafo de D23 evita los recorridos repetidos y escala aproximadamente con la entrada medida. |
+| Documentación | 10/10 | La guía y el diseño identifican el dictamen que acredita el cierre y la condición que habilita la reserva. |

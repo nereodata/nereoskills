@@ -150,36 +150,29 @@ def interrumpe_cita(linea):
             or re.fullmatch(r' {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*', linea))
 
 
-FRAGMENTO = re.compile(CitasHTML.etiqueta + r'|\\[^\w\s]|(?<!`)(?P<marca>`+)(?!`)(?P<codigo>.*?)'
+FRAGMENTO = re.compile(CitasHTML.etiqueta + r'|<!--.*?(?:-->|\Z)|\\[^\w\s]|(?<!`)(?P<marca>`+)(?!`)(?P<codigo>.*?)'
                        r'(?<!`)(?P=marca)(?!`)', re.I | re.S)
 
 
-def ocultar_codigo_markdown(linea, pendientes):
-    """Oculta los fragmentos delimitados dentro del párrafo antes de interpretar su HTML."""
+ENCABEZADO = re.compile(r' {0,3}#{1,6}(?:\s|$)')
+
+
+def parrafo_sin_codigo(linea, pendientes, sangria):
+    """Procesa los fragmentos en línea una vez por párrafo o encabezado Markdown."""
     parrafo = [linea]
-    for otra in pendientes:
-        if (not otra.strip() or interrumpe_cita(otra) or re.match(CERCO, otra)
-                or re.match(r' {0,3}(?:>|#{1,6}(?:\s|$)|[-+*]\s|1[.)]\s|=+\s*$)', otra)):
-            break
-        parrafo.append(otra)
+    if not ENCABEZADO.match(linea):
+        while pendientes:
+            original = pendientes[0].expandtabs(4)
+            if not original.startswith(' ' * sangria):
+                break
+            otra = original[sangria:]
+            if (not otra.strip() or interrumpe_cita(otra) or re.match(CERCO, otra) or ENCABEZADO.match(otra)
+                    or re.match(r' {0,3}(?:>|[-+*]\s|\d{1,9}[.)]\s|=+\s*$)', otra)):
+                break
+            parrafo.append(pendientes.popleft())
     texto = '\n'.join(parrafo)
-    fin_linea = len(linea)
-    visibles = []
-    desde = 0
-    for marca in FRAGMENTO.finditer(texto):
-        if marca.start() >= fin_linea:
-            break
-        if marca['codigo'] is None:
-            continue
-        visibles.extend((texto[desde:marca.start()], '…'))
-        desde = marca.end()
-        if desde > fin_linea:
-            fin_linea = texto.find('\n', desde)
-            if fin_linea < 0:
-                fin_linea = len(texto)
-    for _ in range(texto.count('\n', 0, fin_linea)):
-        pendientes.popleft()
-    return ''.join(visibles) + texto[desde:fin_linea]
+    texto = FRAGMENTO.sub(lambda m: '…' if m['codigo'] is not None else m[0], texto)
+    return deque(texto.split('\n'))
 
 
 def lineas_del_informe(texto):
@@ -189,8 +182,10 @@ def lineas_del_informe(texto):
     citas_html = CitasHTML()
     sangrias = []
     pendientes = deque(contenido_del_informe(CitasHTML.inicio_incompleto.sub('&lt;', texto)))
-    while pendientes:
-        original = pendientes.popleft()
+    preparadas = deque()
+    while preparadas or pendientes:
+        preparada = bool(preparadas)
+        original = (preparadas or pendientes).popleft()
         literal = abierto or citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata
         linea, marcador, cambio_lista = contenido_de_lista(original, sangrias, literal)
         if cambio_lista:
@@ -201,10 +196,12 @@ def lineas_del_informe(texto):
         if parrafo_citado and interrumpe_cita(linea):
             parrafo_citado = False
         if not abierto:
-            if ('`' in linea and not (citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata)
+            if (not preparada and '`' in linea
+                    and not (citas_html.en_bloque_html or citas_html.rawdata or 'pre' in citas_html.abiertas)
                     and not (interrumpe_cita(linea) or citas_html.etiqueta_aislada.fullmatch(linea)
                              or re.match(r' {0,3}(?:>|`{3,}|~{3,})| {4}', linea))):
-                linea = ocultar_codigo_markdown(linea, pendientes)
+                preparadas = parrafo_sin_codigo(linea, pendientes, sangrias[-1] if sangrias else 0)
+                linea = preparadas.popleft()
             visible = citas_html.sin_citas(linea)
             if visible is None:
                 if citas_html.bloque or not linea.strip():
