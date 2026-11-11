@@ -5,7 +5,7 @@ type: bug
 weight: 0
 dificultad: dificil
 version: "v1.1.3"
-status: planned
+status: in_progress
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
 created_at: 2026-11-11
@@ -36,6 +36,22 @@ registrar() usa append y write(JSON más salto de línea), sin bloqueo visible. 
 
 No modificar los archivos activos de Aprexx ni su copia de evidencia. Trabajar exclusivamente en Adevv y copias o fixtures. Mantener las causas del productor y del lector diferenciadas hasta tener evidencia. Hades debe revisar los contratos, pruebas y corrección con el perfil potente fijado, manteniendo el alcance del hotfix. Este bug forma parte de v1.1.3 y debe quedar corregido y validado junto a B-ADV-0044 y B-ADV-0045 antes de instalarla.
 
+## Triaje
+
+- base_calidad: `aaf7a5e7c1402141e3df6bcf8dbdf3e6a9a6517d`
+- A [EXEC] Especificar cola en curso, corrupción visible, recuperación y continuidad en orquestacion.feature.
+- B [EXEC] Diseñar bloqueo multiproceso, publicación, recuperación y cursores.
+- C1 [EXEC] Regresiones con registros sintéticos y con el bucle sobre un repositorio temporal.
+- C2 [EXEC] Centralizar lectores y escritores. El bucle cuenta líneas físicas y decodifica el delta directamente. Las búsquedas de sesión y el diagnóstico de revisión también leen por separado. Motor, agentes, verificador y gateway escriben mediante registrar sin exclusión mutua. No consta qué produjo el fragmento del incidente.
+- D [EXEC] Hades revisa contrato, pruebas y corrección en sus fases respectivas.
+- E [EXEC] Documentar el diagnóstico y el procedimiento de recuperación local.
+- F [EXEC] Cerrar en la rama hotfix/v1.1.3 tras verificar el delta y el dictamen canónico.
+- Verificación al cierre: `python -m unittest skills.orquestar.test_registro_metricas skills.orquestar.test_metricas skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun skills.orquestar.test_progreso.ProgresoTests.test_reanuda_con_metricas_corruptas`. Cubre lectura, exportación estricta, recuperación concurrente, contabilidad y selección del paso tras el cierre.
+
 ## Hallazgo del lector compartido actual
 
 metricas.leer_registros(root, tolerar_ultima=True) actualmente hace continue ante cualquier JSONDecodeError o fila no objeto, incluso en una línea intermedia. Sustituir la comprensión directa por ese lector sin corregir su semántica incumpliría el requisito de diagnóstico y conservación de corrupción intermedia. La copia íntegra privada está fuera del checkout para impedir su inclusión accidental en un commit; las pruebas distribuidas deben usar fixtures mínimos sin contenido privado.
+
+## Reproducción sintética concurrente en este equipo
+
+Ocho procesos Python 3.12 escribieron 400 filas cada uno en un archivo temporal común, siguiendo exactamente open(a, encoding=utf-8), write(json.dumps(ensure_ascii=False) más salto de línea) y close, sin otros escritores ni reescrituras. Cada objeto llevaba worker, seq, texto Unicode y duracion_s. Todos los procesos devolvieron 0. De 3200 filas esperadas, el archivo tiene 2737 líneas, 2339 objetos válidos únicos, 398 líneas inválidas y 313 líneas con UTF-8 roto. Se reprodujo primero UnicodeDecodeError al leer el archivo completo como UTF-8. Evidencia sintética y writer.py en C:/Users/IVNMOR~1/AppData/Local/Temp/adevv-metricas-escritores-llr8esky; SHA256 de metrics-0.jsonl: 94ab875357f4e07cbc4b613a0abfdd0ccb99e7554af4fc70321b85736bb68f5e. Esto confirma que la concurrencia basta para corromper el patrón actual en este equipo, sin atribuir retrospectivamente el fragmento de Aprexx a un escritor concreto. Extender el contrato de diagnóstico y conservación a UnicodeDecodeError y bytes parciales, con línea y evidencia binaria exactas. La regresión debe usar identidades únicas y contrastar cardinalidad y contenido, no solo que el JSON sea parseable. Ningún archivo de Aprexx fue modificado.
