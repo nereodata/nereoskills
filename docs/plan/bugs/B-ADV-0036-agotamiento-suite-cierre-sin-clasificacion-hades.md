@@ -237,3 +237,8 @@ Hades aprobó las decisiones y los escenarios de `tests/features/uso_sin_rutas.f
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades review-test RECHAZADO 7,5/10. H1: verificar la misma solicitud persistida al retomar y ausencia de aviso humano. H2: exigir historial terminal, blocked y parada efectiva del planificador. H3: usar estrategia y conclusión sobre la misma causa. Artemisa corrige las regresiones y vuelve a revisión.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades aprobó /review-test (8,75/10) y cerró H1, H2 y H3. H4 y H5, medios, para Artemisa: exigir que el mandato asocie los tres commits con su evidencia y resultado, y distinguir causas y comprobaciones por separado. Se conservan las aserciones añadidas en SuiteRecoveryTests para ambos hallazgos. Reanudar desarrollo desde el rojo dirigido; la corrección de producción y su QA siguen pendientes.

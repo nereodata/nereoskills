@@ -1427,11 +1427,12 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.evidence(text, command)
         return motor.registrar_fallo_suite(self.root, 'v0.1', command)
 
-    def hades(self, destino, decision='Aplicar la migración', terminal=None, codigo=0):
+    def hades(self, destino, decision='Aplicar la migración', *, causa='Falta la columna moneda',
+              terminal=None, codigos=(0,)):
         """Sustituye solo el proceso externo de diagnóstico y captura el mandato real."""
-        terminal = terminal or {'destino': 'humano', 'pregunta': '¿Puedes renovar el certificado?',
-                                'motivo': 'Solo el titular puede renovarlo.'}
-        respuesta = {'causa': 'Falta la columna moneda', 'destino': destino,
+        terminal = terminal or {'destino': 'humano', 'pregunta': '¿Puedes autorizar la migración de moneda?',
+                                'motivo': 'Solo el administrador puede autorizar el cambio de esquema.'}
+        respuesta = {'causa': causa, 'destino': destino,
                      'decision': decision, 'terminal': terminal}
         if destino == 'humano':
             respuesta.update(pregunta=terminal['pregunta'], motivo=terminal['motivo'])
@@ -1445,7 +1446,9 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.assertEqual(kwargs['env']['ORQUESTAR_ID'], 'B-DEM-0001')
             mandato = Path(args[args.index('--prompt-file') + 1]).read_text(encoding='utf-8')
             mandatos.append(mandato)
-            return subprocess.CompletedProcess(args, codigo, json.dumps(respuesta), '')
+            codigo = codigos[len(mandatos) - 1]
+            return subprocess.CompletedProcess(args, codigo, '' if codigo else json.dumps(respuesta),
+                                               'revisor no disponible' if codigo else '')
 
         self.enterContext(patch.object(subprocess, 'run', side_effect=proceso))
         return mandatos
@@ -1457,17 +1460,32 @@ class SuiteRecoveryTests(unittest.TestCase):
     def umbral(self):
         iid, _ = self.observe_failure(self.pedidos(0))
         motor.actualizar_dificultad(self.root, iid, 'dificil')
+        intentos = []
         for n in (1, 2):
-            self.complete(iid)
+            intentos.append((self.complete(iid), self.pedidos(n)))
             self.observe_failure(self.pedidos(n))
-        self.complete(iid)
-        return iid
+        return iid, intentos
 
-    def complete(self, iid):
+    def complete(self, iid, mensaje='fix attempt'):
         p = motor.fichero_de(self.root, iid)
         p.write_text(p.read_text(encoding='utf-8').replace('status: planned', 'status: completed'), encoding='utf-8')
         self.git('add', '.')
-        self.git('commit', '-qm', 'fix attempt')
+        self.git('commit', '-qm', mensaje)
+        return self.git('rev-parse', 'HEAD')
+
+    def assert_terminal(self, iid, intentos):
+        p = motor.fichero_de(self.root, iid)
+        self.assertEqual(motor.frontmatter(p)['status'], 'blocked')
+        self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
+        historial = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+        observaciones = historial['grupos'][historial['actual']]['evidencias']
+        for commit, salida in intentos:
+            self.assertTrue(any(fila['arbol'] == commit and fila['salida'] == salida and fila['codigo'] == 1
+                                and any(commit in arreglo for arreglo in fila['arreglos']) for fila in observaciones),
+                            f'Falta el arreglo {commit} con su resultado')
+        estado = motor.estado(self.root, 'docs')
+        self.assertEqual(estado[0], 'PARAR')
+        self.assertIn(iid, estado[1])
 
     def test_capture_and_green_reuse_keep_return_contract(self):
         command = f'"{sys.executable}" -c "import sys; print(123); print(456, file=sys.stderr); sys.exit(7)"'
@@ -1528,30 +1546,79 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(len([r for r in rows if r.get('tipo') == 'promocion']), 1)
 
     def test_pending_diagnosis_survives_unavailable_reviewer_without_human_block(self):
-        calls = self.hades('humano', codigo=1)
-        iid = self.umbral()
-        _, stop = self.observe_failure(self.pedidos(3))
-        self.assertTrue(stop)
+        calls = self.hades('desarrollador', codigos=(1, 0))
+        iid, intentos = self.umbral()
+        intentos.append((self.complete(iid), self.pedidos(3)))
+        report = self.root / f'docs/review/code_reviews/{iid}-code-review.md'
+        report.write_text('APROBADO', encoding='utf-8')
+        self.git('add', '.')
+        self.git('commit', '-qm', 'review')
+        self.evidence(self.pedidos(3))
+        args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
+                                       max_pasos=1, reintentos=2, espera_max=0, cmd=None)
+        with (patch.object(motor, 'verificar', return_value=1), patch.object(motor, 'avisar') as avisar,
+              patch.object(motor, 'ejecutar') as ejecutar):
+            self.assertEqual(motor.bucle(args, self.root), 2)
+            ejecutar.assert_not_called()
+            self.assertFalse(any(c.args[1] in ('respuesta', 'version') for c in avisar.call_args_list))
         self.assertEqual(len(calls), 1)
         p = motor.fichero_de(self.root, iid)
         self.assertNotIn('humano', motor.frontmatter(p).get('pendiente_de', ''))
         self.assertFalse(motor.listar_preguntas(self.root))
         self.assertIn(iid, calls[0])
-        for n in (1, 2, 3):
-            self.assertIn(f'/tmp/tmp{n}/informe', calls[0])
-        self.assertIn('fix attempt', calls[0])
+        historial = json.loads(p.with_suffix('.json').read_text(encoding='utf-8'))
+        grupo = historial['grupos'][historial['actual']]
+        registros = []
+        decoder = json.JSONDecoder()
+        for i, char in enumerate(calls[0]):
+            if char == '{':
+                try:
+                    registro, _ = decoder.raw_decode(calls[0], i)
+                except ValueError:
+                    continue
+                if 'arreglos' in registro:
+                    registros.append(registro)
+        for commit, salida in intentos:
+            self.assertTrue(any(fila.get('salida') == salida and fila.get('codigo') == 1
+                                and any(commit in arreglo for arreglo in fila['arreglos']) for fila in registros),
+                            f'Falta la evidencia individual del arreglo {commit} en el mandato')
         self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
         self.assertEqual(self.git('status', '--porcelain'), '')
+        solicitud = grupo['solicitud']
+        self.assertTrue(solicitud)
+        self.assertIn(solicitud, calls[0])
+        with (patch.object(motor, 'verificar') as verificar, patch.object(motor, 'avisar'),
+              patch.object(motor, 'ejecutar', return_value=(0, {}, '')) as ejecutar):
+            motor.bucle(args, self.root)
+            verificar.assert_not_called()
+            self.assertEqual(ejecutar.call_args.kwargs['env']['ORQUESTAR_PASO'], 'bug-fix')
+        self.assertEqual(calls, [calls[0], calls[0]])
+        self.assertIn('Aplicar la migración', p.read_text(encoding='utf-8'))
+        self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
+        self.assertFalse(motor.listar_preguntas(self.root))
+
+    def test_group_distinguishes_check_and_cause_independently(self):
+        pedidos = self.pedidos(0)
+        iid, _ = self.observe_failure(pedidos)
+        p = motor.fichero_de(self.root, iid)
+        for salida, recaidas in ((pedidos.replace('column: moneda', 'table: clientes'), 0),
+                                 (pedidos.replace('test_pedidos', 'test_lineas'), 0),
+                                 (self.pedidos(1), 1)):
+            self.complete(iid)
+            self.assertEqual(self.observe_failure(salida), (iid, ''))
+            self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(recaidas))
 
     def test_causal_groups_resume_budget_and_one_revised_fix(self):
         calls = self.hades('desarrollador')
-        iid = self.umbral()
+        iid, intentos = self.umbral()
+        self.complete(iid)
         p = motor.fichero_de(self.root, iid)
         firma = 'ERROR: test_firma (integracion.Facturas.test_firma)\nValueError: certificado caducado'
         for n in (0, 1):
             self.assertEqual(self.observe_failure(firma), (iid, ''))
             self.assertEqual(motor.frontmatter(p)['suite_intentos'], str(n))
-            self.complete(iid)
+            arreglo = self.complete(iid)
+        intentos.append((arreglo, self.pedidos(3)))
         self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
         self.assertEqual(len(calls), 1)
         self.assertIn('Aplicar la migración', p.read_text(encoding='utf-8'))
@@ -1559,7 +1626,7 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertFalse(motor.listar_preguntas(self.root))
         motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
         self.assertFalse(motor.listar_preguntas(self.root))
-        self.complete(iid)
+        ultimo = self.complete(iid, 'fix attempt: aplicar migración')
         _, stop = self.observe_failure(self.pedidos(4))
         self.assertTrue(stop)
         self.assertEqual(motor.frontmatter(p)['pendiente_de'], 'humano')
@@ -1567,13 +1634,15 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         preguntas = motor.listar_preguntas(self.root)
         self.assertEqual(len(preguntas), 1)
-        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes renovar el certificado?')
-        self.assertIn('Solo el titular', preguntas[0]['contexto'])
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes autorizar la migración de moneda?')
+        self.assertIn('Solo el administrador', preguntas[0]['contexto'])
+        self.assert_terminal(iid, intentos + [(ultimo, self.pedidos(4))])
         self.assertIn(self.pedidos(4).splitlines()[-1], p.read_text(encoding='utf-8'))
 
     def test_specifier_receives_contradiction_without_question(self):
         calls = self.hades('especificador', 'Aclarar de quién se hereda la moneda')
-        iid = self.umbral()
+        iid, _ = self.umbral()
+        self.complete(iid)
         self.assertEqual(self.observe_failure(self.pedidos(3)), (iid, ''))
         self.assertEqual(motor.estado(self.root, 'docs')[1:3], ('especificar', iid))
         self.assertIn('Aclarar de quién', motor.fichero_de(self.root, iid).read_text(encoding='utf-8'))
@@ -1581,12 +1650,15 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_immediate_terminal_question_is_justified_and_idempotent(self):
-        calls = self.hades('humano', 'La revocación es irreversible')
+        calls = self.hades('humano', 'La revocación es irreversible', causa='Certificado revocado',
+                           terminal={'destino': 'humano', 'pregunta': '¿Puedes emitir un certificado de pruebas nuevo?',
+                                     'motivo': 'Solo el titular puede emitir el reemplazo.'})
         fallo = 'ERROR: test_firma (integracion.Facturas)\nValueError: certificado revocado'
         iid, _ = self.observe_failure(fallo)
         motor.actualizar_dificultad(self.root, iid, 'dificil')
+        intentos = []
         for n in (1, 2, 3):
-            self.complete(iid)
+            intentos.append((self.complete(iid, f'fix attempt: firma {n}'), fallo))
             _, stop = self.observe_failure(fallo)
             self.assertEqual(bool(stop), n == 3)
         motor.registrar_fallo_suite(self.root, 'v0.1', 'suite')
@@ -1596,8 +1668,9 @@ class SuiteRecoveryTests(unittest.TestCase):
         self.assertEqual(motor.frontmatter(p)['suite_intentos'], '3')
         preguntas = motor.listar_preguntas(self.root)
         self.assertEqual(len(preguntas), 1)
-        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes renovar el certificado?')
+        self.assertEqual(preguntas[0]['pregunta'], '¿Puedes emitir un certificado de pruebas nuevo?')
         self.assertIn('Solo el titular', preguntas[0]['contexto'])
+        self.assert_terminal(iid, intentos)
 
     def test_blocked_and_cancelled_are_not_reopened(self):
         iid, _ = self.observe_failure()
@@ -1688,7 +1761,9 @@ class SuiteRecoveryTests(unittest.TestCase):
         report.write_text('APROBADO', encoding='utf-8')
         self.git('add', '.')
         self.git('commit', '-qm', 'review')
-        self.hades('humano')
+        self.hades('humano', 'Hace falta la configuración de formato', causa='format: src/app.js: error',
+                   terminal={'destino': 'humano', 'pregunta': '¿Puedes facilitar la regla de formato?',
+                             'motivo': 'Solo el mantenedor conserva la configuración de referencia.'})
         self.evidence('final error src/app.js\nformat: src/app.js: error')
         args = motor.argparse.Namespace(idea=None, docs='docs', test='suite', harness='claude', estado=False,
                                        max_pasos=1, reintentos=2, espera_max=0, cmd=None)
@@ -1722,7 +1797,9 @@ class SuiteRecoveryTests(unittest.TestCase):
             self.complete(iid)
             self.observe_failure()
         self.complete(iid)
-        self.hades('humano')
+        self.hades('humano', 'Hace falta la configuración de formato', causa='format: src/app.js: error',
+                   terminal={'destino': 'humano', 'pregunta': '¿Puedes facilitar la regla de formato?',
+                             'motivo': 'Solo el mantenedor conserva la configuración de referencia.'})
         text = '\U0001f600' * 5000 + '\nlast error src/app.js\nformat: src/app.js: error'
         _, stop = self.observe_failure(text)
         with (patch.object(motor, 'telegram', return_value=('fake', ['123'], {'version'})),
