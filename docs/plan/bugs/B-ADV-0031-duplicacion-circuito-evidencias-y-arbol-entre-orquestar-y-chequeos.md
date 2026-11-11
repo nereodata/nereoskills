@@ -220,3 +220,10 @@ updated_at: 2026-11-11
 - Hades no pudo leer las fuentes con consola ni Node (`registered Core launch requires an installed app`) y también falló al escribir el informe. Se confirma que el informe canónico no existe; código cero sin dictamen no acredita aprobación.
 - El revisor indicó «humano» para restablecer el acceso técnico, sin evaluar la especificación. Se aplica la regla explícita de conservar la revisión pendiente ante indisponibilidad técnica: no se abre pregunta para restaurar el acceso ni elegir reservas. No hay hallazgos de especificación que enrutar.
 - Se conserva `in_progress`, la base original y el trabajo existente. No se avanza a diseño, pruebas o implementación. Verificación limitada a higiene documental y calidad; las pruebas funcionales del triaje siguen pendientes.
+
+## Reintento · 2026-11-11 17:17 (Europe/Madrid)
+
+- `/review-spec` del alcance completo invocada mediante `adevv orquestar --agente hades --prompt-file orquestar_prompt.txt`; invocación `28faadd95a2d4546af5aa2ef85cf570d`, perfil Codex seleccionado por el lanzador.
+- Hades declara que terminal y alternativa Node fallan con `registered Core launch requires an installed app`. Se confirma la ausencia del informe canónico; código cero sin dictamen no acredita aprobación.
+- Se conserva la revisión independiente pendiente y `in_progress`. Sin hallazgos asignados que enrutar ni decisión humana requerida; no se cambian perfiles o reservas ni se avanza a diseño, pruebas o implementación.
+- Verificación limitada a higiene documental mediante `--verificar "git diff --check"` y calidad desde la base original. Las pruebas funcionales del triaje siguen pendientes; no se ejecuta la suite completa.
