@@ -248,12 +248,14 @@ def acreditacion_anterior(root, ruta, historial, texto, carpetas):
         producto_actual = huella_producto(root, emision, carpetas)
     palabras = palabras_informe(texto)
     for origen, declarada, historico in aprobaciones[:revocadas]:
-        if producto_actual is not None:
+        anteriores = palabras_informe(historico)
+        comparar_productos = huella is not None or (not anteriores and bool(palabras))
+        if comparar_productos and producto_actual is not None:
             producto = declarada if declarada is not None else huella_producto(root, origen, carpetas)
             if producto != producto_actual:
                 continue
         actuales = iter(palabras)
-        if all(p in actuales for p in palabras_informe(historico)):
+        if all(p in actuales for p in anteriores):
             return emision, huella, True
     return emision, huella, False
 
