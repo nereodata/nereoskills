@@ -34,3 +34,7 @@ Evidencia accesible en el worktree principal C:/Users/Iván Moreno/SW/Adevv, ram
 ## Condición de publicación e instalación
 
 El usuario exige resolver B-ADV-0044 y B-ADV-0045 en v1.1.3 antes de instalarla. Ambos deben estar completados con sus dictámenes y evidencias. Mantener la versión instalada 1.1.2 mientras quede cualquiera pendiente.
+
+## Pistas del diagnóstico local
+
+Get-Command codex -All resuelve primero AppData/Local/Programs/OpenAI/Codex/bin/codex.exe (CLI 0.167.0), y después el ejecutable del paquete WindowsApps. La configuración global declara windows.sandbox = elevated. El entorno del proceso padre contiene CODEX_WINDOWS_REGISTERED_CORE=1, CODEX_WINDOWS_SANDBOX_PACKAGE_FAMILY=OpenAI.Codex_2p2nqsd0c76g0 y CODEX_INTERNAL_ORIGINATOR_OVERRIDE=Codex Desktop, además de CODEX_APP_RUNTIME_CLI_PATH, CODEX_APP_TOOLS_PIPE_PATH y otros metadatos del escritorio. Investigar si el hijo independiente hereda indebidamente el modo de lanzamiento de una aplicación registrada. Contrastar mediante prueba controlada conservando workspace-write y approval_policy never. Esta es una hipótesis, no autoriza a retirar el sandbox ni acredita la causa.
