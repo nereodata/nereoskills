@@ -2,14 +2,14 @@
 id: T-ADV-0033
 title: "Entregar el contexto vigente del paso y preservar el ciclo de revisión de Adevv"
 type: funcional
-weight: 60
+weight: 140
 dificultad: media
 version: "v1.2.0"
 status: planned
-depende_de: []
+depende_de: ["T-ADV-0034"]
 origen: "Petición del usuario (2026-11-05): mantener la iniciativa y la paralelización del arnés evitando revisiones paralelas al ciclo controlado por Adevv"
 created_at: 2026-11-05
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # T-ADV-0033 · Entregar el contexto vigente del paso y preservar el ciclo de revisión de Adevv
@@ -50,3 +50,4 @@ La entrega de v1.2.0 reúne en el mandato las instrucciones del paso y el contra
 - [ ] **CA-M-7.** Un paso nuevo recibe su objetivo, entradas, autoridad y condición de fin. Las instrucciones de otras fases y los procedimientos excepcionales quedan accesibles bajo demanda.
 - [ ] **CA-M-8.** En una retoma se identifican las decisiones vigentes, el último dictamen aplicable, el hallazgo pendiente y las evidencias necesarias. El historial sigue consultable y las decisiones sustituidas se reconocen como históricas.
 - [ ] **CA-M-9.** Comprobar con un caso equivalente a T-AFN-0139 que el agente puede retomar la tarea con la identidad académica común acordada, sin cargar toda la ficha ni volver a exigir archivos históricos por idioma. Comparar el contexto inicial servido en ese paso antes y después.
+- [ ] **CA-M-10.** El mandato consume la subfase y la evidencia recuperadas por T-ADV-0034. El LLM puede elegir el experimento, la corrección o la aclaración y explicar su condición de salida. Si el dictamen vigente ya aporta una acción ejecutable, se entrega directamente. El ejecutor resuelve perfiles, reservas y espera de cuota.

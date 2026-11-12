@@ -66,3 +66,29 @@ Todas las tareas son maestras (sin descomposición en hijas, al no haber múltip
 | **DEC-W02** | Mantener las 5 tareas como tareas maestras atómicas sin descomponer en tareas hijas | Crear tareas hijas por submódulo interno de `adevv/` | `task_config.yaml` define un único nivel (`components: []`) y cada `F-xx` representa exactamente una capacidad con valor propio para el usuario percibida de extremo a extremo (`/task-add`) |
 | **DEC-W03** | Asignar pesos ascendentes `110, 120, 130, 140, 150` alineados con el orden topológico de `depende_de` (`F-05 → F-01 → F-02 → F-03 → F-04`) | Numerar las tareas por el número nominal `F-01`..`F-05` con pesos `110`..`150` sin alinear con el grafo | Ordenar IDs y pesos según el orden de desbloqueo (`T-ADV-0001` primero porque `F-05` no tiene dependencias y desbloquea las demás; `T-ADV-0003` con peso `130` antes de `T-ADV-0004` con peso `140` porque `F-02` desbloquea `F-04`) hace coincidir la selección del orquestador (mayor desbloqueo y, a igualdad, menor `weight`) con la numeración secuencial del backlog |
 | **DEC-W04** | Declarar `depende_de` directamente en el frontmatter de las 5 tareas maestras al crearlas en `work-plan` | Dejar `depende_de` vacío para que el bucle ejecute un paso adicional `calcular-dependencias` | La tabla de `/orquestar` para `work-plan` define «Hecho cuando: `work_plan.md` y tareas con versión y `depende_de` en el backlog», ahorrando un paso completo del bucle |
+
+## 6. Recuperación del trabajo tras un rechazo · 1.1.4 y 1.2
+
+Plan del 12 de noviembre de 2026 a partir de Afinn, B-AFN-0185. El LLM elige la siguiente acción técnica con la evidencia disponible. Hades conserva el juicio independiente. El planificador comprueba el destinatario y despacha el trabajo. El ejecutor conserva el estado y la cuota de cada llamada.
+
+### 1.1.4 · Un solo bug de cierre
+
+[B-ADV-0048](../plan/bugs/B-ADV-0048-rechazo-de-reserva-sin-continuidad-tecnica.md) se implementará sobre la base v1.1.3. Primero, acreditar el rechazo de la reserva. Después, entregar la intervención vigente por el camino de Artemisa, también al relanzar una ficha ya afectada. Por último, probar el recorrido desde el bucle con Artemisa disponible y con sus perfiles sin cuota. Reconocer únicamente la frase de Hades dejaría el bug de Afinn bloqueado en disco. El valor del parche se demuestra cuando la investigación llega al agente o queda esperando su propia cuota. El resultado E2E sigue siendo rojo hasta que se acredite la corrección.
+
+### 1.2 · Orden recomendado de implementación
+
+La columna de dependencias recoge los resultados que consume cada tarea. Entre líneas independientes, el orden expresa prioridad de trabajo. El especificador puede retomar B-ADV-0031 desde el inicio.
+
+| Orden | Ficha | Entrega | Necesita |
+|---|---|---|---|
+| 1 | [T-ADV-0039](../plan/tasks/T-ADV-0039-resultado-de-cada-llamada-llm.md) · nueva | Un resultado por llamada compartido por el paso principal, los roles internos y el diagnóstico. Cada llamada conserva sus reservas, aclaración y espera. | B-ADV-0048 integrado |
+| 2 | [T-ADV-0035](../plan/tasks/T-ADV-0035-distinguir-intervencion-humana-de-espera-tecnica.md) | Un punto aplica la decisión al ítem y deja constancia del agente asignado, la espera, la pregunta o la pausa. | T-ADV-0039 |
+| 3 | [T-ADV-0034](../plan/tasks/T-ADV-0034-reanudar-desarrollo-desde-el-hallazgo.md) | Reanudar la subfase con el WIP, el hallazgo y las aprobaciones vigentes, incluso tras un corte entre asignación y ejecución. | T-ADV-0035 |
+| 4 | [T-ADV-0033](../plan/tasks/T-ADV-0033-autonomia-del-arnes-y-revisiones-controladas.md) | Entregar al agente el contexto de retoma y la autoridad para elegir el siguiente experimento, con una sola revisión formal. | T-ADV-0034 |
+| 5 | [T-ADV-0040](../plan/tasks/T-ADV-0040-explicar-transiciones-y-reanudacion.md) · nueva | Derivar de la misma transición la explicación de CLI y Telegram sobre la parada del proceso y el próximo trabajo. | T-ADV-0035 |
+| 6 | [T-ADV-0037](../plan/tasks/T-ADV-0037-simplificar-informes-y-medir-revisiones-hades.md) | Simplificar informes y medir por separado intentos técnicos, dictámenes recibidos y hallazgos resueltos. | T-ADV-0039 |
+| 7 | [T-ADV-0036](../plan/tasks/T-ADV-0036-diagnosticar-y-reanudar-cierre-por-etapas.md) | Usar las evidencias compartidas para investigar por etapa y conservar los requisitos del cierre global. | B-ADV-0031 y T-ADV-0034 |
+| 8 | [T-ADV-0038](../plan/tasks/T-ADV-0038-desbloquear-desarrollo-con-respuesta-humana.md) | Incorporar una respuesta humana mediante `/desbloquear` usando el circuito existente de `/responder`. | T-ADV-0035 |
+| En paralelo desde el inicio | [B-ADV-0031](../plan/bugs/B-ADV-0031-duplicacion-circuito-evidencias-y-arbol-entre-orquestar-y-chequeos.md) | Resolver la revisión de especificación pendiente y unificar huellas e historial de comprobaciones de producto. | Ninguna |
+
+Las primeras tres tareas de 1.2 permiten comprobar la recuperación de extremo a extremo antes de ampliar informes, canales y cierre por etapas. La separación interna del código se hace al implantar cada comportamiento, con regresiones por las entradas reales y lectura compatible de las fichas anteriores.

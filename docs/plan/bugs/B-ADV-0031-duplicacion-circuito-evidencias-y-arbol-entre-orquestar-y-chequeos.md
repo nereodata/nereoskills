@@ -9,7 +9,7 @@ status: blocked
 depende_de: []
 origen: "T-ADV-0032; revisar-version v1.1 (docs/review/versions/v1.1-arquitectura.md), H-01 🟡"
 created_at: 2026-11-07
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 pendiente_de: especificador
 ---
 
@@ -30,6 +30,10 @@ pendiente_de: especificador
 
 ## 📋 Evidencias
 - `docs/review/versions/v1.1-arquitectura.md`, hallazgo H-01.
+
+## Alcance revisado el 12 de noviembre
+
+Esta ficha proporciona la identidad y el historial de las **comprobaciones de producto** que consume T-ADV-0036. La identidad, el resultado y la cuota de las **llamadas al LLM** corresponden a T-ADV-0039. El siguiente paso de este bug sigue siendo resolver los hallazgos de especificación del dictamen conservado al final de la ficha.
 
 ## Criterios de aceptación de v1.2.0
 

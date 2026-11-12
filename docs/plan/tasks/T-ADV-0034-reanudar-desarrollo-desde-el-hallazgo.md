@@ -2,14 +2,14 @@
 id: T-ADV-0034
 title: "Reanudar task-dev y bug-fix desde el hallazgo pendiente"
 type: funcional
-weight: 40
+weight: 130
 dificultad: dificil
 version: "v1.2.0"
 status: planned
-depende_de: []
+depende_de: ["T-ADV-0035"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
 created_at: 2026-11-11
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 ---
 
 # T-ADV-0034 · Reanudar task-dev y bug-fix desde el hallazgo pendiente
@@ -24,3 +24,5 @@ Al volver de una revisión, bloqueo o reinicio, retomar la subfase afectada con 
 - [ ] **CA-M-2.** Si la corrección cambia un criterio de aceptación, se reabren su especificación y las aprobaciones que dependían de ella. Las aprobaciones independientes conservan alcance y evidencia identificables.
 - [ ] **CA-M-3.** Un reinicio, cambio de arnés o segunda retoma recupera el último estado acreditado sin duplicar revisiones ni perder WIP o commits intercalados. En tareas antiguas con evidencia incompleta se identifica qué alcance requiere verificación.
 - [ ] **CA-M-4.** Demostrar ambos recorridos por las entradas orquestadas de task-dev y bug-fix. El cierre sigue exigiendo el dictamen final aplicable al cambio entregado.
+- [ ] **CA-M-5.** Consumir la asignación confirmada por T-ADV-0035. Un corte antes de iniciar al agente o tras guardar el resultado recupera el punto alcanzado sin perder ni duplicar el encargo. La espera de una llamada conserva la misma asignación.
+- [ ] **CA-M-6.** Al agotar una estrategia, entregar al LLM lo intentado y la evidencia nueva para que elija el siguiente paso. En el caso Afinn debe poder pasar de preparar un candidato a investigar su teardown, conservando el rechazo y la condición para volver a revisión. Reemitir el mismo texto de diagnóstico no renueva el presupuesto.
