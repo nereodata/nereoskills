@@ -265,7 +265,7 @@ def cabecera_informe(texto):
     for line in lineas:
         if not line:
             continue
-        formal = re.match(r'^(?:[-#]+\s*)?Veredicto(?: final)?:\s*(?:✅\s*)?(APROBADO|RECHAZADO|N/A)(?=$|[\s.,;—(])', line, re.I)
+        formal = re.match(r'^(?:[-#]+\s*)?Veredicto(?: formal)?(?: final)?:\s*(?:✅\s*)?(APROBADO|RECHAZADO|N/A)(?=$|[\s.,;—(])', line, re.I)
         simple = re.fullmatch(r'(APROBADO|RECHAZADO|N/A)[.]?', line, re.I)
         if formal or simple:
             siguiente = next((l for l in lineas if l != ''), None)

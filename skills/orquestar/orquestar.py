@@ -1329,9 +1329,15 @@ def estado(root, docs):
         if sin_revisar:
             return ('PASO', 'revisar-tarea', sin_revisar[0]['id'], rama)
         bloqueadas = sorted((i for i in suyas if i['status'] == 'blocked'), key=lambda i: -alcance.get(i['id'], 0))
+        motivo_tecnico = ''
         for i in bloqueadas:  # primero la causa raíz que más tareas retiene
             if i['pendiente_de'] == 'especificador':
                 return ('PASO', 'especificar', i['id'], rama)
+            if i['pendiente_de'] == 'intervencion_tecnica':
+                encargo, motivo = intervencion_de_cierre(root, i['id'])
+                if encargo and not pendientes_de(i, por_id):
+                    return ('PASO', 'bug-fix', i['id'], rama)
+                motivo_tecnico = motivo_tecnico or f'{i["id"]}: diagnóstico terminal de la suite. {motivo}'
         pend = [i for i in suyas if i['status'] not in FUERA]
         elegibles = [i for i in pend if not pendientes_de(i, por_id)]
         if elegibles:
@@ -1341,9 +1347,8 @@ def estado(root, docs):
         if preguntas:
             return ('PARAR', f'Bloqueos en {v}: Bloqueo de tarea; ' + '; '.join(
                 f'{q["tarea_id"]} {q["id"]}: {q["pregunta"]}' for q in preguntas))
-        for i in bloqueadas:
-            if i['pendiente_de'] == 'intervencion_tecnica':
-                return ('PARAR', f'{i["id"]}: diagnóstico terminal de la suite. Consulta la intervención en el bug.')
+        if motivo_tecnico:
+            return ('PARAR', motivo_tecnico)
         if not (root / f'docs/review/versions/{v}-arquitectura.md').exists():
             return ('PASO', 'revisar-version', v, rama)
         if bloqueadas or pend:
@@ -2962,6 +2967,22 @@ def accion_suite(root, fichero, fm):
     return accion
 
 
+def intervencion_de_cierre(root, iid):
+    """Localiza una intervención pendiente sin modificar la ficha ni consumir la entrega al consultar."""
+    fichero = fichero_de(root, iid)
+    fm = frontmatter(fichero) if fichero else {}
+    if (fm.get('suite_cierre', '').lower() != 'true' or fm.get('suite_accion') != 'resuelta'
+            or fm.get('status') != 'blocked' or fm.get('pendiente_de') != 'intervencion_tecnica'):
+        return None, 'Consulta la intervención en el bug.'
+    informe = root / f'docs/review/test_reviews/{iid}-test-review.md'
+    encargo = diagnostico_suite.encargo_tecnico(fichero, informe)
+    if not encargo:
+        return None, 'Falta una asignación técnica vigente a Artemisa. Consulta la intervención en el bug.'
+    if any(f.get('id') == iid and f.get('intervencion_atendida') == encargo[0] for f in leer_metricas(root)):
+        return None, 'Artemisa ya atendió esta intervención. Consulta el resultado en el bug.'
+    return encargo, 'La intervención espera las dependencias del bug.'
+
+
 def aplicar_diagnostico_suite(root, fichero):
     """Retoma la solicitud o aplica el dictamen guardado, incluso después de reiniciar el bucle."""
     ruta = fichero.with_suffix('.json')
@@ -3004,6 +3025,8 @@ def aplicar_diagnostico_suite(root, fichero):
         write_json_atomic(ruta, historial)
         fichero.write_text(cabecera + '\n---\n' + cuerpo, encoding='utf-8')
     confirmar_suite(root, iid, 'aplicar diagnóstico de la suite', *ficheros)
+    if destino == 'tecnico' and intervencion_de_cierre(root, iid)[0]:
+        return iid, ''
     if motivo:
         motivo += '\nCola de la última salida:\n' + grupo['evidencias'][-1]['salida'][-1200:]
     return iid, motivo
@@ -3785,6 +3808,12 @@ def bucle(a, root):
             recuperacion = recuperaciones_analisis[clave_analisis]
             cfg_rol = recuperacion['perfiles'][recuperacion['indice']]
         prompt = construir_prompt_paso(root, paso, arg)
+        encargo = intervencion_de_cierre(root, arg)[0] if paso == 'bug-fix' else None
+        if encargo:
+            prompt += (f'\nIntervención técnica asignada a Artemisa. Solicitud {encargo[0]}.\n{encargo[1]}\n'
+                       'Ejecuta esta investigación con el WIP y la evidencia conservados. Si el impedimento '
+                       'persiste, registra el resultado y conserva el bloqueo técnico. Solo devuelve el bug a '
+                       'planned cuando acredites la condición de salida. Conserva el rechazo hasta su revisión.')
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or '',
                'ORQUESTAR_BASE': git('rev-parse', 'HEAD')}
         env.pop('ORQUESTAR_ESCALADA', None)
@@ -4000,6 +4029,8 @@ def bucle(a, root):
         if hubo_progreso:
             intentos_revision.pop(clave_analisis, None)
         if not ultimo_registrado or cuota is not None:
+            if encargo and hubo_ejecucion and not codigo and cuota is None and not revision_pendiente:
+                m['intervencion_atendida'] = encargo[0]
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
                              'modelo': cfg_usada.get('model') or 'predeterminado', 'codigo': codigo, **m,
@@ -4044,10 +4075,16 @@ def bucle(a, root):
                 motivo += (f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
                            f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"
                            f" ({cuota_agente.get('cuota_origen') or 'cuota agotada'})")
+            elif cuota is not None and encargo:
+                motivo += (f'; intervención de {rol} pendiente para {paso} {arg} en '
+                           f'{arnes(args_paso, cfg_usada)}/{cfg_usada.get("model") or "predeterminado"}')
             return parar(root, 'cuota' if cuota is not None else 'error',
                          f'el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva.'
                          + (f'\nÚltima salida del arnés:\n{salida[-2000:]}' if cuota is None else ''))
         esperado = 0
+        if encargo and m.get('intervencion_atendida'):
+            sin_progreso = 0
+            continue
 
         if despues == antes:
             if revision_pendiente:

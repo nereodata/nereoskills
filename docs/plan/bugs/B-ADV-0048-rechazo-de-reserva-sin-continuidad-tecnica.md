@@ -5,7 +5,7 @@ type: bug
 weight: 0
 dificultad: media
 version: "v1.1.4"
-status: planned
+status: completed
 depende_de: []
 origen: "Afinn, release/v0.7, B-AFN-0185, solicitud 0c9187dc, commit fdf53457"
 created_at: 2026-11-12
@@ -24,9 +24,21 @@ Evidencia en el repositorio consumidor Afinn, commit `fdf53457`. Véanse `docs/r
 
 ## Orden de implementación y aceptación
 
-- [ ] **1. Recibir el rechazo.** Reconocer la declaración anterior en la respuesta final por la vía existente. Registrar un rechazo para esa invocación. La marca del principal sigue disponible para seleccionar perfil en futuras llamadas. Una cita, un ejemplo o una entrega sin dictamen siguen sin acreditar una revisión.
-- [ ] **2. Entregar la intervención.** Si persiste el fallo y Hades ha asignado una investigación concreta y distinta al rol autorizado de desarrollo, usar el enrutado existente a Artemisa. El siguiente `bug-fix` recibe la intervención, su condición de salida y la misma solicitud. La suite continúa roja y C1 rechazado. Un nombre libre de mantenedor, por sí solo, no acredita asignación. Una intervención realmente externa conserva su destino y motivo.
-- [ ] **3. Retomar desde disco.** Con una ficha ya bloqueada como la de Afinn, recuperar una sola vez la intervención inequívocamente pendiente del hallazgo vigente. Preservar WIP, historial, contador y rechazo. Un segundo arranque o la devolución del mismo resultado sin evidencia nueva no vuelve a emitir el encargo ni reinicia la estrategia agotada. Si la evidencia histórica es insuficiente, el estado explica qué asignación falta.
-- [ ] **4. Comprobar el recorrido completo.** Desde el bucle normal, la reserva devuelve el rechazo y el siguiente paso entrega la intervención a Artemisa. En el caso vecino todos los perfiles autorizados de Artemisa carecen de cuota. La espera, el aviso y la retoma corresponden a esa llamada y conservan el encargo. Ninguno de los dos recorridos abre una pregunta humana ni permite cerrar el bug en rojo.
+- [x] **1. Recibir el rechazo.** Reconocer la declaración anterior en la respuesta final por la vía existente. Registrar un rechazo para esa invocación. La marca del principal sigue disponible para seleccionar perfil en futuras llamadas. Una cita, un ejemplo o una entrega sin dictamen siguen sin acreditar una revisión.
+- [x] **2. Entregar la intervención.** Si persiste el fallo y Hades ha asignado una investigación concreta y distinta al rol autorizado de desarrollo, usar el enrutado existente a Artemisa. El siguiente `bug-fix` recibe la intervención, su condición de salida y la misma solicitud. La suite continúa roja y C1 rechazado. Un nombre libre de mantenedor, por sí solo, no acredita asignación. Una intervención realmente externa conserva su destino y motivo.
+- [x] **3. Retomar desde disco.** Con una ficha ya bloqueada como la de Afinn, recuperar una sola vez la intervención inequívocamente pendiente del hallazgo vigente. Preservar WIP, historial, contador y rechazo. Un segundo arranque o la devolución del mismo resultado sin evidencia nueva no vuelve a emitir el encargo ni reinicia la estrategia agotada. Si la evidencia histórica es insuficiente, el estado explica qué asignación falta.
+- [x] **4. Comprobar el recorrido completo.** Desde el bucle normal, la reserva devuelve el rechazo y el siguiente paso entrega la intervención a Artemisa. En el caso vecino todos los perfiles autorizados de Artemisa carecen de cuota. La espera, el aviso y la retoma corresponden a esa llamada y conservan el encargo. Ninguno de los dos recorridos abre una pregunta humana ni permite cerrar el bug en rojo.
 
 El parche reutiliza el lector formal, el enrutado de hallazgos, el selector de bugs y la gestión de reservas de `bug-fix`. El contrato general para otros roles, la reorganización del bucle y la traza común se planifican en 1.2.
+
+## Triaje
+
+Base de calidad (`base_calidad`) = `04d602db81ade77b5e91c2f6436ada86f1a364ab`. A [EXEC] entrega y cuota en uso_sin_rutas. B [EXEC] identidad de la intervención y reanudación. C1 [EXEC] regresión por el bucle con proveedores simulados. C2 [EXEC] recepción formal, asignación y cuota real del paso. D [EXEC] revisión independiente. E [EXEC] guía del operador y changelog. F [EXEC] verificación y commit. Ejecutar las regresiones de orquestación, cuota y revisiones afectadas y repetir el recorrido con los artefactos reales de Afinn en un repositorio temporal.
+
+## Verificación del incidente
+
+Se extrajeron de `fdf53457` la ficha de Afinn, su historial JSON, el informe C1 y la salida de Codex de `cleanup-test-review.json`. Con esos datos, el selector, el lanzador de roles y el registro de cuota de este hotfix ejercitaron tres recorridos en Git temporal con proveedores simulados. La recepción del rechazo dio paso a la investigación, tanto con cuota de Artemisa inmediata como tras recuperarla. También se retomó directamente la ficha bloqueada en 1.1.3.
+
+La prueba adicional de reinicio abrió tres procesos distintos contra el mismo repositorio temporal. Con todos los perfiles de desarrollo sin cuota, el aviso identificó el bug, Artemisa y el perfil pendiente. El segundo proceso entregó la solicitud `0c9187dc` con el mandato literal de aislar el cierre mediante el protocolo Playwright y las conexiones del servidor. Tras devolver el mismo impedimento, el tercer proceso encontró una entrega acumulada y conservó el bloqueo. El JSON del historial quedó idéntico byte a byte, con tres recaídas. La comprobación valida la entrega al ejecutor de Artemisa. La ejecución de Playwright corresponde al proyecto consumidor.
+
+Pruebas reproducibles en CI mediante `python -B -m unittest tests.test_intervencion_suite`. Las seis pruebas cubren la entrega y la cuota, el dictamen estructurado nuevo, las citas y la asignación histórica ambigua. Hades aprobó especificación, pruebas y código. La puerta de calidad terminó con código cero y declaró formato y lint omitidos por ausencia de herramientas configuradas.
