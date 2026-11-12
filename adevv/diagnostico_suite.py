@@ -109,6 +109,70 @@ def validar_terminal(accion):
     return all(isinstance(accion.get(k), str) and accion[k].strip() for k in campos)
 
 
+def asignacion_c1(ficha, informe, solicitud):
+    """Contrasta el último enrutado 1.1.3 con el rechazo técnico de la solicitud vigente."""
+    from adevv.revisiones import declaracion, lineas_del_informe
+
+    _, separador, ultima = ficha.rpartition('\n## Hallazgo de Hades enrutado\n')
+    enrutado = ultima.partition('\n## ')[0]
+    if not separador or '- Destino: `artemisa`' not in enrutado.splitlines() or solicitud not in enrutado:
+        return False
+    if declaracion(informe)[0] != 'RECHAZADO':
+        return False
+    # El lector descarta los ejemplos de código. Conserva los valores literales de estos campos.
+    for valor in ('desarrollador/artemisa', 'artemisa', 'resolver', 'tecnico'):
+        informe = informe.replace(f'`{valor}`', valor)
+    informe = re.sub(r'`([a-f0-9]{64})`', r'\1', informe)
+    propias = '\n'.join(linea for linea in lineas_del_informe(informe) if linea)
+    bloques = re.split(r'(?m)^(?=#{1,6}\s)', propias)
+    candidatos = []
+    for bloque in bloques:
+        hallazgo = re.match(r'^#{1,6}\s+([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-\d+)\b', bloque)
+        if hallazgo and re.search(r'(?<![\w-])' + re.escape(hallazgo[1]) + r'(?![\w-])', enrutado):
+            candidatos.append(bloque)
+    if len(candidatos) != 1:
+        return False
+    lineas = candidatos[0].splitlines()
+    campos = (r'Para: (?:desarrollador/)?artemisa', r'Destino del hallazgo: resolver',
+              r'Ruta terminal de la solicitud: tecnico')
+    for campo in campos:
+        etiqueta = campo.partition(':')[0]
+        valores = [linea for linea in lineas if linea.startswith(f'- {etiqueta}:')]
+        if len(valores) != 1 or not re.fullmatch(r'- ' + campo + r'\.?', valores[0], re.I):
+            return False
+    return set(re.findall(r'\bsolicitud\s+([a-f0-9]{64})\b', candidatos[0], re.I)) == {solicitud}
+
+
+def encargo_tecnico(fichero, informe):
+    """Obtiene el mandato de la solicitud actual si Hades identificó a su agente ejecutable."""
+    try:
+        historial = json.loads(fichero.with_suffix('.json').read_text(encoding='utf-8'))
+        grupo = historial['grupos'][historial['actual']]
+        solicitud = grupo['solicitud']
+        dictamen = grupo['dictamen']
+        if dictamen['destino'] == 'tecnico':
+            terminal = dictamen
+        elif dictamen['destino'] in ('desarrollador', 'especificador') and grupo.get('estrategia_aplicada'):
+            terminal = dictamen.get('terminal')
+        else:
+            return None
+        if (not isinstance(solicitud, str) or not solicitud or not validar_terminal(terminal)
+                or terminal['destino'] != 'tecnico'):
+            return None
+        if 'agente' in terminal:
+            if terminal['agente'] != 'artemisa':
+                return None
+        elif not asignacion_c1(fichero.read_text(encoding='utf-8'), informe.read_text(encoding='utf-8'), solicitud):
+            return None
+        mandato = terminal['intervencion']
+        condicion = terminal.get('condicion_salida')
+        if isinstance(condicion, str) and condicion.strip():
+            mandato += f'\nCondición de salida: {condicion.strip()}'
+        return solicitud, mandato
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def leer_dictamen(salida):
     """Permite los avisos del lanzador antes del objeto JSON final del revisor."""
     lineas = salida.strip().splitlines()
@@ -143,7 +207,9 @@ def solicitar(root, iid, comando, grupo, ruta_historial):
         'decision describe una estrategia revisada para un solo intento. Incluye terminal con la conclusión '
         'si persiste la causa. Para una intervención inmediata, pon la conclusión en el nivel superior. '
         'Una conclusión tiene destino humano con pregunta concreta y motivo, o tecnico con responsable e '
-        'intervencion concreta. Solo asigna humano si hace falta su decisión, permiso o recurso.\n'
+        'intervencion concreta. Indica su condición de salida en condicion_salida. Añade "agente":"artemisa" '
+        'únicamente si esa intervención es un encargo distinto que desarrollo puede ejecutar. '
+        'Solo asigna humano si hace falta su decisión, permiso o recurso.\n'
         + evidencias)
     with tempfile.TemporaryDirectory() as directorio:
         ruta = Path(directorio) / 'diagnostico.txt'

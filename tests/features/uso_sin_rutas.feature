@@ -316,3 +316,37 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
     Y B-DEMO-0002 reanuda con codex/base-demo/medium por segunda vez
     Y si sigue sin progreso su siguiente ejecución es codex/superior-demo/high por primera vez
     Y la recarga no vuelve a perfiles agotados ni concede intentos adicionales
+
+  @B-ADV-0048
+  Esquema del escenario: Una reserva entrega el rechazo y Artemisa recibe la investigación técnica
+    Dado que Gemini tiene una marca de cuota vigente y Hades usa su reserva Codex
+    Y <disponibilidad>
+    Cuando su respuesta final propia declara «**Veredicto formal: RECHAZADO. Media: 7,75/10.**»
+    Y el fallo persiste y la solicitud asigna expresamente a desarrollo una intervención distinta
+    Entonces se registra un rechazo y el siguiente bug-fix de Artemisa <resultado>
+    Y conserva el rojo, las evidencias, el contador y la cuota de Gemini
+
+    Ejemplos:
+      | disponibilidad | resultado |
+      | Artemisa tiene un perfil con cuota | recibe la solicitud y el mandato de aislar y acreditar la corrección del cierre |
+      | todos los perfiles de Artemisa están sin cuota al entregar el encargo | espera su propia cuota y al relanzar recibe la misma solicitud y el mismo mandato |
+
+  @B-ADV-0048
+  Escenario: Una cita del rechazo o una entrega sin dictamen siguen pendientes
+    Cuando la única declaración de rechazo está dentro de una cita o de un ejemplo, o la entrega carece de dictamen
+    Entonces esa llamada no acredita una revisión ni permite entregar una intervención basada solo en ella
+
+  @B-ADV-0048
+  Escenario: Retomar el bloqueo histórico de Afinn con todos los perfiles de Artemisa sin cuota
+    Dado el bug bloqueado de la solicitud activa con su hallazgo C1 rechazado y enrutado a Artemisa
+    Cuando todos los perfiles de Artemisa carecen de cuota y la espera supera el límite del proceso
+    Entonces el aviso identifica el bug-fix, el bug y la cuota del perfil de Artemisa
+    Y al relanzar con cuota se entrega la misma investigación con su condición de salida
+    Y devolver el mismo impedimento no abre una pregunta ni autoriza otra entrega ni completa el bug
+    Y un segundo arranque después de devolver ese impedimento conserva la parada técnica
+
+  @B-ADV-0048
+  Escenario: Un mantenedor escrito sin asignación vigente conserva el bloqueo explicado
+    Dado un bloqueo técnico con un nombre libre de mantenedor
+    Cuando el informe vigente no acredita una asignación interna de la solicitud activa
+    Entonces el estado indica qué asignación falta y conserva la ficha y el historial

@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.4] - 2026-11-12
+
+### Corregido
+
+- **B-ADV-0048** — Hades puede entregar un rechazo formal desde una reserva. Artemisa recibe la investigación técnica asignada al cierre y, si agota su cuota, retoma el mismo encargo al relanzar.
+
 ## [1.1.3] - 2026-11-11
 
 ### Corregido
