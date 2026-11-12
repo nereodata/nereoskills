@@ -1,7 +1,7 @@
 # Revisión de código de B-ADV-0048
 
 Veredicto: APROBADO
-Producto revisado: c55c94d87dd29ddc3a3ce3c9970e92e24b9a072038b6e7a120bf5b1b2fecb9bf
+Producto revisado: 199a4612d2e7aa1c5786802a565c20c9dca02f675df1d3b3e6f2ee9f9a3252ba
 
 ## Evidencia
 
