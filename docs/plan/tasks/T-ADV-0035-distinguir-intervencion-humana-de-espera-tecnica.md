@@ -5,7 +5,7 @@ type: funcional
 weight: 120
 dificultad: dificil
 version: "v1.2.0"
-status: planned
+status: in_progress
 base_calidad: 8efac2293421d1190f2fb57724aa6e932d964427
 depende_de: ["T-ADV-0039"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
@@ -39,6 +39,12 @@ Aplicar el mismo criterio a preguntas originadas por un agente, un dictamen o el
 - F [EXEC] Verificación final, revisión de versión y commit.
 
 Verificación dirigida con `adevv orquestar --verificar "python -m unittest tests.test_decision_item tests.test_llamadas tests.test_control_intervenciones skills.orquestar.test_intervencion_humana skills.orquestar.test_acceso_agente"`. El módulo `tests.test_decision_item` corresponde a C1. Las regresiones existentes de llamadas, recepción por CLI y Telegram, persistencia y acceso se pueden ejecutar ya en A.
+
+## Retoma de desarrollo · C1
+
+Diseño en `docs/design/T-ADV-0035-design.md` y siete recorridos nuevos en `tests/test_decision_item.py`. La verificación del triaje ejecutó 59 pruebas sobre el árbol `351bd4dd12e5d41edcbf1839b35cb41590e61c4b`. Pasaron las 52 regresiones previas. Fallaron los siete casos nuevos de aclaración, decisión humana y despacho durante una espera.
+
+Queda pendiente el dictamen de Hades sobre C1, objetivo `test`, entradas `d1dd9b2883454864834789f465aa4d310bf2327b55cf2965cf5bdfebc5d8e1c3`, invocación `3de02e970fc3416eaa5fcd8cfabc394b`. Claude devolvió acceso por suscripción deshabilitado. La reserva Codex no pudo leer las instrucciones instaladas y terminó sin dictamen. El orquestador conserva la espera de cuota de la reserva agy. Al reanudar, presentar el mismo objetivo y entradas a Hades, con las instrucciones de revisión accesibles para el revisor. La implementación C2 espera el dictamen de C1.
 
 ## Decisiones de especificación
 
