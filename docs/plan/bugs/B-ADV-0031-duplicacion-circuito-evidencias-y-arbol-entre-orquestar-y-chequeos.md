@@ -5,12 +5,11 @@ type: bug
 weight: 70
 dificultad: media
 version: "v1.2.0"
-status: blocked
+status: planned
 depende_de: []
 origen: "T-ADV-0032; revisar-version v1.1 (docs/review/versions/v1.1-arquitectura.md), H-01 🟡"
 created_at: 2026-11-07
 updated_at: 2026-11-12
-pendiente_de: especificador
 ---
 
 # B-ADV-0031: Duplicación del circuito de lectura/escritura de evidencias y huella de árbol entre orquestar.py y chequeos.py
@@ -38,10 +37,12 @@ Esta ficha proporciona la identidad y el historial de las **comprobaciones de pr
 ## Criterios de aceptación de v1.2.0
 
 - [ ] El comando `--verificar`, la evidencia suministrada a Hades y el preflight consultan el mismo historial aplicable, también desde un worktree secundario.
-- [ ] Los tres identifican el último resultado real de la comprobación. Un fallo posterior impide reutilizar el verde anterior y se explica por qué procede ejecutar, esperar o reutilizar.
+- [ ] Los tres identifican el último resultado real aplicable. Verificar y preflight explican la reutilización de un verde por coincidencia de comando, entradas y entorno, o la nueva ejecución por fallo anterior, entradas modificadas o entorno distinto o desconocido. Si ya se ejecuta una comprobación equivalente, la solicitud indica el motivo de la espera y al terminar comparte su resultado. El mandato de Hades solo acredita resultados verdes aplicables. Un preflight fallido termina tras el primer fallo y una verificación posterior solicitada puede ejecutar de nuevo el comando.
 - [ ] La identidad respeta las entradas y el entorno acreditables de la etapa. Si faltan datos en registros históricos, se conserva su trazabilidad y se vuelve a ejecutar cuando corresponda.
 
 ## Triaje · 2026-11-11
+
+**DEC de especificación (H-01, 2026-11-12).** Se conserva la espera del segundo criterio. T-ADV-0032, CA-M-4, ya establece que las solicitudes equivalentes comparten la ejecución en curso entre worktrees. Eliminar la espera permitiría duplicar la comprobación mientras se obtiene su resultado. La cuota del proveedor y la espera de una revisión LLM corresponden a T-ADV-0039.
 
 - base_calidad: `32d567cb8e1ad1c881a460b09e6742f3b3f2c6cc` (conservar en reintentos).
 - Causa confirmada: cálculo Git y acceso JSONL duplicados en el motor; el lector central prioriza el archivo local sobre el común y los consumidores por árbol no acreditan entorno ni cambios en vuelo. El preflight solo persiste éxitos.
@@ -256,3 +257,7 @@ Los reintentos con registered Core launch requires an installed app carecen de d
 - Destino: `especificador`
 - Decisión: ejecutar especificar
 - Evidencia: Hades /review-spec RECHAZADO, informe docs/review/spec_reviews/B-ADV-0031-spec-review.md, invocación d2d356c2ce0543ab9b75122dce2f0eff. H-01 alta para especificador: concretar cuándo esperar y los diagnósticos de ejecutar/reutilizar, o ajustar justificadamente el criterio. H-02 media resolver: cubrir cambio relevante de entradas previo a consulta con entorno estable. H-03 baja resolver: delimitar ausencia de reintento automático en preflight frente a nueva invocación solicitada. Decisión: ejecutar especificar; conservar trabajo sin avanzar a implementación ni marcar completed. Revisión realizada sobre adjuntos exactos por fallo técnico de acceso al disco; transcripción íntegra del dictamen independiente.
+
+## Resolución del especificador · 2026-11-12
+
+Hades aprobó la especificación corregida y dio por resueltos H-01, H-02 y H-03 en la invocación `97372ce71bbb47f3b08a945e72a3528e`. El siguiente paso de desarrollo parte del [dictamen aprobado](../../review/spec_reviews/B-ADV-0031-spec-review.md) y del triaje anterior.

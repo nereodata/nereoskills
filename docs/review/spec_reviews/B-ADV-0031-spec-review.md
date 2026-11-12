@@ -1,75 +1,51 @@
-**Veredicto:** RECHAZADO
-
-Transcripción íntegra del dictamen independiente de Hades, invocación d2d356c2ce0543ab9b75122dce2f0eff. El revisor evaluó los adjuntos exactos; no pudo leer ni escribir el árbol. No se atribuyen verificaciones ejecutadas por Hades.
-
----
-
-No he podido escribir `docs/review/spec_reviews/B-ADV-0031-spec-review.md`: la herramienta de escritura ha fallado. Devuelvo su contenido íntegro para transcripción.
-
 # Revisión de especificación · B-ADV-0031
 
-**Veredicto: RECHAZADO**
+**Veredicto: APROBADO**
 
-Fecha: 2026-11-11. Revisor: Hades. Skill: `/review-spec`. Modo: orquestado.
+Fecha: 2026-11-12. Revisor: Hades. Skill: `/review-spec`. Paso: especificar. Objetivo: spec. Tipo: reevaluación.
 
 ## Alcance y evidencia
 
-Revisión independiente de los cuatro escenarios etiquetados `@B-ADV-0031` al final de `tests/features/publicacion.feature`, incluido el esquema con sus dos ejemplos. Se utilizan exclusivamente el bug y su triaje, la feature completa y las instrucciones completas de Hades y de la skill adjuntas a la petición. Los escenarios anteriores son contexto existente y no se vuelven a evaluar. No hay etiquetas `@CA-*` nuevas en el delta.
+Reevaluación de H-01 a H-03 del dictamen anterior (invocación d2d356c2ce0543ab9b75122dce2f0eff) y de los cambios adjuntos en la ficha B-ADV-0031 y en `tests/features/publicacion.feature`. Se mantienen el contrato y los inputs funcionales recibidos: criterios del bug, triaje, CA-M-4 de T-ADV-0032, feature completa, informe anterior y delta. Los escenarios previamente aprobados se usan como contexto y no se vuelven a revisar.
 
-No se han revisado diseño, código ni pruebas, ni se han ejecutado verificaciones. No se recibió un informe anterior: esta es una primera revisión, no una reevaluación.
+Se ha leído la feature del árbol de trabajo y el informe anterior; la feature coincide con el material recibido. La comprobación de no regresión se limita al delta adjunto entre rondas. No se certifican cambios ajenos a ese alcance.
 
-La herramienta de procesos no pudo iniciarse al intentar leer la copia instalada del agente y de la skill. Se aplican sus contenidos completos adjuntos; esto no impide juzgar la especificación. No se dispone de un diff independiente contra la base: la comprobación de no regresión se limita al delta expresamente delimitado por la petición. No se certifica el estado de otros archivos del árbol.
+Se acepta la evidencia aportada de `git diff --check` en verde sobre el árbol identificado como `96caa38a7c`; no se repite. Ese chequeo documental no valida el comportamiento funcional, que se juzga leyendo la especificación. No se han revisado código, diseño ni pruebas de implementación, ni se han ejecutado tests, lint u otros chequeos. El bug permanece en fase de especificación; este dictamen no acredita su implementación ni su cierre.
+
+Limitación de acceso: la lectura del agente y la skill en la copia instalada indicada fue denegada. Se aplican sus contenidos íntegros adjuntos a la petición, ignorando el modelo del frontmatter como se solicita. La lectura del repositorio y la escritura de este informe sí están disponibles. No se modifica la copia instalada.
 
 ## Obligatorias
 
 | Criterio | Resultado | Motivo |
 | --- | --- | --- |
-| No regresión | ✅ | El delta recibido añade los cuatro escenarios finales; no contiene eliminación ni modificación de los escenarios existentes. Comprobación limitada al material adjunto y al alcance declarado. |
-| Coherencia | ✅ | Los comportamientos añadidos son compatibles con los criterios del bug: historial común aplicable, invalidación por un fallo posterior e identidad acreditable. Las omisiones de cobertura se detallan como hallazgos, sin atribuir contradicciones al contexto existente. |
-| Trazabilidad | ✅ | Los cuatro escenarios llevan `@B-ADV-0031` y corresponden al bug recibido. No introducen `@CA-*` cuya existencia deba contrastarse. |
-| Delta real | ✅ | Especifican comportamientos de reutilización y acreditación de evidencias que no aparecen en los escenarios previos adjuntos. No son duplicados de los casos de publicación o revisión formal existentes. |
+| No regresión | ✅ | El delta conserva los escenarios ajenos al bug y sus expectativas. Las modificaciones de B-ADV-0031 concretan diagnósticos y secuencia de invocaciones; los dos esquemas añadidos completan los hallazgos anteriores sin retirar obligaciones. |
+| Coherencia | ✅ | La espera se vincula a una comprobación equivalente en curso entre worktrees, conforme a CA-M-4. Se conserva el historial aplicable y la acreditación exclusiva de verdes aplicables; la cuota y las revisiones LLM quedan fuera del contrato del bug. |
+| Trazabilidad | ✅ | Los cambios funcionales llevan `@B-ADV-0031` y corresponden a sus criterios de historial, decisión e identidad. El delta no incorpora etiquetas `@CA-*` nuevas. |
+| Delta real | ✅ | Las adiciones distinguen espera con éxito o fallo y edición anterior a la consulta; las modificaciones hacen observables los motivos de decisión y el límite de cada invocación. No duplican los escenarios previos de publicación ni los de cambios durante la ejecución. |
 
 ## Puntuaciones
 
 | Dimensión | Puntuación | Justificación |
 | --- | ---: | --- |
-| Claridad | 8/10 | Se entienden los consumidores y los resultados principales. Falta concretar la decisión de esperar y distinguir la ausencia de reintento automático de una verificación posterior solicitada. |
-| Completitud | 7/10 | Cubre los cuatro riesgos declarados en los títulos, pero deja sin especificar una rama explícita del criterio de aceptación y el cambio de entradas anterior a una consulta. |
-| Testeabilidad | 8/10 | La ejecución, reutilización, persistencia y contenido del mandato son observables. La explicación exigida por el criterio de aceptación solo se comprueba expresamente para el fallo anterior. |
-| Estructura | 10/10 | Los escenarios se incorporan a la feature funcional existente y se identifican por el bug; no crean una feature por tarea o versión. |
+| Claridad | 9/10 | La decisión de esperar tiene supuesto, mensaje y terminación definidos; los motivos de reutilización y ejecución son explícitos y las invocaciones tras un fallo están separadas. |
+| Completitud | 9/10 | El delta cubre las omisiones señaladas: espera por equivalencia con resultados cero y uno, diagnóstico de identidad y edición previa con entorno estable para verificar y preflight. |
+| Testeabilidad | 9/10 | Se observan mensajes, acreditación de Hades, conservación histórica y número de ejecuciones. Los casos de entorno parten por separado del historial original, evitando que un consumidor enmascare el comportamiento del siguiente. |
+| Estructura | 10/10 | Los cambios permanecen en la feature funcional existente y los nuevos esquemas describen comportamiento sin imponer mecanismos de implementación. |
 
-**Media: 8,25/10.** La media supera 8, pero hay un hallazgo de gravedad alta; por tanto, no procede aprobar.
+**Media: 9,25/10.** Supera 8 y no hay hallazgos críticos ni altos abiertos.
 
-## Hallazgos
+## Reevaluación de hallazgos anteriores
 
-### H-01 · 🟠 ALTA · Falta especificar la decisión de esperar y el diagnóstico de las decisiones
+| Hallazgo | Estado | Evidencia y conclusión |
+| --- | --- | --- |
+| H-01 · 🟠 ALTA · Espera y diagnóstico de decisiones | **resuelto** | La DEC de especificación vincula la espera a CA-M-4. El nuevo esquema inicia verificar en el worktree secundario y hace que el preflight equivalente espere en el principal, explique la espera, comparta éxito o fallo y deje una sola ejecución real en el historial. Hades no acredita antes del resultado y solo acredita el éxito aplicable. Los escenarios modificados exigen explicar la reutilización por coincidencia de comando, entradas y entorno, y la ejecución por entorno ausente o distinto; el nuevo esquema de edición exige diagnosticar el cambio de entradas. |
+| H-02 · 🟡 MEDIA · Cambio de entradas anterior a la reutilización | **resuelto** | El nuevo esquema parte de un éxito sobre `src/precios.py`, modifica ese archivo con comando y entorno estables y consulta Hades antes de verificar o preflight. Exige no acreditar el contenido actual, ejecutar una vez por cambio de entradas y conservar el éxito asociado al contenido anterior. |
+| H-03 · 🔵 BAJA · Límite del reintento automático | **resuelto** | El preflight fallido termina con diagnóstico tras una sola ejecución. Una nueva solicitud explícita de verificación constituye otra invocación, explica el fallo anterior y ejecuta una sola vez. Queda delimitada la ausencia de reintento automático dentro del preflight. |
 
-- **Referencia:** segundo criterio de aceptación de v1.2.0 y los cuatro escenarios del delta.
-- **Evidencia:** el criterio exige que se explique por qué procede «ejecutar, esperar o reutilizar». Los escenarios describen ejecución y reutilización, pero ninguno establece cuándo corresponde esperar, qué observa el consumidor en ese estado ni qué permite salir de él. Solo el caso de fallo anterior exige expresamente una explicación de la decisión de ejecutar.
-- **Impacto:** una solución que siempre ejecutase o reutilizase, sin contemplar espera y sin explicar la reutilización, podría satisfacer estos escenarios dejando incumplido el criterio de aceptación. No puede inferirse del material recibido si esperar se refiere a una comprobación en curso, a otro estado o si esa rama se incluyó por error.
-- **para:** `especificador`.
-- **destino:** `resolver`.
-- **Corrección requerida:** concretar el supuesto observable que requiere esperar y su resultado, y cubrirlo en la especificación. Añadir resultados observables para el motivo de reutilización y de ejecución por identidad no acreditada. Si esperar no forma parte del contrato de este bug, ajustar expresamente el criterio de aceptación y su justificación; no elegir silenciosamente una interpretación en el diseño.
-- **Material necesario:** aclaración del significado de «esperar» en el criterio de origen. No se requiere diseño ni código para resolverlo.
+## Hallazgos nuevos
 
-### H-02 · 🟡 MEDIA · No se comprueba un cambio de entradas previo a la reutilización
+Ninguno. El delta no introduce contradicciones ni omisiones de gravedad crítica o alta respecto al contrato recibido. No se exige ampliar esta corrección a todas las ramas de coordinación de CA-M-4: la reevaluación se limita a la espera equivalente y a los cambios de identidad y diagnóstico afectados por los hallazgos anteriores.
 
-- **Referencia:** tercer criterio de aceptación y escenarios «Evidencia sin identidad acreditable exige ejecución» y «Un comando modifica sus entradas durante la ejecución».
-- **Evidencia:** el esquema mantiene el mismo comando y árbol, y varía el entorno. El último escenario cambia entradas durante la ejecución. Ninguno parte de un éxito seguido de un cambio relevante de entradas antes de que los consumidores consulten la evidencia.
-- **Impacto:** queda sin una comprobación directa la obligación de respetar las entradas actuales. Los casos adjuntos no discriminan por sí solos una solución que controle el entorno y los cambios en vuelo, pero reutilice una evidencia anterior tras una edición previa.
-- **para:** `especificador`.
-- **destino:** `resolver`.
-- **Corrección propuesta:** añadir un caso breve con éxito previo, cambio concreto de un archivo relevante antes de consultar y entorno sin cambios; exigir que Hades no lo acredite y que verificar y preflight ejecuten por cambio de entradas, conservando la trazabilidad del éxito anterior. Puede integrarse como variante de un escenario existente.
+## Dictamen formal
 
-### H-03 · 🔵 BAJA · El límite del reintento automático queda implícito
-
-- **Referencia:** «Un fallo posterior invalida un éxito compartido», últimas dos líneas.
-- **Evidencia:** se exige que la siguiente verificación ejecute el comando y también que «no reintenta automáticamente el fallo», sin delimitar expresamente la invocación a la que se aplica esta última condición.
-- **Impacto:** la lectura razonable distingue una nueva verificación solicitada de un reintento dentro del preflight fallido, pero esa distinción queda implícita al convertir el escenario en una prueba.
-- **para:** `especificador`.
-- **destino:** `resolver`.
-- **Corrección propuesta:** indicar que el preflight fallido termina sin una segunda ejecución automática y que una nueva invocación de verificar ejecuta una vez el comando, explicando el fallo anterior.
-
-## Condición de reevaluación
-
-Resolver H-01 y remitir el cambio de especificación junto con este informe. H-02 y H-03 tienen destino `resolver` por ser ajustes pequeños del mismo contrato. No se solicita modificar código ni aportar pruebas de implementación para esta revisión.
+**APROBADO** para la especificación de B-ADV-0031 en el paso especificar. H-01, H-02 y H-03 quedan resueltos. No quedan correcciones de especificación pendientes derivadas de esta reevaluación.

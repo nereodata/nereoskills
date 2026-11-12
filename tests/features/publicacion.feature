@@ -130,6 +130,7 @@ Característica: F-05 Publicación de versiones sin contenido interno
     Y ambos conservan historiales locales de verificaciones anteriores
     Cuando verifico un comando con éxito desde el worktree secundario
     Entonces verificar desde el principal y el preflight reutilizan ese resultado sin ejecutarlo
+    Y ambos explican que el último resultado real fue verde para el mismo comando, entradas y entorno
     Y el mandato de Hades incluye el comando acreditado
     Y consultar o reutilizar no añade ejecuciones reales al historial
 
@@ -139,15 +140,17 @@ Característica: F-05 Publicación de versiones sin contenido interno
     Cuando un preflight posterior ejecuta ese comando sobre la misma identidad y falla
     Entonces el historial conserva el fallo y su diagnóstico
     Y el mandato de Hades deja de afirmar que ese comando está verificado
-    Y la siguiente verificación ejecuta el comando y explica que el último resultado falló
-    Y no reintenta automáticamente el fallo
+    Y ese preflight termina con el diagnóstico del fallo tras una sola ejecución del comando
+    Cuando solicito una nueva verificación del mismo comando
+    Entonces verificar explica que el último resultado falló y ejecuta el comando una sola vez
 
   @B-ADV-0031
   Esquema del escenario: Evidencia sin identidad acreditable exige ejecución
     Dado un éxito histórico del mismo comando y árbol cuyo entorno está <entorno>
-    Cuando consulto la evidencia para Hades y ejecuto verificar y preflight
+    Cuando consulto el mandato de Hades y solicito cada verificación por separado partiendo de ese historial
     Entonces Hades no anuncia ese éxito como acreditado
     Y verificar y preflight ejecutan el comando al no poder reutilizar esa evidencia
+    Y ambos diagnósticos identifican que el entorno del éxito histórico está <entorno>
     Y el historial original permanece trazable con el motivo de no reutilización
 
     Ejemplos:
@@ -162,3 +165,34 @@ Característica: F-05 Publicación de versiones sin contenido interno
     Entonces el historial registra las identidades inicial y final y el cambio en vuelo
     Y Hades no presenta el resultado como verde reutilizable
     Y la próxima verificación vuelve a ejecutarlo
+
+  @B-ADV-0031
+  Esquema del escenario: El preflight espera la comprobación equivalente iniciada en otro worktree
+    Dado que verificar está ejecutando un comando en el worktree secundario y aún no hay un resultado anterior
+    Cuando el preflight solicita ese comando en el principal con las mismas entradas y entorno relevante
+    Entonces indica que espera el resultado de la comprobación equivalente en curso
+    Y el mandato de Hades aún no acredita el comando
+    Cuando termina la comprobación con código <código> sin cambios de entradas ni de entorno
+    Entonces el preflight sale de la espera y comunica <resultado> con el diagnóstico de esa ejecución
+    Y el historial compartido contiene una sola ejecución real del comando
+    Y el mandato de Hades <acreditación>
+
+    Ejemplos:
+      | código | resultado | acreditación                         |
+      | 0      | éxito     | incluye el comando como verificado   |
+      | 1      | fallo     | deja el comando sin acreditar        |
+
+  @B-ADV-0031
+  Esquema del escenario: Una edición previa invalida el éxito aunque el entorno siga igual
+    Dado que la última ejecución de un comando sobre "src/precios.py" pasó con éxito
+    Y después edito el contenido de "src/precios.py" sin cambiar el comando ni su entorno
+    Cuando consulto el mandato de Hades antes de solicitar <entrada>
+    Entonces el mandato deja el comando sin acreditar para el contenido actual
+    Cuando solicito <entrada> para ese comando
+    Entonces se ejecuta una vez y el diagnóstico identifica el cambio de entradas
+    Y el éxito anterior sigue en el historial asociado al contenido previo
+
+    Ejemplos:
+      | entrada   |
+      | verificar |
+      | preflight |
