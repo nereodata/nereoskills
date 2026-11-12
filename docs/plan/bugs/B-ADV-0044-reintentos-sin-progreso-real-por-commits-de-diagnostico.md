@@ -5,11 +5,11 @@ type: bug
 weight: 1
 dificultad: dificil
 version: "v1.1.3"
-status: planned
+status: completed
 depende_de: []
 perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}}
 created_at: 2026-11-11
-updated_at: 2026-11-11
+updated_at: 2026-11-12
 origen: "Incidente de release/v1.2, B-ADV-0031: al menos 28 ejecuciones repitiendo fallo de acceso de Hades"
 ---
 

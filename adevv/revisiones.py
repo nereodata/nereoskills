@@ -48,7 +48,8 @@ def huella_producto(root, arbol, carpetas, mandato_temporal=None):
 class CitasHTML(HTMLParser):
     """Separa el texto propio de las citas y los ejemplos de código HTML."""
 
-    etiquetas = ('blockquote', 'pre', 'code', *HTMLParser.CDATA_CONTENT_ELEMENTS)
+    bloques_citados = ('blockquote', 'pre')
+    etiquetas = (*bloques_citados, 'code', *HTMLParser.CDATA_CONTENT_ELEMENTS)
     inicio_bloque_html = re.compile(
         r' {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|'
         r'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|'
@@ -70,7 +71,7 @@ class CitasHTML(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag in self.etiquetas:
             if not self.abiertas:
-                self.bloque = self.bloque or tag != 'code'
+                self.bloque = self.bloque or tag in self.bloques_citados
                 self.visible.append(' ')
             self.abiertas.append(tag)
         elif not self.abiertas:
@@ -89,7 +90,7 @@ class CitasHTML(HTMLParser):
     def sin_citas(self, linea):
         """Retiene el texto propio a ambos lados de una cita, incluso entre líneas."""
         continuacion = self.abiertas or self.rawdata
-        self.bloque = any(tag != 'code' for tag in self.abiertas)
+        self.bloque = any(tag in self.bloques_citados for tag in self.abiertas)
         if not linea.strip():
             self.en_bloque_html = False
         elif not continuacion and (self.inicio_bloque_html.match(linea) or self.etiqueta_aislada.fullmatch(linea)):
@@ -219,7 +220,7 @@ def lineas_del_informe(texto):
             if marcador:
                 parrafo_citado = False
             abierto = ''
-        if parrafo_citado and interrumpe_cita(linea):
+        if parrafo_citado and not citas_html.cdata_elem and interrumpe_cita(linea):
             parrafo_citado = False
         if not abierto:
             if (not preparada and ('`' in linea or sangrias) and linea.strip()
