@@ -48,14 +48,15 @@ def huella_producto(root, arbol, carpetas, mandato_temporal=None):
 class CitasHTML(HTMLParser):
     """Separa el texto propio de las citas y los ejemplos de código HTML."""
 
-    etiquetas = ('blockquote', 'pre', 'code')
+    etiquetas = ('blockquote', 'pre', 'code', *HTMLParser.CDATA_CONTENT_ELEMENTS)
     inicio_bloque_html = re.compile(
         r' {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|'
         r'details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|'
         r'header|hgroup|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|'
         r'p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s/>]|$)', re.I)
-    etiqueta = (r"""(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*(?:\s+[^\s"'<>/=\x00]+(?:\s*=\s*"""
-                r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*/?>)""")
+    atributos = (r"""(?:\s+[^\s"'<>/=\x00]+(?:\s*=\s*"""
+                 r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*""")
+    etiqueta = rf'(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*{atributos}/?>)'
     etiqueta_aislada = re.compile(r' {0,3}' + etiqueta + r'[ \t]*', re.I)
     inicio_incompleto = re.compile(r'(?!' + etiqueta + r')<(?=/?[a-z])', re.I)
 
@@ -150,7 +151,9 @@ def interrumpe_cita(linea):
             or re.fullmatch(r' {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*', linea))
 
 
-TOKEN_HTML = re.compile(CitasHTML.etiqueta + r'|<!--.*?(?:-->|\Z)', re.I | re.S)
+ELEMENTO_CRUDO = (rf'<(?P<crudo>{"|".join(HTMLParser.CDATA_CONTENT_ELEMENTS)}){CitasHTML.atributos}>'
+                  r'.*?(?:</(?P=crudo)\s*>|\Z)')
+TOKEN_HTML = re.compile(ELEMENTO_CRUDO + '|' + CitasHTML.etiqueta + r'|<!--.*?(?:-->|\Z)', re.I | re.S)
 FRAGMENTO = re.compile(TOKEN_HTML.pattern + r'|\\[^\w\s]|(?<!`)(?P<marca>`+)(?!`)(?P<codigo>.*?)'
                        r'(?<!`)(?P=marca)(?!`)', re.I | re.S)
 
@@ -190,7 +193,7 @@ def parrafo_sin_codigo(linea, pendientes, sangrias):
             sangria = next((n for n in reversed(sangrias) if n <= espacios), 0)
             otra = original[sangria:]
             if (not otra.strip() or interrumpe_cita(otra) or re.match(CERCO, otra) or ENCABEZADO.match(otra)
-                    or re.match(r' {0,3}(?:>|(?:[-+*]|0{0,8}1[.)])\s+\S|=+\s*$)', otra)
+                    or re.match(r' {0,3}(?:>|(?:[-+*]|0{0,8}1[.)])\s+\S|(?:=+|-+)[ \t]*$)', otra)
                     or (sangrias and sangria < sangrias[-1]
                         and re.match(r' {0,3}(?:[-+*]|\d{1,9}[.)])(?:\s|$)', otra))):
                 break
@@ -219,8 +222,9 @@ def lineas_del_informe(texto):
         if parrafo_citado and interrumpe_cita(linea):
             parrafo_citado = False
         if not abierto:
-            if (not preparada and '`' in linea
-                    and not (citas_html.en_bloque_html or citas_html.rawdata or 'pre' in citas_html.abiertas)
+            if (not preparada and ('`' in linea or sangrias) and linea.strip()
+                    and not (citas_html.en_bloque_html or citas_html.rawdata or citas_html.cdata_elem
+                             or 'pre' in citas_html.abiertas)
                     and not (interrumpe_cita(linea) or citas_html.etiqueta_aislada.fullmatch(linea)
                              or re.match(r' {0,3}(?:>|`{3,}|~{3,})| {4}', linea))):
                 preparadas = parrafo_sin_codigo(linea, pendientes, sangrias)

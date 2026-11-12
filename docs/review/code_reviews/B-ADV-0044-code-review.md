@@ -1,88 +1,62 @@
 **Veredicto:** RECHAZADO
-Producto revisado: cbeded7a66ac5d39cb5b51f86c3084bd44f0a74a84a5f88f77cba952589f257a
-Rechazo reevaluado: 96d66226b2802bc46f43285dabe501f8292d8898
+Producto revisado: cbdfb81bd262de6d3f27f00d8b15bd0d5bdbab0b2e1d8e64499191591b657c00
+Rechazo reevaluado: 71cb10159a304d318b389ae8ea25c1e06da76989
 
-# B-ADV-0044 · Reevaluación D de D24–D26
+# B-ADV-0044 · Reevaluación D de D27–D29
 
-**Media 7,50/10.** D24, D25 y D26 quedan resueltos en los dos consumidores. El cambio introduce tres regresiones de atribución. D28 permite cerrar una ficha con la aprobación de un ejemplo. D27 y D29 ocultan el rechazo del principal y habilitan una reserva.
+**Media 7,67/10.** D27, D28 y D29 quedan resueltos. D30 impide aprobar el producto. Un `script` en mitad de un párrafo citado puede exponer la aprobación de la cita y permitir el cierre pese al rechazo propio de Hades.
 
 ## Hallazgos anteriores
 
-| Hallazgo | Estado y evidencia del árbol revisado | Para | Destino |
-|---|---|---|---|
-| D24 · 🟠 Alta | **Resuelto.** Dentro del párrafo, `2. ejemplo` y `paso 2. ejemplo` quedan entre los delimitadores del fragmento. La aprobación de ejemplo permanece oculta. | Artemisa (`desarrollador`) | `resolver`, cumplido en C2 |
-| D25 · 🟠 Alta | **Resuelto.** El lector conserva las dos líneas que continúan la viñeta, tanto al margen como con dos espacios de sangría. El acento de cierre pertenece al mismo párrafo. | Artemisa (`desarrollador`) | `resolver`, cumplido en C2 |
-| D26 · 🟠 Alta | **Resuelto.** El lector reconoce el `pre` efectivo tras el nombre del archivo y trata su acento grave como literal hasta el cierre HTML. El marcado de `archivo.py` conserva el rechazo exterior. | Artemisa (`desarrollador`) | `resolver`, cumplido en C2 |
+| Hallazgo | Estado | Evidencia en proveedor y preflight |
+|---|---|---|
+| D27 · Segundo elemento numerado | **Resuelto** | El lector prepara el párrafo desde el primer elemento mientras dispone de su sangría. El marcador `2.` delimita el segundo elemento tanto si la continuación tiene cero o dos espacios como si tiene los tres del control. |
+| D28 · Cadena JSON con una etiqueta literal | **Resuelto** | La preparación del párrafo consume el `script` completo. Tanto con `"<pre>"` como con `"<div>"`, el fragmento que empieza después de `</script>` oculta la aprobación de ejemplo. |
+| D29 · Subrayado Setext | **Resuelto** | El subrayado de un guion con espacio final termina el encabezado, igual que el control de tres guiones. El acento grave del título queda separado del rechazo del párrafo siguiente. |
 
-Las seis entradas de C1 pasan en el árbol corregido. En cada una, `motor.agente` llama una vez al principal y registra su rechazo. El preflight encuentra el ID de la ficha completada con el motivo «informe rechazado».
+En las siete entradas, el arnés simulado registra una sola llamada al principal y su rechazo. El preflight mantiene pendiente la ficha completada `B-DEMO-0001` por «informe rechazado». C1 estaba aprobada con 9,75/10. Para los tres hallazgos, el destinatario era Artemisa (`desarrollador`) y el destino `resolver` quedó cumplido en C2.
 
-## Hallazgos nuevos
+## Hallazgo nuevo
 
-### D27 · 🟠 Alta · El segundo elemento de una lista numerada queda dentro del fragmento del primero
-
-````markdown
-1. Primer hallazgo
-El separador es `
-2. Segundo hallazgo
-**Veredicto:** RECHAZADO
-Afecta a `lector`.
-````
-
-La segunda línea continúa el párrafo del primer elemento. El marcador `2.` inicia el siguiente elemento de la misma lista. Por tanto, el acento suelto del primero queda literal y el rechazo del segundo es propio.
-
-En `adevv/revisiones.py`, `contenido_de_lista` retira la sangría al leer la continuación sin sangrar. Cuando esa línea activa `parrafo_sin_codigo`, la pila ya está vacía. En las líneas 193–195, el marcador `2.` no activa ninguna de las dos condiciones de interrupción. El lector empareja el acento anterior a `2.` con el que precede a `lector`, y elimina el rechazo intermedio. El lector de `cdcee1cb` detenía la búsqueda en `2.`. Como control, añadir dos espacios antes de «El separador» conserva la pila y recupera el rechazo en el lector actual.
-
-**Consecuencia.** Con el principal y la reserva de C1, el principal queda sin veredicto y se invoca la reserva. El informe canónico del principal deja la ficha pendiente por «informe sin veredicto formal».
-
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Conservar el contexto de la lista durante la continuación del párrafo. Las dos sangrías deben dar una sola llamada, el rechazo del principal y el motivo «informe rechazado».
-
-### D28 · 🟠 Alta · Una cadena HTML dentro de un script expone la aprobación de un ejemplo posterior
+### D30 · 🟠 Alta · Un script en una continuación citada expone la aprobación de la cita
 
 ````markdown
-Plantilla <script type="application/json">"<pre>"</script>. Salida: `
+> Respuesta anterior del revisor
+Incluye esta plantilla <script type="application/json">
+{}
+</script>
 Veredicto: APROBADO
-fin`.
 
 **Veredicto:** RECHAZADO
 ````
 
-El contenido del `script` es una cadena JSON. El ejemplo Markdown empieza después de `</script>` y termina en la tercera línea. En `ocultar_fragmentos` (`adevv/revisiones.py`, líneas 166–178), el analizador auxiliar recibe el token `<pre>` de la cadena, aunque nunca recibió la apertura del `script`. Entra en modo literal, lo conserva tras `</script>` y deja intactos los acentos del ejemplo. Al consumir las líneas ya preparadas, el analizador principal sí reconoce el `script` completo. Así, `cabecera_informe` encuentra primero la aprobación que debía quedar oculta.
+«Incluye esta plantilla» continúa el párrafo citado. La apertura del `script` aparece después de esas palabras. La línea de JSON, el cierre de la etiqueta y la aprobación siguen en el mismo párrafo. La línea vacía separa el rechazo propio.
 
-El lector de `cdcee1cb` preservaba las etiquetas y ocultaba el fragmento posterior. En el lector nuevo, sustituir únicamente la cadena JSON `"<pre>"` por `"<div>"` también recupera el rechazo.
+En `adevv/revisiones.py`, la línea 51 incorpora `script` a `CitasHTML.etiquetas`. Al leer `{}`, `sin_citas` encuentra esa etiqueta en `abiertas`, activa `bloque` y devuelve `None`. La rama de `lineas_del_informe` que procesa ese resultado borra `parrafo_citado` aunque la línea original contiene JSON. Tras `</script>`, `cabecera_informe` acepta la aprobación anterior al rechazo. En el árbol previo, el contenido de `script` también se almacenaba hasta el cierre, pero la línea de JSON conservaba el estado de cita porque `script` no activaba `bloque`.
 
-**Consecuencia.** El proveedor principal registra la aprobación citada en una llamada. Para una ficha completada cuyo primer informe canónico se confirma junto al cierre sobre el mismo producto, esa aprobación sin huella explícita se acredita por el commit de emisión y el preflight permite el cierre.
+**Efecto en los consumidores.** En el recorrido de C1, `motor.agente` registraría la aprobación citada como dictamen del principal y terminaría en una llamada. Si el primer informe canónico se confirma junto con la ficha completada, `motivo_revision` atribuiría esa aprobación sin huella explícita al producto del commit de cierre. Con esa única ficha, `pendientes_cierre` devolvería una lista vacía.
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Distinguir el texto de un elemento HTML de la apertura efectiva de `pre` al preparar el párrafo. Ambas cadenas deben producir el rechazo del principal y mantener la ficha pendiente por «informe rechazado».
+**Para** Artemisa (`desarrollador`). **Destino** `resolver` en C2. Conservar el párrafo citado al ocultar el contenido del `script` en línea. Como control, unir la apertura, `{}` y el cierre en la línea «Incluye esta plantilla», manteniendo las demás líneas. En ambas presentaciones debe registrarse el rechazo del principal en una llamada y el preflight debe identificar la ficha por «informe rechazado».
 
-### D29 · 🟠 Alta · Un subrayado de encabezado con un solo guion oculta el rechazo siguiente
+## Alcance y evidencia
 
-Entrada literal de Python para hacer visible el espacio final de la segunda línea.
+Comparé los árboles Git `4a9b1d2fb5d9ece9edeb5aeee0e61cedb5c4b92d` y `870a23e384ede126aca575b4441b0b45d377c7f8`. El único archivo de producción del delta es `adevv/revisiones.py`. Antes de escribir el informe, el contenido rastreado coincidía con el árbol final y la huella de producto recalculada coincidía con la cabecera. La revisión siguió el resultado del lector hasta las métricas y la decisión de reserva de `motor.agente`, y hasta la acreditación del informe en `pendientes_cierre`.
 
-````python
-"El separador es `\n- \n**Veredicto:** RECHAZADO\nAfecta a `lector`."
-````
+El diseño exige atribuir a Hades su declaración fuera de citas y ejemplos. D30 vulnera ese criterio y la barrera de cierre revisado. El delta conserva las interfaces, las capas y la librería estándar previstas en el plan de plataforma. Los contadores por paso e ID, la cuota, la recarga y la vigencia por producto siguen cubiertos por la verificación dirigida del triaje.
 
-La línea formada por un guion y un espacio subraya el título anterior (encabezado Setext). El párrafo del rechazo empieza después del subrayado. En `adevv/revisiones.py:193`, la nueva condición exige contenido tras los espacios del marcador. La condición de subrayado solo reconoce signos `=`, y la de separación temática requiere tres guiones. El lector une los dos bloques y empareja el acento del título con el que precede a `lector`. En `cdcee1cb`, el patrón anterior detenía la lectura en el guion seguido de espacio. Usar tres guiones como subrayado conserva el rechazo en el lector nuevo.
+Reutilicé las siete pruebas focalizadas en verde (6,838 s) y las 223 pruebas del triaje en verde (249,717 s), acreditadas sobre el árbol final. D30 y su control proceden de la lectura de ambos árboles y de los consumidores. Su resultado está deducido por análisis estático y queda pendiente de reproducción ejecutada.
 
-**Consecuencia.** El principal queda sin dictamen, se habilita la reserva y el preflight diagnostica «informe sin veredicto formal» para el informe del principal.
+## Análisis estático
 
-**Para** `desarrollador` (Artemisa). **Destino** `resolver` en C2. Terminar el encabezado al reconocer su subrayado. Con uno y con tres guiones debe conservarse el rechazo en una sola llamada y la ficha debe quedar pendiente por «informe rechazado».
-
-## Análisis estático, evidencia y límites
-
-Antes de escribir el informe, el contenido rastreado coincidía con el árbol verificado `4a9b1d2fb5d9ece9edeb5aeee0e61cedb5c4b92d`. Recalculé la huella de producto de la cabecera. Desde `cdcee1cb4fbd493365a05c9bd46aa630ffb27472`, el único archivo de producción modificado es `adevv/revisiones.py`. La revisión abarca ese delta y las decisiones que dependen de su resultado en `motor.agente`, `motivo_revision` y `pendientes_cierre`. C1 estaba aprobada.
-
-Reutilicé la evidencia de las seis pruebas focalizadas (5,682 s) y de las 216 pruebas del triaje (240,004 s). D27–D29 y sus controles proceden del seguimiento estático de las entradas por ambos lectores y sus consumidores. Las entradas nuevas carecen de ejecución en esta ronda. La suite completa corresponde al cierre de versión.
-
-Sobre la base `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5`, constan en verde `git diff --check`, el escaneo de patrones de secretos y Ruff selectivo (`E9,F63,F7,F82`). La orden de calidad sin escritura terminó con código 0 y omitió formato y lint automáticos por falta de herramientas detectadas. El proyecto carece de tipador configurado. El delta conserva las dependencias.
+Sobre la base `4fc39ce8a27b4f2ee6b1af1598ab0760b564cfd5` constan en verde `git diff --check`, el escaneo de patrones de secretos y Ruff selectivo (`E9,F63,F7,F82`). La orden de calidad sin escritura terminó con código 0 y omitió las etapas automáticas de formato y lint por ausencia de herramientas detectadas. El proyecto carece de tipador configurado. Las dependencias permanecen iguales.
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Corrección | 5/10 | D28 permite cerrar con un dictamen citado. D27 y D29 pierden un rechazo propio. |
-| Seguridad | 9/10 | El lector procesa texto local. El escaneo de secretos del delta pasó. |
-| Conformidad | 6/10 | Los tres casos contradicen el criterio de atribuir a Hades su declaración formal fuera de ejemplos. La arquitectura y el stack se conservan. |
-| Calidad | 6/10 | La preparación del párrafo y el consumo de sus líneas discrepan sobre la lista abierta, el contexto HTML y el límite del encabezado. |
-| Eficiencia | 9/10 | Se conserva el consumo por párrafo de D23. Esta ronda carece de una medición nueva de tiempos. |
-| Documentación | 10/10 | El diseño y la guía identifican qué dictamen habilita el cierre y cuándo procede la reserva. |
+| Corrección | 5/10 | D30 puede invertir el dictamen y liberar una ficha rechazada. |
+| Seguridad | 9/10 | El cambio procesa texto local y el escaneo de secretos pasó. |
+| Conformidad | 6/10 | La aprobación citada incumple el criterio de atribución y habilita el cierre. La arquitectura se conserva. |
+| Calidad | 7/10 | El lector comparte el patrón de atributos, pero usa la misma marca para ocultar texto HTML y terminar la cita Markdown. |
+| Eficiencia | 9/10 | La preparación sigue consumiendo el párrafo una vez. La evidencia de esta ronda mide el triaje, no el rendimiento aislado del lector. |
+| Documentación | 10/10 | El diseño y la guía describen la declaración exigida, la reserva y la acreditación del cierre. |
