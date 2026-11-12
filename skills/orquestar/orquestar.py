@@ -34,8 +34,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from adevv import diagnostico_suite
-from adevv.revisiones import clave_version as vkey, nombre_version, motivo_revision, diagnostico_revision
+from adevv import diagnostico_suite, registro_metricas
+from adevv.revisiones import (carpetas_maestras, clave_version as vkey, declaracion, diagnostico_revision,
+                              huella_producto, motivo_informe, motivo_revision, nombre_version)
 from adevv.store import write_json_atomic
 
 try:
@@ -62,7 +63,7 @@ SKILL = Path(__file__).resolve().parent / 'SKILL.md'
 AGENTES = Path(__file__).resolve().parents[2] / 'agents'
 CONFIG = 'orchestration.json'  # roles: atenea, artemisa, hades, clio, cronos → harness, model, effort
 DESARROLLO = {'task-dev', 'bug-fix', 'revisar-tarea'}  # pasos de Artemisa; el resto (análisis y decisión), de Atenea
-METRICAS = 'orquestar_metricas.jsonl'
+METRICAS = registro_metricas.ARCHIVO
 EVIDENCIAS = 'orquestar_evidencias.jsonl'
 LOG = 'orquestar.log'
 PID = 'orquestar.pid'
@@ -71,13 +72,17 @@ ESPERA = 'orquestar.espera'
 BUZON = 'orquestar_buzon.jsonl'  # tareas y bugs pedidos desde fuera (Telegram), por registrar
 TELEGRAM_SESIONES = 'orquestar_telegram.json'  # sesiones de conversación de usuarios en Telegram
 PROMPT_FILE_DEFAULT = 'orquestar_prompt.txt'
-PROPIOS = (METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
+PROPIOS = ('/' + registro_metricas.AUXILIAR + '/', METRICAS, EVIDENCIAS, LOG, PID, PARADA, ESPERA, BUZON, BUZON + '.tmp', '.env', TELEGRAM_SESIONES,
            PROMPT_FILE_DEFAULT, 'telegram.pid', 'telegram.log', 'telegram.parar',
            'orquestar_preguntas.json', 'orquestar_respuestas.jsonl', 'adevv-intervencion-*')
 CERRADO = {'completed', 'cancelled'}
 FUERA = CERRADO | {'blocked'}  # no pendientes
 FIN_VERSION = ('Bloqueos en ', 'Versión ')  # paradas de una versión sin más tareas elegibles
 PRODUCTO = 'docs/review/versions/{v}-producto.md'  # revisión funcional, con su tabla de decisiones
+DOCUMENTOS_PASO = {'ciclo-requisitos': 'req_analysis.md', 'platform-plan': 'platform_plan.md',
+                   'revisar-plataforma': 'platform_review.md', 'work-plan': 'work_plan.md'}
+INFORMES_VERSION = {'revisar-deuda': 'deuda', 'revisar-version': 'arquitectura',
+                    'revisar-producto': 'producto', 'aplicar-producto': 'producto'}
 PROMPT = ('Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
           'Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. '
           'No hagas preguntas: aplica las reglas del modo orquestado.')
@@ -131,10 +136,19 @@ def responder_pregunta_local(root, referencia, respuesta):
 def esperar_intervencion(root):
     """Espera cooperativamente sin desconectar el gateway ni ignorar parada manual."""
     while listar_preguntas(root, True) and not (root / PARADA).exists():
-        if incorporar_respuestas(root):
-            return True
+        incorporadas = incorporar_respuestas(root)
+        if incorporadas:
+            return incorporadas
         time.sleep(1)
-    return False
+    return []
+
+
+def renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis):
+    """Renueva los presupuestos correspondientes a los IDs con respuestas incorporadas."""
+    ids = {respuesta['tarea_id'] for respuesta in respuestas}
+    for contadores in (intentos_revision, recuperaciones_analisis):
+        for clave in [k for k in contadores if k[1] in ids]:
+            del contadores[clave]
 
 
 def directorio_version_almacen(script=None):
@@ -496,7 +510,7 @@ def construir_prompt_paso(root, paso, arg):
     return instruccion_agente + prompt_cuerpo + corregir + extra + nota_fuente
 
 
-def construir_prompt_agente(root, rol, prompt, reanudacion=False):
+def construir_prompt_agente(root, rol, prompt, reanudacion=False, mandato_temporal=None):
     """Construye el mandato para un rol con --agente citando la versión activa instalada."""
     version_dir = get_active_version_dir()
     paso, iid = os.environ.get("ORQUESTAR_PASO", ""), os.environ.get("ORQUESTAR_ID", "")
@@ -541,6 +555,13 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False):
                              f'{", ".join(f"`{c}`" for c in cmds)}. No los relances.\n\n')
         except Exception:
             pass
+    if (rol == 'hades' and paso in DESARROLLO and (root / '.git').exists()
+            and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'):
+        producto = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
+        cabecera += (f'En /review-code incluye tras el veredicto la línea «Producto revisado: {producto}» '
+                     'si has revisado el producto de este árbol. Si reevalúas un rechazo, identifica en la cabecera '
+                     'su commit con «Rechazo reevaluado: <SHA completo del último rechazo canónico>». '
+                     'Declara el veredicto formal en tu respuesta final.\n\n')
     return cabecera + prompt
 
 
@@ -699,21 +720,15 @@ def lista(valor):
 
 
 def backlog_dirs(root):
-    base, tareas, bugs = 'docs/plan/', 'tasks/', 'bugs/'
+    cfg = {}
     try:
         if yaml and hasattr(yaml, 'safe_load'):
-            m = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))['levels']['master']
+            cfg = yaml.safe_load((root / 'task_config.yaml').read_text(encoding='utf-8'))
         elif yaml and hasattr(yaml, 'load_yaml'):
-            m = yaml.load_yaml((root / 'task_config.yaml'))['levels']['master']
-        else:
-            m = {}
-        folders = m.get('folders', {})
-        base = m.get('path', 'docs/plan/')
-        tareas = folders.get('tasks', m.get('tasks', 'tasks/'))
-        bugs = folders.get('bugs', m.get('bugs', 'bugs/'))
+            cfg = yaml.load_yaml(root / 'task_config.yaml')
+        return carpetas_maestras(root, cfg or {})
     except Exception:
-        pass
-    return root / base / tareas, root / base / bugs
+        return carpetas_maestras(root, {})
 
 
 def backlog(root):
@@ -1234,9 +1249,9 @@ def primera_linea(path):
     return lineas[0] if lineas else ''
 
 
-def revisada(root, iid):
+def revisada(root, iid, objetivo=None):
     """Exige aprobación formal o N/A justificado en el informe canónico."""
-    return not motivo_revision(root, iid)
+    return not motivo_revision(root, iid, fichero_de(root, iid), backlog_dirs(root), objetivo)
 
 
 def producto_activa(root, v):
@@ -1257,6 +1272,12 @@ def ramas_abiertas():
     """Devuelve las ramas de versión en el orden operativo del selector."""
     ramas = [b.lstrip('* ').strip() for b in git('branch', '--list', 'release/v*', 'hotfix/v*').splitlines()]
     return sorted(ramas, key=lambda b: vkey(b.split('/')[1]) or (0, 0, 0))
+
+
+def faltan_dependencias(items):
+    """Las tareas abiertas con versión requieren declaración, los bugs pueden omitirla."""
+    return any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None
+               and vkey(i['version']) for i in items) or bool(errores_dependencias(items))
 
 
 def estado(root, docs):
@@ -1289,11 +1310,7 @@ def estado(root, docs):
         return ('PARAR', 'Bloqueo global: intervención humana pendiente de persistir con seguridad; ' + '; '.join(
             f'{q["tarea_id"]} {q["id"]}: {q.get("impedimento_incorporacion", "recuperación pendiente")}'
             for q in incompletas))
-    if any(i['paso'] == 'task-dev' and i['status'] not in CERRADO and i['depende_de'] is None and vkey(i['version'])
-           for i in items):
-        return ('PASO', 'calcular-dependencias', '', None)
-    errores = errores_dependencias(items)
-    if errores:
+    if faltan_dependencias(items):
         return ('PASO', 'calcular-dependencias', '', None)
 
     por_id = {i['id']: i for i in items}
@@ -1362,9 +1379,51 @@ def estado(root, docs):
     return ('PASO', 'start-version', nombre_version(v), None)
 
 
-def firma(root, docs):
-    return (estado(root, docs), git('rev-parse', 'HEAD'), git('status', '--porcelain'),
-            tuple((i['id'], i['status']) for i in backlog(root)), arbol(root))
+def rutas_producto(root):
+    """Selecciona el producto y deja las fichas y el seguimiento a sus señales propias."""
+    carpetas = [d.relative_to(root).as_posix() for d in backlog_dirs(root)]
+    return ['.', ':(exclude)docs/review/**', *(f':(exclude,literal){d}' for d in carpetas)]
+
+
+def firma(root, docs, paso=None, arg=''):
+    """Observa el entregable del paso original aunque cambie el selector o se confirme el WIP."""
+    if paso is None:
+        seleccion = estado(root, docs)
+        paso = seleccion[1] if seleccion[0] == 'PASO' else ''
+        arg = seleccion[2] if len(seleccion) > 2 else ''
+    rutas = []
+    if paso in DOCUMENTOS_PASO:
+        rutas = [f'{docs}/{DOCUMENTOS_PASO[paso]}']
+        if paso in ('ciclo-requisitos', 'work-plan'):
+            rutas.extend(['*.feature', f'{docs}/funcionalidades'])
+    elif paso in INFORMES_VERSION:
+        rutas = [f'docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md']
+    elif paso == 'especificar':
+        rutas = ['*.feature', f'{docs}/requirements.md', f'{docs}/funcionalidades',
+                 f'{docs}/platform_plan.md', ':(glob)**/evals/**']
+    elif paso not in ('revisar-tarea', 'calcular-dependencias'):
+        rutas = rutas_producto(root)
+    fichas = ()
+    if paso in ('task-dev', 'bug-fix', 'revisar-tarea', 'especificar', 'work-plan',
+                'calcular-dependencias', 'aplicar-producto', 'revisar-deuda', 'revisar-version'):
+        de_id = paso in DESARROLLO or paso == 'especificar'
+        fichas = tuple((i['id'], i['status'], i['version'], i['pendiente_de'], i['depende_de'], i['weight'])
+                       for i in backlog(root) if not de_id or i['id'] == arg)
+    dictamenes = []
+    if arg and paso in DESARROLLO:
+        for tipo in ('spec', 'test', 'code'):
+            if tipo == 'code':
+                motivo = motivo_revision(root, arg, fichero_de(root, arg), backlog_dirs(root))
+            else:
+                motivo = motivo_informe(root / f'docs/review/{tipo}_reviews/{arg}-{tipo}-review.md')
+            dictamenes.append(motivo if motivo in ('', 'informe rechazado') else None)
+    contenido = b''
+    if rutas:
+        with indice_de_trabajo(root) as env:
+            contenido = subprocess.check_output(['git', 'ls-files', '--stage', '-z', '--', *rutas],
+                                                cwd=root, env=env)
+    rama = git('branch', '--show-current') if paso == 'start-version' else None
+    return contenido, fichas, dictamenes, rama
 
 
 # ---------------------------------------------------------------- arneses y roles
@@ -1517,10 +1576,10 @@ def reintentos_acumulados(root, iid):
             pasos = 0
             rech = 0
             continue
-        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota'):
+        if f.get('tipo', 'paso') == 'paso' and not f.get('sin_cuota') and not f.get('bloqueo_agente'):
             if f.get('progreso'):
                 pasos = 0
-            else:
+            elif not f.get('revision_pendiente'):
                 pasos += 1
         elif f.get('tipo') == 'agente' and f.get('rol') == 'hades' and f.get('veredicto'):
             if f['veredicto'] == 'RECHAZADO':
@@ -2000,7 +2059,8 @@ def _ejecutar_captura_json(cmd, root, harness, entrada=None, env=None, timeout=N
         return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
 
 
-def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO, gracia_cierre=GRACIA_CIERRE_JSON_S):
+def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
+           gracia_cierre=GRACIA_CIERRE_JSON_S, solo_respuesta=False):
     """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
     inicio = time.monotonic()
     if timeout is _TIMEOUT_OMITIDO:
@@ -2021,7 +2081,7 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return rc, m, salida
+            return rc, m, '' if solo_respuesta and not rc else salida
         print(d.get('response', ''), flush=True)
         u = d.get('usage') or {}
         modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == '--model'), 'agy')
@@ -2034,6 +2094,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                                    'razonamiento': u.get('thinking_tokens')}})
         if sesion_id:
             m['sesion'] = sesion_id
+        if solo_respuesta and not (rc or m['error']):
+            salida = d.get('response') or ''
         return (1 if m['error'] and not rc else rc), m, salida
     if harness == 'claude' and '--output-format' in cmd:
         rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
@@ -2051,7 +2113,7 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             d = json.loads(r_stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             print(salida, flush=True)
-            return rc, m, salida
+            return rc, m, '' if solo_respuesta and not rc else salida
         print(d.get('result', ''), flush=True)
         sesion_id = d.get('session_id') or d.get('sessionId')
         m.update(turnos=d.get('num_turns'), coste_usd=d.get('total_cost_usd'),
@@ -2062,9 +2124,12 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                           for k, u in (d.get('modelUsage') or {}).items()})
         if sesion_id:
             m['sesion'] = sesion_id
+        if solo_respuesta and not (rc or m['error']):
+            salida = d.get('result') or ''
         return (1 if d.get('is_error') and not rc else rc), m, salida
     lineas, uso, turnos = [], {}, 0
     sesion_id = None
+    respuesta_codex = ''
     por_timeout = [False]
     temporizador = None
     with _proceso_agrupado(cmd, cwd=root, stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
@@ -2096,7 +2161,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
                 elif evento.get('type') == 'thread.started':
                     sesion_id = evento.get('thread_id') or (evento.get('thread', {}).get('id') if isinstance(evento.get('thread'), dict) else None)
                 elif evento.get('type') == 'item.completed' and evento.get('item', {}).get('type') == 'agent_message':
-                    print(evento['item'].get('text', ''), flush=True)
+                    respuesta_codex = evento['item'].get('text', '')
+                    print(respuesta_codex, flush=True)
                 elif evento.get('type') == 'turn.completed':
                     turnos += 1
                     for k, v in (evento.get('usage') or {}).items():
@@ -2123,6 +2189,8 @@ def lanzar(cmd, root, harness, entrada=None, env=None, timeout=_TIMEOUT_OMITIDO,
             'cache_leida': uso.get('cached_input_tokens'), 'cache_escrita': uso.get('cache_write_input_tokens'),
             'razonamiento': uso.get('reasoning_output_tokens')}})
     codigo = 124 if por_timeout[0] else p.returncode
+    if solo_respuesta and not codigo and harness == 'codex':
+        return codigo, m, respuesta_codex
     return codigo, m, ''.join(lineas[-200:])
 
 
@@ -2130,16 +2198,8 @@ def buscar_sesion_agente(root, rol, iid, arnes):
     """Busca la sesión previa de un rol dentro del intento en curso de la tarea."""
     if not iid:
         return None
-    f = root / METRICAS
-    if not f.exists():
-        return None
-    try:
-        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
-    except Exception:
-        return None
-
     es_escalada = bool(os.environ.get('ORQUESTAR_ESCALADA'))
-    for e in reversed(lineas):
+    for e in reversed(leer_metricas(root)):
         if e.get('id') and e.get('id') != iid:
             break
         if e.get('tipo') == 'paso' and e.get('paso') == 'especificar':
@@ -2158,14 +2218,7 @@ def buscar_sesion_agente(root, rol, iid, arnes):
 
 def buscar_sesion_paso(root, paso, iid, arnes):
     """Busca la sesión para reanudar un paso interrumpido inmediatamente antes por cuota."""
-    f = root / METRICAS
-    if not f.exists():
-        return None
-    try:
-        lineas = [json.loads(l) for l in f.read_text(encoding='utf-8').splitlines() if l.strip()]
-    except Exception:
-        return None
-    for e in reversed(lineas):
+    for e in reversed(leer_metricas(root)):
         if e.get('tipo') in ('espera', 'verificacion'):
             continue
         if e.get('tipo') == 'paso':
@@ -2221,15 +2274,18 @@ def acceso_suscripcion_denegado(harness, salida):
     return harness == 'claude' and 'Your organization has disabled Claude subscription access for Claude Code' in salida
 
 
-def agente(root, rol, prompt):
+def agente(root, rol, prompt, mandato_temporal=None):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     invocacion = uuid.uuid4().hex
 
     def registrar_intento(fila):
         """Relaciona reservas de una llamada sin mezclar revisiones independientes."""
+        if os.environ.get('ORQUESTAR_DICTAMEN') == 'diagnostico-suite':
+            fila['tipo_dictamen'] = 'diagnostico-suite'
         registrar(root, {**fila, 'invocacion': invocacion})
 
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
+    revision_formal = rol == 'hades' and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'
     dif = dificultad_de(root, iid) if iid else None
     cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
     if 'instructions' in cfg:
@@ -2252,20 +2308,28 @@ def agente(root, rol, prompt):
         hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
         sesion = buscar_sesion_agente(root, rol, iid, harness)
         es_reanudacion = bool(sesion)
-        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion)
+        prompt_texto = construir_prompt_agente(root, rol, prompt, reanudacion=es_reanudacion,
+                                               mandato_temporal=mandato_temporal)
         base = base_comando_agente(harness, prompt_texto, sesion=sesion)
         if not base:
             sys.exit(f'Arnés no soportado para roles: {harness}')
         exe = buscar_ejecutable(base[0])
         if not exe:
             posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
-            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid)
+            registrar_ausencia(root, 'agente', posicion, cfg_actual, rol=rol, paso=paso, id=iid,
+                               invocacion=invocacion)
             if cfg_actual is cfg and cfg.get('fijado'):
                 cede = 'sin arnés'
             continue
         cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
         timeout_rol = timeout_de_rol(cfg_actual, por_defecto=TIMEOUT_AGENTE_S)
         kwargs_lanzar = {'timeout': timeout_rol} if _acepta_kwarg(lanzar, 'timeout') else {}
+        if harness == 'codex' and os.name == 'nt' and 'CODEX_WINDOWS_REGISTERED_CORE' in os.environ:
+            entorno_rol = os.environ.copy()
+            entorno_rol.pop('CODEX_WINDOWS_REGISTERED_CORE', None)
+            kwargs_lanzar['env'] = entorno_rol
+        if revision_formal and _acepta_kwarg(lanzar, 'solo_respuesta'):
+            kwargs_lanzar['solo_respuesta'] = True
         entrada_arnes = None if harness == 'agy' else prompt_texto
         codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada_arnes, **kwargs_lanzar)
         if cede and cfg_actual is not cfg:
@@ -2273,7 +2337,7 @@ def agente(root, rol, prompt):
             cede = ''
         if (es_reanudacion and codigo != 0 and espera_cuota(salida) is None
                 and not acceso_suscripcion_denegado(harness, salida) and not m.get('timeout')):
-            prompt_fresh = construir_prompt_agente(root, rol, prompt, reanudacion=False)
+            prompt_fresh = construir_prompt_agente(root, rol, prompt, mandato_temporal=mandato_temporal)
             base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
             cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
             entrada_fresh = None if harness == 'agy' else prompt_fresh
@@ -2312,14 +2376,22 @@ def agente(root, rol, prompt):
 
         if not codigo:
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
-        veredicto = re.findall(r'Veredicto\W{0,6}(APROBADO|RECHAZADO)', salida) if rol == 'hades' and not codigo else []
+        veredicto = declaracion(salida)[0] if revision_formal and not codigo else ''
+        sin_dictamen = revision_formal and not codigo and not veredicto
         registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                          'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
-                         **({'veredicto': veredicto[-1]} if veredicto else {}),
-                         **({'diagnostico': salida[-1200:]} if codigo else {}),
+                         **({'veredicto': veredicto} if veredicto else {}),
+                         **({'diagnostico': salida[-1200:]} if codigo or sin_dictamen else {}),
                          **({'escalado': True} if escalado else {}), **m})
-        if veredicto and veredicto[-1] == 'RECHAZADO':
+        if veredicto == 'RECHAZADO':
             print(tope_de_rechazos(root, iid), flush=True)
+        if sin_dictamen:
+            print('[orquestar] revisión pendiente de Hades: falta el dictamen formal.'
+                  + (' Probando reserva autorizada.' if hay_mas_reservas else ''), flush=True)
+            if hay_mas_reservas:
+                continue
+            if intentos_cuota or cuota_descartada(root, configs_originales, configs_a_probar)[0] is not None:
+                break
         return codigo
 
     if intentos_cuota:
@@ -2378,12 +2450,52 @@ def cuota_agente_pendiente(filas):
     return menor_espera_agente(pendientes) if pendientes else None
 
 
+def revision_sin_dictamen(filas, paso, iid):
+    """La última reserva de cada revisión determina si quedó sin dictamen."""
+    revisiones = {}
+    for n, fila in enumerate(filas):
+        if (fila.get('tipo') == 'agente' and fila.get('rol') == 'hades' and not fila.get('tipo_dictamen')
+                and fila.get('paso', paso) == paso and fila.get('id', iid) == iid):
+            revisiones[fila.get('invocacion') or n] = fila
+    return any(not f.get('veredicto') and not f.get('sin_cuota') for f in revisiones.values())
+
+
 def cierre_revisado(root, paso, iid, base):
     """Acredita que el trabajo revisado quedó completo y confirmado durante el paso."""
-    if paso not in DESARROLLO or git('rev-parse', 'HEAD') == base or git('status', '--porcelain'):
+    head = git('rev-parse', 'HEAD')
+    if paso not in DESARROLLO or head == base or git('status', '--porcelain'):
         return False
     fichero = fichero_de(root, iid)
-    return bool(fichero and frontmatter(fichero).get('status') == 'completed' and revisada(root, iid))
+    return bool(fichero and frontmatter(fichero).get('status') == 'completed' and revisada(root, iid, head))
+
+
+def cierre_tras_error(root, docs, paso, arg, base, antes):
+    """Un error solo se da por recuperado cuando el entregable del paso está confirmado."""
+    if paso in DESARROLLO:
+        return cierre_revisado(root, paso, arg, base)
+    if git('rev-parse', 'HEAD') == base or git('status', '--porcelain') or firma(root, docs, paso, arg) == antes:
+        return False
+    if paso == 'especificar':
+        f = fichero_de(root, arg)
+        fm = frontmatter(f) if f else {}
+        return fm.get('status') == 'planned' or (fm.get('status'), fm.get('pendiente_de')) == ('blocked', 'humano')
+    if paso == 'calcular-dependencias':
+        return not faltan_dependencias(backlog(root))
+    if paso == 'start-version':
+        return git('branch', '--show-current') == f'release/{arg}'
+    if paso == 'work-plan':
+        return (root / docs / 'work_plan.md').is_file() and bool(backlog(root))
+    if paso == 'aplicar-producto':
+        return decision_producto(root / PRODUCTO.format(v=arg)) == 'APLICADA'
+    if paso == 'revisar-producto':
+        return decision_producto(root / PRODUCTO.format(v=arg)) == 'PENDIENTE'
+    if paso in ('revisar-deuda', 'revisar-version'):
+        return (root / f'docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md').is_file()
+    if paso == 'revisar-plataforma':
+        informe = root / docs / DOCUMENTOS_PASO[paso]
+        return informe.is_file() and motivo_informe(informe) in ('', 'informe rechazado')
+    artefacto = DOCUMENTOS_PASO.get(paso)
+    return bool(artefacto and (root / docs / artefacto).is_file())
 
 
 def tope_de_rechazos(root, iid):
@@ -2713,11 +2825,22 @@ def evento_de(e):
 
 # ---------------------------------------------------------------- evidencia de verificación
 
-def arbol(root):
-    """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
+@contextmanager
+def indice_de_trabajo(root):
+    """Captura el contenido rastreable del árbol sin modificar el índice del usuario."""
     with tempfile.TemporaryDirectory() as tmp:
         env = {**os.environ, 'GIT_INDEX_FILE': str(Path(tmp) / 'index')}
+        entradas = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=root)
+        if entradas:
+            subprocess.run(['git', 'update-index', '-z', '--index-info'], cwd=root, env=env,
+                           input=entradas, capture_output=True, check=True)
         subprocess.run(['git', 'add', '-A', '.'], cwd=root, env=env, capture_output=True, check=True)
+        yield env
+
+
+def arbol(root):
+    """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
+    with indice_de_trabajo(root) as env:
         valor = subprocess.run(['git', 'write-tree'], cwd=root, env=env, capture_output=True,
                                text=True, check=True).stdout.strip()
         if not re.fullmatch(r'[0-9a-f]{40}|[0-9a-f]{64}', valor):
@@ -3016,14 +3139,18 @@ def registrar(root, fila):
     """Añade una línea al registro común de métricas (pasos, agentes, esperas y verificaciones)."""
     excluir(root)
     fila.setdefault('tipo', 'paso')
-    with (root / METRICAS).open('a', encoding='utf-8') as f:
-        f.write(json.dumps(fila, ensure_ascii=False) + '\n')
-
+    registro_metricas.registrar(root, fila)
 
 
 def leer_metricas(root):
     """Lee registros completos; tolera una última línea aún en escritura."""
     return metricas.leer_registros(root, tolerar_ultima=True)
+
+
+def nuevas_metricas(root, desde):
+    """Devuelve los eventos nuevos y el cursor lógico, estable al retirar fragmentos."""
+    filas = leer_metricas(root)
+    return filas[desde:], len(filas)
 
 
 def fecha_estado(valor):
@@ -3245,7 +3372,7 @@ def parte(root, docs='docs/requirements'):
     e = estado(root, docs)
     lineas = [f'*{root.name}* · bucle {marcha}', f'*Fase:* {e[0]} ' + ' '.join(str(x) for x in e[1:3] if x)]
     if e[0] == 'PASO' and e[1] == 'revisar-tarea':
-        lineas.append(diagnostico_revision(root, e[2]))
+        lineas.append(diagnostico_revision(root, e[2], fichero_de(root, e[2]), backlog_dirs(root)))
     items = backlog(root)
     abiertas = sorted({vkey(i['version']) for i in items if vkey(i['version']) and i['status'] not in CERRADO})
     for vk in abiertas[:1]:
@@ -3372,6 +3499,8 @@ def main():
     ap.add_argument('--agentes', '--agents', action='store_true', help='consulta roles, modelos y porcentaje de cuota')
     ap.add_argument('--cuota-reset', nargs='?', const='', metavar='ARNES[/MODELO]',
                     help='recupera marcas de cuota del selector, o todas si se omite')
+    ap.add_argument('--recuperar-metricas', action='store_true',
+                    help='conserva el JSONL original y retira sus líneas inválidas')
     ap.add_argument('--metricas', '--metrics', nargs='?', const='todas', metavar='FILTRO',
                     help='consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)')
     ap.add_argument('--version-filtro', metavar='FILTRO', help='filtro alternativo para --metricas')
@@ -3435,6 +3564,15 @@ def main():
         print(informe_agentes(root, a.docs))
         return 0
 
+    if a.recuperar_metricas:
+        excluir(root)
+        try:
+            copia = metricas.recuperar(root)
+        except OSError as error:
+            ap.error(str(error))
+        print(f'Métricas recuperadas. Copia del original en {copia}' if copia else 'Registro sin líneas inválidas.')
+        return 0
+
     if a.metricas is not None:
         spec = importlib.util.spec_from_file_location('adevv_metricas', SKILL.with_name('metricas.py'))
         modulo = importlib.util.module_from_spec(spec)
@@ -3465,6 +3603,8 @@ def main():
         try:
             if not prompt or not prompt.strip():
                 sys.exit('Falta el mandato: --prompt, --prompt-file o entrada estándar.')
+            if borrar_prompt_file:
+                return agente(root, a.agente, prompt, mandato_temporal=ruta_prompt_file.name)
             return agente(root, a.agente, prompt)
         finally:
             if borrar_prompt_file and ruta_prompt_file and ruta_prompt_file.exists():
@@ -3538,6 +3678,7 @@ def bucle(a, root):
     intentos_dependencias = {tuple(r['errores']): r['n'] for r in recarga.get('intentos_dependencias', [])}
     recuperaciones_analisis = {(r['paso'], r['arg']): r
                               for r in recarga.get('recuperaciones_analisis', [])}
+    intentos_revision = {(p, i): n for p, i, n in recarga.get('intentos_revision', [])}
     for n in range(recarga.get('n', 1), a.max_pasos + 1):
         if (root / PARADA).exists():
             print('\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
@@ -3545,12 +3686,14 @@ def bucle(a, root):
         if not a.estado and recargar_version(__file__, root, PID,
                                              {'n': n, 'sin_progreso': sin_progreso, 'esperado': esperado,
                                               'recuperaciones_analisis': list(recuperaciones_analisis.values()),
+                                              **({'intentos_revision': [[p, i, n] for (p, i), n in intentos_revision.items()]}
+                                                 if intentos_revision else {}),
                                               'intentos_dependencias': [{'errores': list(k), 'n': v}
                                                                         for k, v in intentos_dependencias.items()]},
                                              'orquestar'):
             return 0
         if not a.estado:
-            incorporar_respuestas(root)
+            renovar_intentos_de_respuestas(incorporar_respuestas(root), intentos_revision, recuperaciones_analisis)
             for iid, titulo in ingerir(root):
                 print(f'[orquestar] alta desde Telegram: {iid} {titulo}', flush=True)
                 avisar(root, None, f'📝 Registrada {iid}: {titulo} (backlog, sin versión).')
@@ -3591,7 +3734,8 @@ def bucle(a, root):
             return 0
         if e[0] == 'PARAR':
             if espera_humana:
-                if a.espera_max > 0 and esperar_intervencion(root):
+                if a.espera_max > 0 and (respuestas := esperar_intervencion(root)):
+                    renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis)
                     continue
                 return 2
             return parar(root, evento_de(e), e[1])
@@ -3622,7 +3766,7 @@ def bucle(a, root):
                     dif = nueva_dif
         if intervencion.restaurar(root, SimpleNamespace(**globals()), arg) is False:
             return parar(root, 'error', f'{arg}: WIP pendiente; guarda el trabajo local ajeno y reintenta.')
-        antes = firma(root, a.docs)
+        antes = firma(root, a.docs, paso, arg)
         rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
         escalado = False
         if paso not in PASOS_ANALISIS:
@@ -3677,6 +3821,7 @@ def bucle(a, root):
         pendiente_cuota = False
         paso_completado = False
         ultimo_registrado = False
+        revision_pendiente = False
 
         for idx_cfg, cfg_actual in enumerate(configs_a_probar):
             arnes_paso = args_paso.cmd or arnes(args_paso, cfg_actual)
@@ -3693,8 +3838,7 @@ def bucle(a, root):
             for intento in range(getattr(a, 'reintentos_arnes', 3) + 1):
                 if (root / PARADA).exists():
                     return 2
-                f_met = root / METRICAS
-                n_met = len(f_met.read_text(encoding='utf-8').splitlines()) if f_met.exists() else 0
+                n_met = len(leer_metricas(root))
                 try:
                     if recuperacion is not None:
                         recuperacion['perfil_iniciado'] = True
@@ -3712,6 +3856,10 @@ def bucle(a, root):
                     ausente = True
                     break
                 codigo, m, salida = resultado
+                if paso in DESARROLLO:
+                    head = git('rev-parse', 'HEAD')
+                    if head and head != env['ORQUESTAR_BASE']:
+                        m['commit_producto'] = head
                 intervencion.notificar_reanudacion(root, SimpleNamespace(**globals()), arg)
                 intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env['ORQUESTAR_BASE'], salida)
                 if cede and cfg_actual is not cfg_rol:
@@ -3723,8 +3871,12 @@ def bucle(a, root):
                 cfg_usada = cfg_actual
                 cuota = espera_cuota(salida) if codigo else None
                 cuota_agente = None
-                if cuota is None and f_met.exists():
-                    nuevas = [json.loads(l) for l in f_met.read_text(encoding='utf-8').splitlines()[n_met:] if l.strip()]
+                revision_pendiente = False
+                if cuota is None:
+                    nuevas, _ = nuevas_metricas(root, n_met)
+                    revision_pendiente = revision_sin_dictamen(nuevas, paso, arg)
+                    if revision_pendiente:
+                        m['revision_pendiente'] = True
                     cuota_agente = cuota_agente_pendiente(nuevas)
                     if cuota_agente is not None:
                         if cierre_revisado(root, paso, arg, env['ORQUESTAR_BASE']):
@@ -3732,10 +3884,11 @@ def bucle(a, root):
                             cuota_agente = None
                         else:
                             cuota = cuota_agente.get('espera_s', 1800)
-                if not codigo or cuota is not None:
-                    break
-                if firma(root, a.docs) != antes and not git('status', '--porcelain'):
+                if codigo and cuota is None and not paso_completado and cierre_tras_error(
+                        root, a.docs, paso, arg, env['ORQUESTAR_BASE'], antes):
                     paso_completado = True
+                    cuota = cuota_agente = None
+                if not codigo or cuota is not None or paso_completado:
                     break
                 if intento == getattr(a, 'reintentos_arnes', 3):
                     break
@@ -3765,7 +3918,7 @@ def bucle(a, root):
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
 
-            if codigo and cuota_propia is not None:
+            if codigo and cuota_propia is not None and not paso_completado:
                 datos = fallo_cuota(root, arnes_paso, cfg_actual.get('model') or 'predeterminado', salida)
                 m.update(datos)
                 cuota_propia = datos['cuota_espera_s']
@@ -3842,8 +3995,10 @@ def bucle(a, root):
                     m = {'modelos': {}}
         if not codigo:
             recuperar_cuota(root, arnes(args_paso, cfg_usada), cfg_usada.get('model') or 'predeterminado')
-        despues = firma(root, a.docs)
+        despues = firma(root, a.docs, paso, arg)
         hubo_progreso = bool(paso_completado or (despues != antes))
+        if hubo_progreso:
+            intentos_revision.pop(clave_analisis, None)
         if not ultimo_registrado or cuota is not None:
             registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg, 'rama': git('branch', '--show-current'),
                              'rol': rol, 'arnes': args_paso.cmd or arnes(args_paso, cfg_usada),
@@ -3881,13 +4036,10 @@ def bucle(a, root):
                 return 2
             continue
         if codigo or cuota is not None:
-            if cuota_agente is None and despues != antes and not git('status', '--porcelain'):
-                print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
-                sin_progreso = 0
-                recuperaciones_analisis.pop(clave_analisis, None)
-                continue
             motivo = (f'sin cuota tras esperar {esperado // 3600} h (--espera-max)' if cuota is not None
                       else '¿autenticación, red?')
+            if cuota is None and revision_pendiente:
+                motivo = f'{paso} {arg}: revisión técnica pendiente de Hades'
             if cuota_agente is not None:
                 motivo += (f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
                            f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"
@@ -3898,6 +4050,12 @@ def bucle(a, root):
         esperado = 0
 
         if despues == antes:
+            if revision_pendiente:
+                intentos_revision[clave_analisis] = intentos_revision.get(clave_analisis, 0) + 1
+                if intentos_revision[clave_analisis] >= a.reintentos:
+                    return parar(root, 'error', f'{paso} {arg or ""}: revisión técnica pendiente de Hades '
+                                 f'tras {intentos_revision[clave_analisis]} intentos sin avance.')
+                continue
             if recuperacion is not None:
                 recuperacion['intentos'] += 1
                 print(f'[orquestar] {paso} {arg or ""}: sin progreso '

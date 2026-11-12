@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import chdir
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from tests import aislamiento_telegram
@@ -30,7 +31,9 @@ class AgentePromptTests(unittest.TestCase):
 
     def test_excluir_agrega_orquestar_prompt_txt(self):
         """excluir() debe añadir orquestar_prompt.txt a .git/info/exclude."""
-        motor.excluir(self.root)
+        subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
+        with chdir(self.root):
+            motor.excluir(self.root)
         exclude_file = self.root / '.git' / 'info' / 'exclude'
         self.assertTrue(exclude_file.exists())
         contenido = exclude_file.read_text(encoding='utf-8')
@@ -160,7 +163,8 @@ class AgentePromptTests(unittest.TestCase):
         prompt_file = self.root / 'mandato_temporal.txt'
         prompt_file.write_text('Contenido de prueba', encoding='utf-8')
 
-        def validar_existencia_durante_agente(root_arg, rol_arg, prompt_arg):
+        def validar_existencia_durante_agente(root_arg, rol_arg, prompt_arg, mandato_temporal):
+            self.assertEqual(mandato_temporal, prompt_file.name)
             self.assertTrue(prompt_file.exists())
             self.assertEqual(prompt_arg, 'Contenido de prueba')
             return 0
@@ -181,7 +185,7 @@ class AgentePromptTests(unittest.TestCase):
         prompt_file = self.root / 'orquestar_prompt.txt'
         prompt_file.write_text('Mandato cuota', encoding='utf-8')
 
-        def simular_salida_cuota(root_arg, rol_arg, prompt_arg):
+        def simular_salida_cuota(root_arg, rol_arg, prompt_arg, mandato_temporal):
             self.assertTrue(prompt_file.exists())
             sys.exit(2)
 
@@ -201,7 +205,7 @@ class AgentePromptTests(unittest.TestCase):
         prompt_file = self.root / 'orquestar_prompt.txt'
         prompt_file.write_text('Mandato antes de fallo', encoding='utf-8')
 
-        def simular_fallo(root_arg, rol_arg, prompt_arg):
+        def simular_fallo(root_arg, rol_arg, prompt_arg, mandato_temporal):
             self.assertTrue(prompt_file.exists())
             raise RuntimeError('Fallo simulado')
 

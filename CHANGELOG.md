@@ -2,6 +2,14 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.1.3] - 2026-11-11
+
+### Corregido
+
+- **B-ADV-0046** — El bucle conserva los pasos completados al encontrar una fila de métricas dañada. Los productores serializan sus escrituras y `--recuperar-metricas` guarda una copia íntegra antes de recuperar el registro.
+
+- **B-ADV-0044** — El orquestador acota las revisiones técnicas pendientes aunque cada intento confirme otra nota de diagnóstico. Un retorno erróneo solo permite cerrar el desarrollo con una aprobación vigente sobre el producto.
+
 ## [1.1.2] - 2026-11-11
 
 ### Corregido

@@ -169,7 +169,8 @@ class OrquestarRegressionTests(unittest.TestCase):
                     with self.assertRaises(subprocess.CalledProcessError):
                         motor.verificar(root, 'suite')
                 self.assertEqual(evidence.read_text(encoding='utf-8'), previous)
-                self.assertEqual(calls.call_count, 1 if failed_command == 'add' else 2)
+                self.assertEqual(calls.call_args.args[0][1], failed_command)
+                self.assertTrue(all(c.args[0][0] == 'git' for c in calls.call_args_list))
 
     def test_invalid_tree_hash_is_rejected(self):
         with patch.object(motor.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, stdout='')):
@@ -1417,8 +1418,9 @@ class SuiteRecoveryTests(unittest.TestCase):
         motor.excluir(self.root)
 
     def git(self, *args):
+        """Decodifica la salida UTF-8 de Git sin depender de la página de códigos."""
         return subprocess.run(['git', *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding='utf-8').stdout.strip()
 
     def evidence(self, text='format: src/app.js: error', command='suite'):
         with (self.root / motor.EVIDENCIAS).open('a', encoding='utf-8') as out:
@@ -2546,12 +2548,13 @@ class SubprocesoColgadoTests(unittest.TestCase):
                 pid_file = self.root / 'hijo.pid'
                 grupo_file = self.root / 'grupo.pid'
                 grupo_invocador = os.getpgrp()
+                mensaje = '{"status":"SUCCESS","response":"ok"}' if json_final else 'iniciado'
                 script = (
                     'import os, subprocess, sys, time; from pathlib import Path; '
                     'hijo = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
                     f'Path({str(pid_file)!r}).write_text(str(hijo.pid)); '
                     f'Path({str(grupo_file)!r}).write_text(str(os.getpgrp())); '
-                    f'print({("{\"status\":\"SUCCESS\",\"response\":\"ok\"}" if json_final else "iniciado")!r}, flush=True); '
+                    f'print({mensaje!r}, flush=True); '
                     + ('sys.exit(0)' if padre_sale else 'time.sleep(60)')
                 )
                 inicio = time.monotonic()

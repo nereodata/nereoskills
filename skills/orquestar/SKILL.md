@@ -45,6 +45,10 @@ Los intentos de un rol comparten `invocacion` por llamada y cada intento conserv
 
 ### Consulta y exportación de métricas
 
+El bucle espera a que termine de escribirse una última fila incompleta. Si encuentra una fila cerrada dañada, indica el archivo y la línea en stderr y continúa con los eventos válidos. La consulta y la exportación estrictas requieren que todas las filas sean legibles.
+
+Desde la raíz del proyecto, ejecuta `adevv orquestar --recuperar-metricas` para guardar una copia exacta del original en `.adevv-metricas/` y retirar las filas inválidas del registro activo. El comando muestra qué líneas retiró y la ruta de la copia. Después puedes repetir la exportación. Repetir la recuperación sobre el archivo sano conserva la primera copia.
+
 `adevv orquestar --metricas [FILTRO]` (alias `--metrics`) consulta el registro y el backlog sin arrancar ni detener el bucle. Sin filtro muestra todas las versiones; acepta `todas` / `all`, `ultima` / `last`, `ultimas:N` / `last:N` (N positivo), o una lista como `v0.2,v0.3.0`. `--version-filtro FILTRO` sustituye al filtro posicional. El orden es numérico; `v0.3` y `v0.3.0` representan el mismo bloque.
 
 - Tabla con desglose y totales: `adevv orquestar --metricas ultima`.
@@ -235,6 +239,12 @@ Cada ejecución conserva sus métricas. Solo se detiene por este error cuando se
 
 
 ## Recuperación de análisis sin progreso
+
+El avance se compara sobre el entregable del paso original. En desarrollo incluye el producto sin confirmar, los cambios operativos de la ficha y el dictamen formal del ID. Los commits vacíos, las notas de la ficha y el resumen de versión conservan el contador. Ante un retorno erróneo, el cierre en desarrollo exige ficha completada, árbol limpio, commit nuevo y aprobación canónica vigente sobre el producto.
+
+En la revisión de código, Hades declara el veredicto en la respuesta final y escribe en el informe la línea `Producto revisado: <huella>` justo después del veredicto. Cada paso de desarrollo que confirma cambios registra el commit alcanzado para su ID en las métricas. El selector y el preflight lo recuperan al relanzar y también comprueban las revisiones posteriores. La aprobación vigente cuenta como avance. Una edición administrativa del informe conserva la acreditación anterior. Una respuesta técnica sin dictamen prueba las reservas elegibles en la misma invocación.
+
+Una revisión sin dictamen tras las reservas autorizadas consume un intento técnico cuando el paso termina sin avance. Al alcanzar `--reintentos` para el mismo paso e ID, el motor para e identifica la revisión pendiente. Una respuesta incorporada o un avance del entregable renuevan el presupuesto correspondiente. La recarga cooperativa transfiere los contadores. El arranque manual inicia otra tanda y conserva el WIP, las métricas y las preguntas. La cuota pendiente de una revisión mantiene su espera.
 
 Para `especificar`, `revisar-tarea`, `revisar-version`, `calcular-dependencias`,
 `work-plan`, `revisar-deuda` y `aplicar-producto`, una ejecución correcta del arnés
