@@ -350,3 +350,78 @@ Característica: F-02 · Adevv desde cualquier proyecto sin rutas
     Dado un bloqueo técnico con un nombre libre de mantenedor
     Cuando el informe vigente no acredita una asignación interna de la solicitud activa
     Entonces el estado indica qué asignación falta y conserva la ficha y el historial
+
+  @T-ADV-0039
+  Escenario: La ratificación de Afinn resuelve su propia revisión y el rechazo vuelve a Artemisa
+    Dado que Hades deja la revisión de especificación de T-AFN-0147 pendiente por cuota a las 18:00
+    Y las llamadas de ratificación identifican la misma revisión de especificación y las mismas entradas
+    Cuando a las 18:01 ratifica esa revisión con otra llamada y dictamen válido
+    Entonces esa revisión queda recibida y la cuota de las 18:00 deja de impedir el trabajo
+    Y a las 18:38 rechaza el código y asigna la corrección a Artemisa
+    Entonces la tarea planned recibe la corrección en el siguiente paso
+    Y la cuota de Gemini se conserva para seleccionar perfiles futuros
+    Y el coste de cada intento y sus identificadores originales siguen consultables
+
+  @T-ADV-0039
+  Escenario: Una revisión de otro alcance conserva la espera de la revisión pendiente
+    Dado que la especificación de una tarea espera cuota o aclaración
+    Cuando Hades entrega una revisión de pruebas o de otra tarea
+    Entonces la espera de especificación sigue pendiente con su propia identidad y motivo
+    Y una entrega contradictoria sobre la misma revisión requiere aclaración
+
+  @T-ADV-0039
+  Esquema del escenario: La misma recuperación se aplica a cada entrada de llamada
+    Dado una llamada de <entrada> con principal y reserva autorizados
+    Cuando el principal agota cuota y la reserva entrega un resultado válido
+    Entonces el llamador recibe el resultado y el perfil efectivo
+    Y el registro identifica el trabajo, la invocación, la llamada padre y el rol
+    Y la marca de cuota del principal conserva su causa y el coste del intento
+    Ejemplos:
+      | entrada |
+      | paso principal |
+      | rol interno |
+      | diagnóstico de suite |
+
+  @T-ADV-0039
+  Esquema del escenario: Agotamiento total y retoma de la llamada pendiente
+    Dado una llamada de <entrada> con todos sus perfiles autorizados sin cuota durante una hora
+    Y el trabajo previo tiene su evidencia y el proceso permite esperar cero horas
+    Cuando el proceso termina y se relanza después de recuperar un perfil
+    Entonces se retoma la misma acción conservando la evidencia y la relación con su llamada padre
+    Y el registro y el aviso identifican el perfil y la hora de recuperación
+    Y los eventos distinguen el intento con cuota del resultado posterior sin duplicar consumo
+    Y si el perfil es estricto no se ejecuta una reserva de otro modelo
+    Ejemplos:
+      | entrada |
+      | paso principal |
+      | rol interno |
+      | diagnóstico de suite |
+
+  @T-ADV-0039
+  Escenario: La aclaración conserva las dos entregas contradictorias y su propia espera
+    Dado una revisión cuya respuesta y entrega canónica de esta llamada se contradicen
+    Cuando se solicita aclaración y sus perfiles autorizados no tienen cuota
+    Entonces la revisión queda pendiente de aclaración y conserva ambas fuentes
+    Y el aviso de cuota identifica la llamada de aclaración y la revisión afectada
+    Y al recuperar cuota la aclaración permite recibir un único dictamen concordante
+
+  @T-ADV-0039
+  Escenario: El historial parcial conserva un resultado desconocido sin cancelar otra espera
+    Dado una revisión histórica con espera e identidad de alcance incompleta
+    Cuando se lee junto a una revisión recibida de alcance desconocido
+    Entonces se conserva la espera sin atribuirle una ratificación y se indica la correlación desconocida
+    Y los intentos históricos conservan su coste original
+
+  @T-ADV-0039
+  Esquema del escenario: Un fallo técnico y una entrega sin dictamen quedan identificados
+    Dado una llamada de <entrada> mediante proveedores simulados
+    Cuando el proveedor devuelve <fallo>
+    Entonces el llamador distingue <estado> y conserva la revisión o acción afectada y la salida recibida
+    Y una aclaración usa los perfiles autorizados de la llamada y conserva el trabajo acreditado
+    Ejemplos:
+      | entrada | fallo | estado |
+      | paso principal | error de ejecución | fallo técnico |
+      | rol interno | error de ejecución | fallo técnico |
+      | diagnóstico de suite | error de ejecución | fallo técnico |
+      | rol interno | respuesta sin veredicto | entrega pendiente |
+      | diagnóstico de suite | respuesta sin dictamen JSON | entrega pendiente |

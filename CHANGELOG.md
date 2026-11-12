@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.2.0] - En desarrollo
+
+### Añadido
+
+- **T-ADV-0039** — Cada llamada entrega su resultado con su objetivo, entradas, perfil y llamada padre. La ratificación de una revisión resuelve su espera anterior y permite continuar tras un rechazo de otro alcance. La cuota del proveedor conserva su recuperación.
+
 ## [1.1.4] - 2026-11-12
 
 ### Corregido

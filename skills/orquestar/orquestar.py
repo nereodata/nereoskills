@@ -34,7 +34,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from adevv import diagnostico_suite, registro_metricas
+from adevv import diagnostico_suite, registro_metricas, llamadas
 from adevv.revisiones import (carpetas_maestras, clave_version as vkey, declaracion, diagnostico_revision,
                               huella_producto, motivo_informe, motivo_revision, nombre_version)
 from adevv.store import write_json_atomic
@@ -494,7 +494,9 @@ def construir_prompt_paso(root, paso, arg):
         extra += '\nDecisiones humanas incorporadas:\n' + '\n'.join(
             f'{q["id"]}: {q["pregunta"]}\nRespuesta: {q["respuesta"]}' for q in respuestas)
     if config(root).get('hades') is not False:
-        extra += ' Lanza las revisiones de Hades con `adevv orquestar --agente hades --prompt-file <mandato>`.'
+        extra += (' Lanza las revisiones de Hades con `adevv orquestar --agente hades --prompt-file <mandato>`. '
+                  'Añade --revision spec para especificación, --revision test para pruebas o --revision code '
+                  'para código. Al ratificar una entrega conserva ese objetivo y sus entradas.')
 
     nota_fuente = ""
     if es_repositorio_fuente_adevv(root):
@@ -2282,17 +2284,45 @@ def acceso_suscripcion_denegado(harness, salida):
 def agente(root, rol, prompt, mandato_temporal=None):
     """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
     invocacion = uuid.uuid4().hex
+    iniciada = time.time_ns()
 
     def registrar_intento(fila):
         """Relaciona reservas de una llamada sin mezclar revisiones independientes."""
         if os.environ.get('ORQUESTAR_DICTAMEN') == 'diagnostico-suite':
             fila['tipo_dictamen'] = 'diagnostico-suite'
-        registrar(root, {**fila, 'invocacion': invocacion})
+        registrar(root, {**fila, 'invocacion': invocacion,
+                         'objetivo_llamada': objetivo, 'entradas_llamada': entradas,
+                         'llamada_padre': os.environ.get('ORQUESTAR_LLAMADA', '')})
 
     paso, iid = os.environ.get('ORQUESTAR_PASO', ''), os.environ.get('ORQUESTAR_ID', '')
+    objetivo = os.environ.get('ORQUESTAR_REVISION', '')
+    if not objetivo:
+        objetivo = os.environ.get('ORQUESTAR_DICTAMEN', '')
+    entradas = os.environ.get('ORQUESTAR_ENTRADAS', '')
+    if objetivo and not entradas:
+        head = git('rev-parse', 'HEAD')
+        if head:
+            entradas = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
+
+    fuentes = {}
+    contradiccion = False
+    entrega_valida = True
+
+    def terminar(codigo, salida='', veredicto='', cuota=None):
+        """Entrega el resultado al llamador por su canal, conservando la salida pública de la CLI."""
+        resultado = llamadas.Resultado(
+            invocacion, iid, paso, rol,
+            llamadas.estado(codigo, cuota=cuota, entrega=bool(veredicto) if revision_formal else entrega_valida,
+                            contradiccion=contradiccion),
+            codigo, padre=os.environ.get('ORQUESTAR_LLAMADA', ''), objetivo=objetivo, entradas=entradas,
+            perfil={k: cfg_actual.get(k) for k in ('harness', 'model', 'effort')},
+            veredicto=veredicto, salida=salida, espera_s=cuota, fuentes=fuentes, iniciada=iniciada)
+        llamadas.publicar(os.environ.get('ORQUESTAR_CANAL'), resultado)
+        return codigo
     revision_formal = rol == 'hades' and os.environ.get('ORQUESTAR_DICTAMEN') != 'diagnostico-suite'
     dif = dificultad_de(root, iid) if iid else None
     cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
+    cfg_actual = cfg
     if 'instructions' in cfg:
         p_inst = Path(cfg['instructions'])
         if not p_inst.is_absolute():
@@ -2304,6 +2334,7 @@ def agente(root, rol, prompt, mandato_temporal=None):
     configs_originales = [cfg] + reservas
     configs_a_probar = configuraciones_con_cuota(root, configs_originales)
     intentos_cuota = []
+    salida = ''
     acceso_denegado = False
     escalado = bool(os.environ.get('ORQUESTAR_ESCALADA'))
     cede = 'sin cuota' if cfg.get('fijado') and configs_a_probar and configs_a_probar[0] is not cfg else ''
@@ -2333,8 +2364,10 @@ def agente(root, rol, prompt, mandato_temporal=None):
             entorno_rol = os.environ.copy()
             entorno_rol.pop('CODEX_WINDOWS_REGISTERED_CORE', None)
             kwargs_lanzar['env'] = entorno_rol
-        if revision_formal and _acepta_kwarg(lanzar, 'solo_respuesta'):
+        if (revision_formal or os.environ.get('ORQUESTAR_DICTAMEN') == 'diagnostico-suite') and _acepta_kwarg(lanzar, 'solo_respuesta'):
             kwargs_lanzar['solo_respuesta'] = True
+        informe = root / f'docs/review/{objetivo}_reviews/{iid}-{objetivo}-review.md'
+        anterior = informe.read_bytes() if objetivo in ('spec', 'test', 'code') and informe.exists() else None
         entrada_arnes = None if harness == 'agy' else prompt_texto
         codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada_arnes, **kwargs_lanzar)
         if cede and cfg_actual is not cfg:
@@ -2371,7 +2404,9 @@ def agente(root, rol, prompt, mandato_temporal=None):
                        **({'escalado': True} if escalado else {})}
             intentos_cuota.append(intento)
             registrar_intento({**intento, **m})
-            if hay_mas_reservas:
+            resultado_cuota = llamadas.Resultado(invocacion, iid, paso, rol, 'espera_cuota', codigo,
+                                                espera_s=cuota)
+            if llamadas.recuperacion(resultado_cuota, hay_reserva=hay_mas_reservas) == 'reserva':
                 print(f'[orquestar] {rol} agotó cuota ({cfg_actual.get("model") or harness}); '
                       f'conmutando a reserva...', flush=True)
                 if cfg_actual is cfg and cfg.get('fijado'):
@@ -2382,7 +2417,29 @@ def agente(root, rol, prompt, mandato_temporal=None):
         if not codigo:
             recuperar_cuota(root, harness, cfg_actual.get('model') or 'predeterminado')
         veredicto = declaracion(salida)[0] if revision_formal and not codigo else ''
+        contradiccion = False
+        if revision_formal and not codigo and objetivo in ('spec', 'test', 'code') and informe.exists():
+            actual = informe.read_bytes()
+            if actual != anterior:
+                texto_informe = actual.decode('utf-8')
+                canonico = declaracion(texto_informe)[0]
+                anteriores = fuentes
+                fuentes = {'respuesta': salida, 'informe': texto_informe}
+                if anteriores:
+                    fuentes['anteriores'] = anteriores
+                contradiccion = bool(veredicto and canonico and veredicto != canonico)
+                if not contradiccion:
+                    veredicto = veredicto or canonico
+        if contradiccion:
+            veredicto = ''
         sin_dictamen = revision_formal and not codigo and not veredicto
+        entrega_valida = not codigo
+        if os.environ.get('ORQUESTAR_DICTAMEN') == 'diagnostico-suite' and not codigo:
+            try:
+                diagnostico_suite.leer_dictamen(salida)
+            except diagnostico_suite.DiagnosticoPendiente:
+                entrega_valida = False
+                sin_dictamen = True
         registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
                          'arnes': harness, 'codigo': codigo, **marca_fijado(cfg_actual),
                          **({'veredicto': veredicto} if veredicto else {}),
@@ -2390,20 +2447,27 @@ def agente(root, rol, prompt, mandato_temporal=None):
                          **({'escalado': True} if escalado else {}), **m})
         if veredicto == 'RECHAZADO':
             print(tope_de_rechazos(root, iid), flush=True)
+        if codigo and objetivo and llamadas.recuperacion(
+                llamadas.Resultado(invocacion, iid, paso, rol, 'fallo_tecnico', codigo),
+                hay_reserva=hay_mas_reservas) == 'reserva':
+            continue
         if sin_dictamen:
             print('[orquestar] revisión pendiente de Hades: falta el dictamen formal.'
                   + (' Probando reserva autorizada.' if hay_mas_reservas else ''), flush=True)
-            if hay_mas_reservas:
+            pendiente = llamadas.Resultado(invocacion, iid, paso, rol, 'entrega_pendiente', codigo)
+            if llamadas.recuperacion(pendiente, hay_reserva=hay_mas_reservas) == 'reserva':
                 continue
             if intentos_cuota or cuota_descartada(root, configs_originales, configs_a_probar)[0] is not None:
                 break
-        return codigo
+        return terminar(codigo, salida, veredicto)
 
     if intentos_cuota:
-        registrar_intento({**menor_espera_agente(intentos_cuota), 'modelos': {}, 'sin_cuota': True})
+        menor = menor_espera_agente(intentos_cuota)
+        registrar_intento({**menor, 'modelos': {}, 'sin_cuota': True})
         print(f'[orquestar] {rol} sin cuota: termina el paso sin tocar estados; '
               'el bucle esperará la cuota y reintentará.', flush=True)
-        return intentos_cuota[-1]['codigo']
+        cfg_actual = {'harness': menor.get('arnes'), 'model': menor.get('modelo_cuota')}
+        return terminar(intentos_cuota[-1]['codigo'], salida, cuota=menor['espera_s'])
     espera, cfg_omitida = cuota_descartada(root, [cfg] + reservas, configs_a_probar)
     if espera is not None:
         registrar_intento({'tipo': 'agente', 'fecha': ahora(), 'rol': rol, 'paso': paso, 'id': iid,
@@ -2412,17 +2476,18 @@ def agente(root, rol, prompt, mandato_temporal=None):
                          'modelos': {}, 'sin_cuota': True, 'espera_s': espera,
                          **({'escalado': True} if escalado else {})})
         print(f'[orquestar] {rol} sin cuota; se conserva la recuperación vigente.', flush=True)
-        return 1
+        cfg_actual = cfg_omitida
+        return terminar(1, salida if configs_a_probar else '', cuota=espera)
     if acceso_denegado:
         restriccion = ' (perfil estricto)' if cfg.get('estricto') else ''
         print(f'[orquestar] {rol}: revisión pendiente por acceso deshabilitado{restriccion}; '
               'conserva el trabajo y termina el paso sin completar ni abrir preguntas. '
               'Reintenta cuando un perfil autorizado recupere acceso.', flush=True)
-        return 1
+        return terminar(1, 'Acceso por suscripción deshabilitado')
     mensaje = f'{rol}: ningún arnés disponible en el principal ni en las reservas.'
     print(f'[orquestar] {mensaje}', flush=True)
     avisar(root, 'error', mensaje)
-    return 1
+    return terminar(1, mensaje)
 
 
 def menor_espera_agente(filas):
@@ -2442,27 +2507,16 @@ def menor_espera_agente(filas):
 
 def cuota_agente_pendiente(filas):
     """Devuelve una espera no resuelta; conserva registros antiguos sin correlación."""
-    ultimas = {}
-    historicas = []
-    for fila in filas:
-        if fila.get('tipo') != 'agente':
-            continue
-        if fila.get('invocacion'):
-            ultimas[fila['invocacion']] = fila
-        else:
-            historicas.append(fila)
-    pendientes = [f for f in [*historicas, *ultimas.values()] if f.get('sin_cuota')]
+    pendientes = [r.fuentes['registro'] for r in llamadas.pendientes(llamadas.desde_metricas(filas))
+                  if r.espera_s is not None]
     return menor_espera_agente(pendientes) if pendientes else None
 
 
 def revision_sin_dictamen(filas, paso, iid):
     """La última reserva de cada revisión determina si quedó sin dictamen."""
-    revisiones = {}
-    for n, fila in enumerate(filas):
-        if (fila.get('tipo') == 'agente' and fila.get('rol') == 'hades' and not fila.get('tipo_dictamen')
-                and fila.get('paso', paso) == paso and fila.get('id', iid) == iid):
-            revisiones[fila.get('invocacion') or n] = fila
-    return any(not f.get('veredicto') and not f.get('sin_cuota') for f in revisiones.values())
+    filas = [f for f in filas if f.get('rol') == 'hades' and not f.get('tipo_dictamen')
+             and f.get('paso', paso) == paso and f.get('id', iid) == iid]
+    return any(r.espera_s is None for r in llamadas.pendientes(llamadas.desde_metricas(filas)))
 
 
 def cierre_revisado(root, paso, iid, base):
@@ -3532,6 +3586,8 @@ def main():
     ap.add_argument('--fondo', action='store_true', help=f'lanza el bucle desacoplado, con la salida en {LOG}')
     ap.add_argument('--parar', action='store_true', help='pide al bucle en marcha que pare tras el paso en curso')
     ap.add_argument('--agente', metavar='ROL', help=f'lanza un rol (hades, clio, cronos) según {CONFIG}')
+    ap.add_argument('--revision', choices=('spec', 'test', 'code'),
+                    help='identifica el alcance de la revisión de Hades, incluida su ratificación')
     ap.add_argument('--prompt', help='mandato directo para --agente')
     ap.add_argument('--prompt-file', type=Path, help='mandato para --agente (si no, por la entrada estándar)')
     ap.add_argument('--verificar', nargs='?', const='suite', metavar='CMD',
@@ -3608,6 +3664,8 @@ def main():
         ap.error('--csv y --version-filtro requieren --metricas / --metrics.')
 
     if a.agente:
+        if a.revision:
+            os.environ['ORQUESTAR_REVISION'] = a.revision
         borrar_prompt_file = False
         ruta_prompt_file = None
         prompt = None
@@ -3686,6 +3744,22 @@ def cierre_de_version(e):
     return (e[0] == 'PASO' and e[1] == 'revisar-version') or (e[0] == 'PARAR' and e[1].startswith(FIN_VERSION))
 
 
+def esperar_llamada(root, resultado, contexto=None):
+    """Notifica y registra la espera de cualquier llamada con el mismo contrato."""
+    cuota = resultado.espera_s
+    clave = (resultado.perfil.get('harness'), resultado.perfil.get('model') or 'predeterminado')
+    marca = marcas_cuota(root, fecha_estado(ahora())).get(clave)
+    if not (marca and marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())):
+        avisar(root, 'cuota', f'⏳ Sin cuota en {clave[0]}/{clave[1]} para "{resultado.paso}" '
+               f'{resultado.trabajo}: espero hasta las {datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
+    inicio = time.monotonic()
+    seguir = esperar(root, cuota, cuotas_esperadas=contexto)
+    registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': resultado.paso,
+                     'id': resultado.trabajo, 'invocacion': resultado.invocacion,
+                     'duracion_s': round(time.monotonic() - inicio)})
+    return seguir
+
+
 def bucle(a, root):
     _gateway_aviso_entorno.discard(str(Path(root).resolve()))
     if not a.estado:
@@ -3728,6 +3802,14 @@ def bucle(a, root):
             try:
                 _, motivo = aplicar_diagnostico_suite(root, fichero_de(root, e[2]))
             except diagnostico_suite.DiagnosticoPendiente as exc:
+                if exc.resultado and exc.resultado.espera_s is not None:
+                    if llamadas.recuperacion(exc.resultado, esperado=esperado, limite=a.espera_max * 3600) == 'esperar':
+                        esperado += exc.resultado.espera_s
+                        if esperar_llamada(root, exc.resultado):
+                            continue
+                        return 2
+                    return parar(root, 'cuota', f'{e[2]}: diagnóstico pendiente de cuota de '
+                                 f'{exc.resultado.perfil}. La solicitud se conserva al relanzar.')
                 return parar(root, 'error', f'{e[2]}: diagnóstico pendiente. {exc}')
             if motivo:
                 return parar(root, 'version', motivo)
@@ -3746,6 +3828,14 @@ def bucle(a, root):
                 try:
                     iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
                 except diagnostico_suite.DiagnosticoPendiente as exc:
+                    if exc.resultado and exc.resultado.espera_s is not None:
+                        if llamadas.recuperacion(exc.resultado, esperado=esperado, limite=a.espera_max * 3600) == 'esperar':
+                            esperado += exc.resultado.espera_s
+                            if esperar_llamada(root, exc.resultado):
+                                continue
+                            return 2
+                        return parar(root, 'cuota', f'Diagnóstico de la suite pendiente de cuota: '
+                                     f'{exc.resultado.perfil}. La solicitud se conserva al relanzar.')
                     return parar(root, 'error', f'Diagnóstico de la suite pendiente. {exc}')
                 if motivo:
                     return parar(root, 'version', motivo)
@@ -3816,6 +3906,15 @@ def bucle(a, root):
                        'planned cuando acredites la condición de salida. Conserva el rechazo hasta su revisión.')
         env = {**os.environ, 'ORQUESTAR_PASO': paso, 'ORQUESTAR_ID': arg or '',
                'ORQUESTAR_BASE': git('rev-parse', 'HEAD')}
+        llamada_padre = uuid.uuid4().hex
+        objetivo_paso = hashlib.sha256(json.dumps([paso, arg, rama]).encode()).hexdigest()
+        gitdir = Path(git('rev-parse', '--absolute-git-dir'))
+        if not gitdir.is_absolute():
+            gitdir = root / '.git'
+        almacen_llamadas = gitdir / 'adevv-llamadas' / objetivo_paso
+        env.update(ORQUESTAR_LLAMADA=llamada_padre, ORQUESTAR_CANAL=str(almacen_llamadas.resolve()))
+        env.pop('ORQUESTAR_REVISION', None)
+        env.pop('ORQUESTAR_ENTRADAS', None)
         env.pop('ORQUESTAR_ESCALADA', None)
         if escalado:
             env['ORQUESTAR_ESCALADA'] = '1'
@@ -3907,6 +4006,26 @@ def bucle(a, root):
                     if revision_pendiente:
                         m['revision_pendiente'] = True
                     cuota_agente = cuota_agente_pendiente(nuevas)
+                    entregas = llamadas.leer(almacen_llamadas)
+                    if entregas:
+                        recibidas = {r.invocacion for r in entregas}
+                        legacy = [f for f in nuevas if f.get('invocacion') not in recibidas]
+                        faltantes = llamadas.pendientes(entregas + llamadas.desde_metricas(legacy))
+                        revision_pendiente = any(r.espera_s is None for r in faltantes)
+                        m.pop('revision_pendiente', None)
+                        if revision_pendiente:
+                            m['revision_pendiente'] = True
+                        cuotas = [r for r in faltantes if r.espera_s is not None]
+                        cuota_agente = None
+                        if cuotas:
+                            pendiente = min(cuotas, key=lambda r: r.restante)
+                            if not pendiente.objetivo or not pendiente.entradas:
+                                m['correlacion_desconocida'] = True
+                            cuota_agente = {'rol': pendiente.rol, 'arnes': pendiente.perfil.get('harness'),
+                                'modelo_cuota': pendiente.perfil.get('model'),
+                                'espera_s': pendiente.restante, 'invocacion': pendiente.invocacion}
+                    elif cuota_agente is not None:
+                        m['correlacion_desconocida'] = True
                     if cuota_agente is not None:
                         if cierre_revisado(root, paso, arg, env['ORQUESTAR_BASE']):
                             paso_completado = True
@@ -3946,6 +4065,9 @@ def bucle(a, root):
                     configs_a_probar.append(recuperada)
             cuota_propia = espera_cuota(salida) if codigo else None
             hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
+            resultado_perfil = llamadas.Resultado(llamada_padre, arg, paso, rol,
+                llamadas.estado(codigo, cuota=cuota_propia), codigo, espera_s=cuota_propia)
+            recuperar_perfil = llamadas.recuperacion(resultado_perfil, hay_reserva=hay_mas_reservas)
 
             if codigo and cuota_propia is not None and not paso_completado:
                 datos = fallo_cuota(root, arnes_paso, cfg_actual.get('model') or 'predeterminado', salida)
@@ -3953,7 +4075,7 @@ def bucle(a, root):
                 cuota_propia = datos['cuota_espera_s']
                 cuotas_paso.append(cuota_propia)
                 recuperaciones_paso.append((time.monotonic() + cuota_propia, cfg_actual))
-                if hay_mas_reservas:
+                if recuperar_perfil == 'reserva':
                     registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                      'rama': git('branch', '--show-current'),
                                      'rol': rol, 'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
@@ -3972,7 +4094,7 @@ def bucle(a, root):
                 else:
                     cuota = min(cuotas_paso)
                     break
-            elif codigo and cuota is None and not paso_completado and hay_mas_reservas:
+            elif codigo and cuota is None and not paso_completado and recuperar_perfil == 'reserva':
                 registrar(root, {'fecha': ahora(), 'paso': paso, 'id': arg,
                                  'rama': git('branch', '--show-current'), 'rol': rol,
                                  'arnes': arnes_paso, 'modelo': cfg_actual.get('model') or 'predeterminado',
@@ -4042,26 +4164,23 @@ def bucle(a, root):
                              **({'bloqueo_agente': {k: cuota_agente.get(k) for k in
                                  ('rol', 'arnes', 'modelo_cuota', 'cuota_origen', 'espera_s', 'invocacion')}}
                                 if cuota_agente is not None else {})})
+        resultado_paso = llamadas.Resultado(llamada_padre, arg, paso, rol,
+            llamadas.estado(0 if paso_completado else codigo, cuota=cuota, entrega=not revision_pendiente), codigo,
+            perfil=cfg_usada, espera_s=cuota, salida=salida)
+        if cuota_agente is not None:
+            resultado_paso = llamadas.Resultado(llamada_padre, arg, paso, cuota_agente['rol'],
+                'espera_cuota', codigo, perfil={'harness': cuota_agente.get('arnes'),
+                'model': cuota_agente.get('modelo_cuota')}, espera_s=cuota, salida=salida)
+        llamadas.publicar(almacen_llamadas.parent / 'pasos', resultado_paso)
         if paso_completado:
             print(f'[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.', flush=True)
             sin_progreso = 0
             esperado = 0
             recuperaciones_analisis.pop(clave_analisis, None)
             continue
-        if cuota is not None and esperado + cuota <= a.espera_max * 3600:
+        if llamadas.recuperacion(resultado_paso, esperado=esperado, limite=a.espera_max * 3600) == 'esperar':
             esperado += cuota
-            marcas = marcas_cuota(root, fecha_estado(ahora()))
-            clave = (arnes(a, cfg_usada), cfg_usada.get('model') or 'predeterminado')
-            if cuota_agente is not None:
-                clave = (cuota_agente.get('arnes'), cuota_agente.get('modelo_cuota'))
-            marca = marcas.get(clave)
-            if not (marca and marca['origen'] == 'sin créditos' and marca['hasta'] > fecha_estado(ahora())):
-                avisar(root, 'cuota', f'⏳ Sin cuota en {clave[0]}/{clave[1]} para "{paso}" {arg or ""}: espero hasta las '
-                                      f'{datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.')
-            inicio = time.monotonic()
-            seguir = esperar(root, cuota, cuotas_esperadas=contexto_cuota)
-            registrar(root, {'tipo': 'espera', 'fecha': ahora(), 'paso': paso, 'id': arg,
-                             'duracion_s': round(time.monotonic() - inicio)})
+            seguir = esperar_llamada(root, resultado_paso, contexto_cuota)
             if not seguir:
                 print('[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.', flush=True)
                 return 2
@@ -4075,6 +4194,8 @@ def bucle(a, root):
                 motivo += (f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
                            f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"
                            f" ({cuota_agente.get('cuota_origen') or 'cuota agotada'})")
+                if m.get('correlacion_desconocida'):
+                    motivo += '; el historial no acredita el alcance de esa revisión'
             elif cuota is not None and encargo:
                 motivo += (f'; intervención de {rol} pendiente para {paso} {arg} en '
                            f'{arnes(args_paso, cfg_usada)}/{cfg_usada.get("model") or "predeterminado"}')

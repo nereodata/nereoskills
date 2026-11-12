@@ -13,6 +13,8 @@ inputs:
 
 ## ▶️ Dos usos
 
+Al solicitar una revisión con `--agente hades`, indica `--revision spec`, `--revision test` o `--revision code`. Conserva ese objetivo al ratificar una entrega. El resultado identifica sus entradas y su llamada padre y persiste dentro del directorio Git. Una ratificación recibida resuelve la espera de la misma revisión y permite continuar después de un rechazo. El registro de cuota del proveedor sigue rigiendo futuras llamadas. Los historiales con alcance insuficiente se muestran como correlación desconocida.
+
 **Te invoca el bucle** (el prompt indica un paso): ejecuta solo ese paso según el modo orquestado y termina.
 
 **Te invoca una persona** (sin paso): no ejecutes pasos tú. El bucle (`orquestar.py`, junto a esta skill) es quien deduce el estado del disco y continúa desde donde toque. Desde la raíz del proyecto:

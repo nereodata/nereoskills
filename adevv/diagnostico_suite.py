@@ -6,11 +6,19 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
+from dataclasses import replace
 from pathlib import Path
+
+from adevv import llamadas
 
 
 class DiagnosticoPendiente(Exception):
     """La solicitud sigue pendiente por un fallo operativo o una respuesta inválida."""
+
+    def __init__(self, mensaje, resultado=None):
+        super().__init__(mensaje)
+        self.resultado = resultado
 
 
 def normalizar(texto):
@@ -211,6 +219,10 @@ def solicitar(root, iid, comando, grupo, ruta_historial):
         'únicamente si esa intervención es un encargo distinto que desarrollo puede ejecutar. '
         'Solo asigna humano si hace falta su decisión, permiso o recurso.\n'
         + evidencias)
+    gitdir = subprocess.run(['git', 'rev-parse', '--absolute-git-dir'], cwd=root,
+                            capture_output=True, text=True, encoding='utf-8').stdout.strip()
+    canal = Path(gitdir) / 'adevv-llamadas' / 'diagnosticos' / grupo['solicitud']
+    padre = uuid.uuid4().hex
     with tempfile.TemporaryDirectory() as directorio:
         ruta = Path(directorio) / 'diagnostico.txt'
         ruta.write_text(mandato, encoding='utf-8')
@@ -219,9 +231,22 @@ def solicitar(root, iid, comando, grupo, ruta_historial):
                                      cwd=root, capture_output=True, encoding='utf-8', errors='replace',
                                      env={**os.environ, 'ORQUESTAR_ID': iid, 'ORQUESTAR_PASO': 'bug-fix',
                                           'ORQUESTAR_DICTAMEN': 'diagnostico-suite',
+                                          'ORQUESTAR_LLAMADA': padre, 'ORQUESTAR_CANAL': str(canal.resolve()),
+                                          'ORQUESTAR_ENTRADAS': grupo['solicitud'],
+                                          'ORQUESTAR_REVISION': 'diagnostico-suite',
                                           'PYTHONIOENCODING': 'utf-8'})
         except OSError as exc:
             raise DiagnosticoPendiente(str(exc)) from exc
+    recibidos = [r for r in llamadas.leer(canal) if r.padre == padre]
+    resultado = recibidos[-1] if recibidos else llamadas.Resultado(
+        padre, iid, 'diagnosticar-suite', 'hades', llamadas.estado(proceso.returncode),
+        proceso.returncode, objetivo='diagnostico-suite', entradas=grupo['solicitud'],
+        salida=proceso.stdout + '\n' + proceso.stderr)
     if proceso.returncode:
-        raise DiagnosticoPendiente((proceso.stdout + '\n' + proceso.stderr).strip()[-1200:])
-    return leer_dictamen(proceso.stdout)
+        raise DiagnosticoPendiente(resultado.salida[-1200:] or 'Diagnóstico pendiente de cuota', resultado)
+    try:
+        return leer_dictamen(proceso.stdout)
+    except DiagnosticoPendiente as exc:
+        resultado = replace(resultado, estado='entrega_pendiente', salida=proceso.stdout)
+        llamadas.publicar(canal, resultado)
+        raise DiagnosticoPendiente(str(exc), resultado) from exc
