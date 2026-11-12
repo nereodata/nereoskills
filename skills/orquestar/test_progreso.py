@@ -985,6 +985,18 @@ class ProgresoTests(unittest.TestCase):
     def test_subrayado_setext_de_tres_guiones(self):
         self.comprobar_rechazo_y_preflight(self.informe_con_subrayado('---'))
 
+    def informe_con_script_en_cita(self, salto):
+        """Reproduce la continuación citada de D30 con el mismo contenido JSON."""
+        return ('> Respuesta anterior del revisor\nIncluye esta plantilla '
+                f'<script type="application/json">{salto}{{}}{salto}</script>\n'
+                'Veredicto: APROBADO\n\n**Veredicto:** RECHAZADO')
+
+    def test_script_multilinea_en_continuacion_citada(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_script_en_cita('\n'))
+
+    def test_script_en_una_linea_en_continuacion_citada(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_script_en_cita(''))
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',

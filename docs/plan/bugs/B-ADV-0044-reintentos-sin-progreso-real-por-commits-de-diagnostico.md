@@ -259,3 +259,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Hades rechazó la reevaluación D del árbol 870a23e384ede126aca575b4441b0b45d377c7f8 (7,67/10). D27–D29 resueltos en proveedor y preflight. D30 alto, para Artemisa en C2: un script multilínea con JSON en la continuación de una cita Markdown puede exponer su aprobación y permitir cerrar pese al rechazo propio. Reproducir la entrada y su control en una línea del informe canónico docs/review/code_reviews/B-ADV-0044-code-review.md, conservar la cita al ocultar el script y reevaluar. D30 procede de análisis estático. Pasaron las siete pruebas focalizadas y las 223 del triaje en 249,717 s.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades aprueba C1 de D30 (9,75/10). El script multilínea acredita la aprobación citada y deja cerrar la ficha rechazada. El control de una línea conserva el rechazo en ambos consumidores. Artemisa reanuda C2 para preservar el párrafo citado y presentar la corrección a revisión D.

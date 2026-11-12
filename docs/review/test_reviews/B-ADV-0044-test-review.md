@@ -1,34 +1,34 @@
 **Veredicto:** APROBADO
 
-# B-ADV-0044 · Reevaluación C1 de las pruebas de D27–D29
+# B-ADV-0044 · Reevaluación C1 de las pruebas de D30
 
-**Media 9,75/10.** Cuatro de las siete entradas reproducen el defecto en ambos consumidores. Los tres controles pasan en ambos. En D27, la continuación con dos espacios reproduce el mismo fallo que la continuación al margen. El control que conserva el rechazo tiene tres espacios, alineados con el texto del primer elemento.
+**Media 9,75/10.** La regresión reproduce las dos consecuencias de D30. Con el `script` multilínea, la métrica de Hades atribuye a Claude la aprobación citada y el preflight permite cerrar la ficha pese al rechazo propio. El control de una línea pasa en ambos consumidores.
 
-| Hallazgo | Entrada que falla | Métricas de Hades en `motor.agente` | Resultado de `pendientes_cierre` | Control que pasa |
-|---|---|---|---|---|
-| D27 | Continuación con cero o dos espacios antes de `El separador` | Claude queda sin dictamen y Codex registra `APROBADO` en ambas variantes. | En ambas, la ficha queda pendiente por «informe sin veredicto formal». | Tres espacios antes de `El separador`. |
-| D28 | Cadena JSON `"<pre>"` dentro de `script` | Claude registra el `APROBADO` del ejemplo posterior. | Devuelve `[]` y permite cerrar la ficha rechazada. | Cambiar solo la cadena a `"<div>"`. |
-| D29 | Subrayado Setext de un guion seguido de un espacio | Claude queda sin dictamen y Codex registra `APROBADO`. | La ficha queda pendiente por «informe sin veredicto formal». | Tres guiones con el mismo espacio final. |
+## Reproducción y control
 
-En los tres controles, el arnés observa una sola llamada a Claude con el modelo principal y una sola métrica de Hades con `RECHAZADO`. El preflight encuentra el ID `B-DEMO-0001` y «informe rechazado» en la misma entrada. Exigir ese motivo detecta la pérdida del rechazo en D27 y D29 incluso cuando el cierre sigue bloqueado.
+Las dos pruebas usan el mismo texto de informe. «Incluye esta plantilla» continúa el párrafo citado. La aprobación sigue a `</script>` y una línea vacía la separa del rechazo propio. La única diferencia entre las entradas son los dos saltos de línea que rodean al JSON `{}`.
+
+| Entrada | Dictamen del proveedor | Preflight de la versión |
+|---|---|---|
+| Reproducción con `{}` en su propia línea | La única métrica de Hades contiene `('claude', 'APROBADO')`. La aserción esperaba `('claude', 'RECHAZADO')` y falló antes de comprobar las llamadas efectivas. | `pendientes_cierre` devolvió `[]` tras confirmar el informe canónico junto con la ficha completada. |
+| Control con el `script` en una línea | El arnés observó una sola llamada a Claude con el modelo `principal` y una única métrica de Hades con `RECHAZADO`. | `pendientes_cierre` identificó `B-DEMO-0001` por «informe rechazado». |
 
 ## Puntuaciones
 
 | Criterio | Nota | Fundamento |
 |---|---:|---|
-| Cobertura | 10/10 | Cada variante entrega el mismo informe a los dos consumidores en subpruebas separadas. Un fallo del proveedor permite observar también la decisión de cierre. |
-| Aserciones | 9/10 | El arnés exige las métricas y llamadas esperadas por proveedor y modelo. El preflight lee el informe canónico confirmado junto con la ficha completada y comprueba el ID y el motivo mediante subcadenas. |
-| Rojo correcto | 10/10 | Los ocho fallos son de aserción y muestran los resultados de la tabla. Los controles alcanzan las mismas comprobaciones con la misma preparación. |
-| Estabilidad | 10/10 | Cada método usa un repositorio Git temporal propio, configuración Git aislada y respuestas fijas de los proveedores simulados. Las expectativas son independientes del reloj y del orden de ejecución. |
+| Cobertura | 10/10 | Ambas entradas recorren `motor.agente` y `pendientes_cierre` en subpruebas separadas. El fallo en las métricas deja observable la decisión de cierre. |
+| Aserciones | 9/10 | Se comprueban el dictamen registrado, el proveedor y el modelo llamados. El preflight exige que el ID y el motivo aparezcan en la misma entrada mediante subcadenas. |
+| Rojo correcto | 10/10 | Los dos fallos son de aserción y muestran los efectos previstos en D30. El control alcanza las mismas comprobaciones con la misma preparación. |
+| Estabilidad | 10/10 | Cada prueba crea su propio repositorio Git temporal, aísla su configuración y simula respuestas fijas de los proveedores. Las expectativas son independientes del reloj y del orden de ejecución. |
 
-## Hallazgos y destino
+## Estado de los hallazgos
 
-**Anteriores.** H1–H4 y N1–N10 siguen resueltos en C1. El delta añade los siete métodos y sus datos de entrada. La revisión D aportada dio por resueltos D24–D26.
-
-**Nuevos.** C1 queda sin hallazgos. D27, D28 y D29 persisten en el producto y quedan para Artemisa (`desarrollador`), con destino `resolver` en C2.
+- **Anteriores de C1.** H1–H4 y N1–N10 siguen resueltos. El delta añade la reproducción y el control de D30.
+- **Anteriores de producto.** D27–D29 constan como resueltos en la revisión D anterior.
+- **D30 · 🟠 Alta.** La reproducción solicitada queda cubierta en C1. El defecto de producto persiste. Destinataria: Artemisa (`desarrollador`). Destino: `resolver` en C2. En ambas presentaciones, el principal debe registrar su rechazo en una sola llamada y el preflight debe mantener pendiente la ficha por «informe rechazado».
+- **Nuevos en C1.** Ninguno.
 
 ## Evidencia
 
-El archivo de pruebas revisado coincide con el del árbol `a077777df66d23f488b9c129934602ec9d4ef75c`. La ejecución focalizada adjunta registró `FFFFFF.FF..`, `Ran 7 tests in 7.480s` y `FAILED (failures=8)`, con código 1. En las cuatro subpruebas rojas del proveedor, la aserción sobre métricas falló antes de alcanzar la de llamadas efectivas.
-
-Se reutilizaron esa ejecución y el resultado de `python -m ruff check --select E9,F63,F7,F82 skills/orquestar/test_progreso.py` (`All checks passed!`, código 0). El proyecto carece de tipador configurado.
+El delta de pruebas desde `489edd627f4a5743e15e8b714ecbad45ca292a44` coincide con el adjunto. Se reutilizó la evidencia del árbol `e7e74007e1c5a6458b96a60a6f79623e4f4a8ed8`. La ejecución focalizada registró `FF.`, dos métodos en 2,186 s y dos fallos de aserción en el método multilínea (código 1). Ruff selectivo (`E9,F63,F7,F82`) pasó sobre `skills/orquestar/test_progreso.py` con código 0. El proyecto carece de tipador configurado.
