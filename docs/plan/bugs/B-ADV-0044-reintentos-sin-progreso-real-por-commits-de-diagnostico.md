@@ -249,3 +249,8 @@ El bloqueo por dos rechazos corresponde al límite del perfil estricto introduci
 - Destino: `artemisa`
 - Decisión: reanudar desarrollo
 - Evidencia: Reevaluación D rechazada por Hades (7,50/10) sobre el árbol 4a9b1d2fb5d9ece9edeb5aeee0e61cedb5c4b92d. D24–D26 resueltos. Reanudar desarrollo en C2 por tres hallazgos altos de análisis estático: D27 pierde el límite entre dos elementos numerados tras una continuación sin sangría y oculta el rechazo; D28 interpreta la cadena <pre> de un script como HTML efectivo y permite cerrar con una aprobación citada; D29 une un encabezado Setext subrayado con un guion y espacio con el rechazo del párrafo siguiente y habilita la reserva. Reproducciones y controles en docs/review/code_reviews/B-ADV-0044-code-review.md. Las 216 pruebas del triaje pasaron en 240,004 s. Los tres casos nuevos quedan pendientes de reproducción y corrección.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades aprobó C1 con 9,75/10. D27 se reproduce con cero y dos espacios, D28 acredita una aprobación citada y D29 oculta el rechazo. Ocho fallos de aserción, tres controles verdes. Artemisa reanuda C2 para corregir la lectura de listas, texto de script y subrayados Setext y someter el producto a Hades.

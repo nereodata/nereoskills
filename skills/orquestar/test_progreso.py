@@ -953,6 +953,38 @@ class ProgresoTests(unittest.TestCase):
         self.comprobar_rechazo_y_preflight('Se inspecciono archivo.py. Salida: <pre>\nMarca literal: `\n'
                                           '</pre>\n**Veredicto:** RECHAZADO\nAfecta a `lector`.')
 
+    def informe_con_segundo_elemento(self, sangria):
+        return (f'1. Primer hallazgo\n{sangria}El separador es `\n2. Segundo hallazgo\n'
+                '**Veredicto:** RECHAZADO\nAfecta a `lector`.')
+
+    def test_segundo_elemento_tras_continuacion_al_margen(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_segundo_elemento(''))
+
+    def test_segundo_elemento_tras_continuacion_sangrada(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_segundo_elemento('  '))
+
+    def test_segundo_elemento_tras_continuacion_alineada(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_segundo_elemento('   '))
+
+    def informe_con_cadena_script(self, etiqueta):
+        return (f'Plantilla <script type="application/json">"<{etiqueta}>"</script>. Salida: `\n'
+                'Veredicto: APROBADO\nfin`.' + self.rechazo_exterior)
+
+    def test_fragmento_tras_script_con_pre_literal(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_cadena_script('pre'))
+
+    def test_fragmento_tras_script_con_div_literal(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_cadena_script('div'))
+
+    def informe_con_subrayado(self, guiones):
+        return f'El separador es `\n{guiones} \n**Veredicto:** RECHAZADO\nAfecta a `lector`.'
+
+    def test_subrayado_setext_de_un_guion(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_subrayado('-'))
+
+    def test_subrayado_setext_de_tres_guiones(self):
+        self.comprobar_rechazo_y_preflight(self.informe_con_subrayado('---'))
+
     def comprobar_rechazo_del_principal(self, dictamen):
         """Comprueba que el rechazo propio termina la invocación antes de la reserva."""
         self.escribir('orchestration.json', json.dumps({'hades': {'harness': 'claude', 'model': 'principal',
