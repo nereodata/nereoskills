@@ -5,12 +5,12 @@ type: funcional
 weight: 120
 dificultad: dificil
 version: "v1.2.0"
-status: blocked
+status: planned
+base_calidad: 8efac2293421d1190f2fb57724aa6e932d964427
 depende_de: ["T-ADV-0039"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
 created_at: 2026-11-11
 updated_at: 2026-11-12
-pendiente_de: especificador
 ---
 
 # T-ADV-0035 · Pedir intervención humana solo ante una decisión o recurso pendiente del usuario
@@ -27,6 +27,23 @@ Aplicar el mismo criterio a preguntas originadas por un agente, un dictamen o el
 - [ ] **CA-M-4.** Cubrir con proveedores simulados un fallo técnico, un conflicto resoluble por el especificador y una decisión genuinamente humana. Verificar estado, cola y destino a través de los canales existentes.
 - [ ] **CA-M-5.** Aplicar en un único punto la decisión técnica del LLM y el resultado de llamada de T-ADV-0039. Confirmar una acción cuando hay agente autorizado, mandato y condición de salida. Si hay duda sobre el destino, solicitar aclaración dentro del flujo. Una pausa justificada conserva el impedimento y la condición verificable para levantarla.
 - [ ] **CA-M-6.** Con un ítem en espera o pausado, despachar otro independiente que tenga capacidad disponible. Comprobar por separado falta de cuota del rol, falta de un recurso externo y ausencia acreditada de una vía ejecutable.
+
+## Triaje
+
+- A [EXEC] Escenarios de decisión por ítem, continuidad de preguntas y despacho durante una espera en la feature de orquestación.
+- B [EXEC] Aplicación común de la decisión, identidad del impedimento, persistencia y selección del siguiente ítem.
+- C1 [EXEC] Recorridos con proveedores simulados desde el motor y las entradas de intervención. Reutilizar las regresiones existentes de llamadas y canales.
+- C2 [EXEC] Integrar el resultado de llamada en la transición del ítem y en la selección de trabajo independiente.
+- D [EXEC] Hades revisa el delta de producción respecto a la base de calidad.
+- E [EXEC] Documentar espera, pausa, pregunta y reanudación en la guía de orquestación.
+- F [EXEC] Verificación final, revisión de versión y commit.
+
+Verificación dirigida con `adevv orquestar --verificar "python -m unittest tests.test_decision_item tests.test_llamadas tests.test_control_intervenciones skills.orquestar.test_intervencion_humana skills.orquestar.test_acceso_agente"`. El módulo `tests.test_decision_item` corresponde a C1. Las regresiones existentes de llamadas, recepción por CLI y Telegram, persistencia y acceso se pueden ejecutar ya en A.
+
+## Decisiones de especificación
+
+- **S1.** Se usan las consultas existentes `--estado` y `/estado` para observar el destino de A y `--preguntas` y `/preguntas` para comprobar la cola antes y después de la decisión. Observar solo el registro interno permitiría que un canal siguiera pidiendo intervención humana por una espera técnica. La recepción y el transporte de la respuesta reutilizan las regresiones de `tests.test_control_intervenciones` y `skills.orquestar.test_intervencion_humana`.
+- **S2.** Se simula la denegación de suscripción de Claude en el principal y su única reserva autorizada. Este caso acredita que A sigue esperando revisión mientras el motor despacha B. Los escenarios de B-ADV-0040 fijan por separado el perfil estricto, la reserva que sí puede revisar y el fallo genérico de autenticación o red que devuelve el error sin conmutar.
 
 ## Hallazgo de Hades enrutado
 - Destino: `especificador`
