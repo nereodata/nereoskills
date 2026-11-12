@@ -132,6 +132,7 @@ class FallosArnesTests(unittest.TestCase):
     def test_completado_en_disco_no_repite(self):
         """Un retorno incorrecto con paso completado y limpio no se repite."""
         def ejecutar(*args, **kwargs):
+            self.registrar_cierre()
             self.progreso = True
             return 1, {}, 'network'
         self.ejecutar.side_effect = ejecutar
@@ -358,6 +359,8 @@ class FallosArnesTests(unittest.TestCase):
             (informes / 'B-ADV-0011-code-review.md').write_text('**Veredicto:** APROBADO', encoding='utf-8')
         def git(*args, **kwargs):
             if args == ('rev-parse', 'HEAD'):
+                return 'commit-final'
+            if args == ('log', '-1', '--format=%H', '--', 'docs/review/code_reviews/B-ADV-0011-code-review.md'):
                 return 'commit-final'
             if args == ('status', '--porcelain'):
                 return '' if limpio else ' M bug.md'

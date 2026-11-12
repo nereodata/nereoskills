@@ -44,6 +44,7 @@ class ControlIntervencionesTests(unittest.TestCase):
                               'depende_de: []\n---\n', encoding='utf-8')
         self.git('add', '.')
         self.git('commit', '-qm', 'base')
+        self.enterContext(patch.object(motor, 'git', side_effect=self.git))
         self.aviso = self.enterContext(patch.object(motor, 'avisar', return_value=False))
         self.enterContext(patch.object(motor, 'telegram', return_value=None))
         self.enterContext(patch.object(motor, 'iniciar_gateway'))
@@ -55,8 +56,9 @@ class ControlIntervencionesTests(unittest.TestCase):
         self.registro = self.root / motor.intervencion.PREGUNTAS
 
     def git(self, *args):
+        """Ejecuta Git real en la fixture y decodifica su salida UTF-8."""
         return subprocess.run(['git', *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+                              capture_output=True, text=True, encoding='utf-8').stdout.strip()
 
     def preguntas(self):
         return json.loads(self.registro.read_text(encoding='utf-8'))

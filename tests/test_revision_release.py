@@ -52,6 +52,7 @@ class RevisionesReleaseTests(unittest.TestCase):
                  for p in self.root.rglob('*') if p.is_file()
                  and not {'.git', 'remote.git'}.intersection(p.relative_to(self.root).parts)
                  and p.relative_to(self.root).as_posix() not in excluir
+                 and p.relative_to(self.root).as_posix() != '.adevv-metricas/registro.lock'
                  and not p.name.startswith('orquestar_')}
         return (self.git('show-ref'), self.git('branch', '--show-current'),
                 self.git('ls-files', '--stage'), self.git('ls-remote', 'origin'), files)

@@ -1,0 +1,92 @@
+---
+id: B-ADV-0046
+title: "Un fragmento inválido en métricas provoca la caída del orquestador"
+type: bug
+weight: 0
+dificultad: dificil
+version: "v1.1.3"
+status: completed
+depende_de: []
+perfil: {artemisa: {harness: codex, model: gpt-6-astra, effort: high}, hades: {harness: codex, model: gpt-6-astra, effort: high}, atenea: {harness: codex, model: gpt-6-astra, effort: high}, estricto: true}
+created_at: 2026-11-11
+updated_at: 2026-11-11
+origen: "Incidente Aprexx, bug-fix B-APX-0262, Adevv 1.1.2; petición expresa del usuario"
+---
+
+# B-ADV-0046 · Robustez y recuperación del registro de métricas
+
+## Hechos confirmados y reproducción
+
+Aprexx sufrió una caída en bucle() al ejecutar la comprensión directa json.loads sobre las líneas nuevas de orquestar_metricas.jsonl (línea 3727 del motor instalado 1.1.2). Se evita leer_metricas(), que usa metricas.leer_registros(..., tolerar_ultima=True). El registro original tiene 2369 líneas. La línea 2367 contiene exactamente `_s": 0}` entre registros válidos. Las otras 2368 son JSON válido. Se ha reproducido JSONDecodeError: Expecting value: line 1 column 1 (char 0) aplicando esa lectura a una copia íntegra en C:/Users/IVNMOR~1/AppData/Local/Temp/adevv-metricas-repro-0046/orquestar_metricas.original.jsonl, fuera del checkout. SHA256 de la copia y original: 3233e90ef1a56e744326774efe37d5e1488ff14c1c394d01dc93d358f9428cd2.
+
+El diagnóstico original y la copia before-recovery están en C:/Users/Iván Moreno/SW/Aprexx/build/adevv-recovery-20261111/. Solo lectura. La recuperación ya realizada allí conservó el original y retiró exclusivamente el fragmento; el proyecto reanudó sin cambiar la instalación.
+
+registrar() usa append y write(JSON más salto de línea), sin bloqueo visible. Investigar todos los escritores, incluidas verificaciones y gateway, y posibles reescrituras, buffers o escrituras parciales. La concurrencia es una hipótesis, no causa confirmada. No añadir al Git de Adevv las métricas privadas de Aprexx. Usar fixtures mínimos para las regresiones.
+
+## Requisitos del usuario
+
+1. Centralizar las lecturas y evitar que una lectura concurrente de un registro incompleto derribe el bucle.
+2. Diferenciar una última línea en escritura de corrupción intermedia.
+3. Ante corrupción intermedia, diagnosticar archivo y número de línea, conservar evidencia y permitir recuperación controlada. No ignorar ni borrar datos silenciosamente.
+4. Garantizar escrituras completas y serializadas entre motor, agentes, verificaciones y gateway, con protección multiproceso y comportamiento coherente ante fallo parcial.
+5. Preservar consumo, costes, verificaciones y estados. No inventar ni duplicar registros durante la recuperación. Revisar cursores basados en número de líneas al tolerar una cola parcial o al recuperar un archivo.
+6. Añadir regresiones para cola parcial, fragmento intermedio, escritores concurrentes y reanudación sin repetir trabajo completado. Incluir consumidores normales del motor y pasos completados antes de un fallo de lectura.
+
+## Restricciones y cierre
+
+No modificar los archivos activos de Aprexx ni su copia de evidencia. Trabajar exclusivamente en Adevv y copias o fixtures. Mantener las causas del productor y del lector diferenciadas hasta tener evidencia. Hades debe revisar los contratos, pruebas y corrección con el perfil potente fijado, manteniendo el alcance del hotfix. Este bug forma parte de v1.1.3 y debe quedar corregido y validado junto a B-ADV-0044 y B-ADV-0045 antes de instalarla.
+
+## Triaje
+
+- base_calidad: `aaf7a5e7c1402141e3df6bcf8dbdf3e6a9a6517d`
+- A [EXEC] Especificar cola en curso, corrupción visible, recuperación y continuidad en orquestacion.feature.
+- B [EXEC] Diseñar bloqueo multiproceso, publicación, recuperación y cursores.
+- C1 [EXEC] Regresiones con registros sintéticos y con el bucle sobre un repositorio temporal.
+- Ampliación de C2 por D1 y D2: en el mismo módulo del triaje, mantener el bloqueo real en Windows durante más de diez segundos y comprobar que E3 se confirma una sola vez. Inyectar ENOSPC al sincronizar la copia, comprobar el activo y la limpieza de temporales, y recuperar de nuevo.
+- C2 [EXEC] Centralizar lectores y escritores. El bucle cuenta líneas físicas y decodifica el delta directamente. Las búsquedas de sesión y el diagnóstico de revisión también leen por separado. Motor, agentes, verificador y gateway escriben mediante registrar sin exclusión mutua. No consta qué produjo el fragmento del incidente.
+- D [EXEC] Hades revisa contrato, pruebas y corrección en sus fases respectivas.
+- E [EXEC] Documentar el diagnóstico y el procedimiento de recuperación local.
+- F [EXEC] Cerrar en la rama hotfix/v1.1.3 tras verificar el delta y el dictamen canónico.
+- Verificación al cierre: `python -m unittest skills.orquestar.test_registro_metricas skills.orquestar.test_metricas skills.orquestar.test_deuda_menor.DeudaMenorTests.test_version_numerica_y_lectura_jsonl_tienen_implementacion_comun skills.orquestar.test_progreso.ProgresoTests.test_reanuda_con_metricas_corruptas`. Cubre lectura, exportación estricta, recuperación concurrente, contabilidad y selección del paso tras el cierre.
+
+## Hallazgo del lector compartido actual
+
+metricas.leer_registros(root, tolerar_ultima=True) actualmente hace continue ante cualquier JSONDecodeError o fila no objeto, incluso en una línea intermedia. Sustituir la comprensión directa por ese lector sin corregir su semántica incumpliría el requisito de diagnóstico y conservación de corrupción intermedia. La copia íntegra privada está fuera del checkout para impedir su inclusión accidental en un commit; las pruebas distribuidas deben usar fixtures mínimos sin contenido privado.
+
+## Reproducción sintética concurrente en este equipo
+
+Ocho procesos Python 3.12 escribieron 400 filas cada uno en un archivo temporal común, siguiendo exactamente open(a, encoding=utf-8), write(json.dumps(ensure_ascii=False) más salto de línea) y close, sin otros escritores ni reescrituras. Cada objeto llevaba worker, seq, texto Unicode y duracion_s. Todos los procesos devolvieron 0. De 3200 filas esperadas, el archivo tiene 2737 líneas, 2339 objetos válidos únicos, 398 líneas inválidas y 313 líneas con UTF-8 roto. Se reprodujo primero UnicodeDecodeError al leer el archivo completo como UTF-8. Evidencia sintética y writer.py en C:/Users/IVNMOR~1/AppData/Local/Temp/adevv-metricas-escritores-llr8esky; SHA256 de metrics-0.jsonl: 94ab875357f4e07cbc4b613a0abfdd0ccb99e7554af4fc70321b85736bb68f5e. Esto confirma que la concurrencia basta para corromper el patrón actual en este equipo, sin atribuir retrospectivamente el fragmento de Aprexx a un escritor concreto. Extender el contrato de diagnóstico y conservación a UnicodeDecodeError y bytes parciales, con línea y evidencia binaria exactas. La regresión debe usar identidades únicas y contrastar cardinalidad y contenido, no solo que el JSON sea parseable. Ningún archivo de Aprexx fue modificado.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades rechazó /review-spec (8,0/10). H-01 alta: distinguir la recogida antes de recuperar (diagnóstico con archivo y línea, cierre conservado) del relanzamiento; una ejecución total del paso. H-02 alta: con V1 ya observada, recuperar acortando el registro, añadir V2 y observar exactamente V2 una vez. H-03 alta: solapar recuperación y escritura confirmada; preservar todos los eventos válidos una sola vez y la evidencia binaria del fragmento. H-04 media, resolver: cuantificar y conservar un coste distinto de cero tras dos recuperaciones. Ejecutar especificar sobre los escenarios y triaje conservados en wip/B-ADV-0046, commit 58b5774, con el dictamen literal en docs/review/spec_reviews/B-ADV-0046-spec-review.md. Mantener base_calidad aaf7a5e7c1402141e3df6bcf8dbdf3e6a9a6517d.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Reevaluación de Hades de la fase A, APROBADO (9,5/10). H-01 a H-04 resueltos. H-05 media, resolver por el especificador en este paso: tras la segunda recuperación, exigir que la primera copia de evidencia siga disponible e idéntica byte a byte al original.
+
+## Reanudación de desarrollo
+
+Fase A aprobada. Hades cerró H-01 a H-05 en los seis escenarios `@metricas`. Retomar el triaje en B (diseño); las regresiones ejecutables corresponden a C1. [Revisión de especificación](../../review/spec_reviews/B-ADV-0046-spec-review.md)
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades rechazó /review-test de C1 (7,75/10) y asignó cuatro hallazgos al desarrollador. H1 alta: acreditar la delegación real de motor, agente, verificador y gateway en el escritor compartido y mantener los cuatro procesos. H2 alta: coordinar lectura y publicación con una frontera controlable y anunciar E3 al solicitar el registro, sin depender del bloqueo de plataforma. H3 media: antes de V2 exigir dos filas físicas válidas, consumo y V1, tras el acortamiento. H4 media: comprobar los objetos activos y localizar la copia por contenido binario, sin imponer extensión, salida ni CRLF. Artemisa reanuda C1 y solicita reevaluación antes de C2. Diseño y regresiones en hotfix/v1.1.3. Informe de Hades en docs/review/test_reviews/B-ADV-0046-test-review.md. El rojo dirigido reproduce la caída real en la recogida de A (17 pruebas, dos fallos y cinco errores).
+
+## Corrección y verificación
+
+La reevaluación de C1 aprobó las pruebas con 8,75/10. Antes de C2, la verificación dirigida ejecutó 18 pruebas con dos fallos y cinco errores. El bucle lanzó JSONDecodeError al recoger A y la lectura de la línea con FF lanzó UnicodeDecodeError. El resto de la salida queda en la evidencia del verificador. [Dictamen de pruebas](../../review/test_reviews/B-ADV-0046-test-review.md)
+
+El motor, los agentes, el verificador y el gateway comparten un bloqueo de archivo para registrar eventos. La recuperación usa el mismo bloqueo desde la lectura del original hasta la publicación del registro saneado. El cursor cuenta objetos válidos. La prueba focalizada confirmó la escritura concurrente de E3 y la integridad de la copia. Se ajustó la comprobación del fragmento a los dos terminadores admitidos. Las 18 pruebas del triaje pasaron en Windows.
+
+## Hallazgo de Hades enrutado
+- Destino: `artemisa`
+- Decisión: reanudar desarrollo
+- Evidencia: Hades rechazó la fase D (8,50/10) sobre el producto 583b836296a5b87a66dab3268dde8e2f7e3771318cde5d9e0520d918e82b2f04. D1 alta: en Windows, msvcrt.LK_LOCK falla tras 9,1 segundos de contención y E3 queda sin registrar. Reintentar la contención hasta adquirir el bloqueo, propagando otros errores. D2 media: un fallo por espacio insuficiente puede dejar una copia parcial con nombre de original íntegro. Publicar la evidencia solo después de escribirla y sincronizarla completamente. Artemisa reanuda C2, amplía el triaje para estas regresiones y solicita reevaluación de D. Quedan cerradas las dos observaciones de C1. Informe y reproducción en docs/review/code_reviews/B-ADV-0046-code-review.md.
+
+## Cierre de la corrección
+
+Las dos regresiones añadidas fallaron con el escritor anterior en Windows. Tras el arreglo, el proceso que solicitó E3 esperó doce segundos y lo registró una sola vez al liberarse el bloqueo. Al simular ENOSPC en la sincronización, se conservaron el registro activo y la evidencia anterior y se eliminó la copia fallida. Un reintento produjo una copia íntegra. Las 20 pruebas del triaje pasaron. Hades dio por resueltos D1 y D2 y aprobó la fase D con 9,17/10. [Informe de código](../../review/code_reviews/B-ADV-0046-code-review.md)

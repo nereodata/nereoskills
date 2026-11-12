@@ -207,3 +207,5 @@ obtener el informe. Recuperar cuota o emitir el informe no publica por sí solo.
 El selector y el cierre distinguen parches (`v1.1.1` y `v1.1.2`); `v1.1` equivale
 a `v1.1.0`. `/cerrar v1.1.2 confirmo` admite la rama hotfix o release correspondiente.
 Las métricas conservan su agrupación histórica por mayor y menor.
+
+Si el bucle diagnostica una línea dañada en `orquestar_metricas.jsonl`, ejecuta `adevv orquestar --recuperar-metricas` en la raíz del proyecto. El comando indica dónde guardó el original y recupera los registros válidos en su orden. [Consulta y exportación de métricas](skills/orquestar/SKILL.md#consulta-y-exportación-de-métricas)

@@ -152,6 +152,7 @@ def solicitar(root, iid, comando, grupo, ruta_historial):
             proceso = subprocess.run(['adevv', 'orquestar', '--agente', 'hades', '--prompt-file', str(ruta)],
                                      cwd=root, capture_output=True, encoding='utf-8', errors='replace',
                                      env={**os.environ, 'ORQUESTAR_ID': iid, 'ORQUESTAR_PASO': 'bug-fix',
+                                          'ORQUESTAR_DICTAMEN': 'diagnostico-suite',
                                           'PYTHONIOENCODING': 'utf-8'})
         except OSError as exc:
             raise DiagnosticoPendiente(str(exc)) from exc

@@ -610,3 +610,128 @@ Característica: Continuidad con arneses ausentes
       | respuesta INSUFICIENTE: falta puerto | pregunta pendiente y diagnóstico falta puerto |
       | otra pregunta pendiente de la misma tarea | respuesta incorporada y tarea bloqueada por esa pregunta |
       | dependencia no completada | respuesta incorporada y tarea en espera de su dependencia sin anunciar elegibilidad ni relanzar por esa tarea |
+
+  @B-ADV-0044
+  Esquema del escenario: Acotar la revisión técnica pendiente en desarrollo y análisis
+    Dado un paso <paso> con dos intentos permitidos y un trabajo en curso
+    Cuando en cada intento Hades termina sin dictamen por falta de acceso tras probar los perfiles autorizados
+    Y el arnés registra el impedimento con otra redacción y fecha en la ficha y la revisión de versión
+    Y cada invocación confirma únicamente esas dos notas en un commit y termina con código 0 y el árbol limpio
+    Entonces el bucle para tras el segundo commit e identifica el paso, el ID y la revisión técnica pendiente
+    Y el arnés ha recibido exactamente dos invocaciones y no se inicia una tercera
+    Y conserva el trabajo, las métricas de cada ejecución y el perfil estricto sin completar ni abrir una pregunta
+    Ejemplos:
+      | paso          |
+      | bug-fix       |
+      | task-dev      |
+      | revisar-tarea |
+
+  @B-ADV-0044
+  Escenario: Los cambios administrativos no renuevan el presupuesto de análisis
+    Dado que work-plan tiene un único perfil con dos intentos y el plan sigue pendiente
+    Cuando el primer intento crea un commit vacío y el segundo solo actualiza notas del seguimiento
+    Entonces el bucle agota los dos intentos de ese perfil y para informando de work-plan
+
+  @B-ADV-0044
+  Esquema del escenario: Reconocer trabajo parcial en una ficha antigua
+    Dado un bug sin campos de progreso, en curso con un intento sin avance
+    Cuando el siguiente intento aporta <entregable>
+    Entonces se registra avance y el bug dispone de nuevo de todos sus intentos de desarrollo
+    Y el avance parcial conserva pendiente el cierre revisado
+    Ejemplos:
+      | entregable                                                              |
+      | código WIP sin commit que corrige el comportamiento afectado por el bug |
+      | prueba confirmada que reproduce ese comportamiento del bug              |
+      | escenario en la especificación de la función                            |
+      | primer dictamen formal de la revisión en curso                          |
+      | resolución incorporada de una pregunta del ID                           |
+
+  @B-ADV-0044
+  Escenario: Aislar intentos técnicos entre IDs y conservarlos al recargar
+    Dado que A ha consumido un intento técnico de dos y después B avanza
+    Cuando el motor se recarga y otro proveedor autorizado de Hades tampoco emite dictamen para A
+    Entonces el segundo intento de A agota su presupuesto y el avance de B queda registrado
+    Y un arranque manual posterior conserva el WIP y las métricas y permite una nueva tanda de dos intentos
+
+  @B-ADV-0044
+  Esquema del escenario: Distinguir el cierre del trabajo parcial ante un retorno erróneo
+    Dado un bug con el mismo cambio parcial de código en un commit nuevo y el árbol limpio
+    Cuando el arnés termina con código 1 y el estado en disco es <estado>
+    Entonces el bucle <resultado>
+    Ejemplos:
+      | estado                                                                            | resultado                                                                 |
+      | en curso, sin dictamen                                                            | aplica la recuperación acotada del arnés                                  |
+      | completed, aprobación canónica anterior al cambio y revisión del cambio pendiente | mantiene pendiente la revisión y aplica la recuperación acotada del arnés |
+      | completed, aprobación canónica que cubre el cambio actual                         | continúa sin repetir el paso                                              |
+
+  @B-ADV-0044
+  Esquema del escenario: Distinguir la reserva recuperada de una invocación sin cuota
+    Dado un intento técnico sin dictamen y una reserva autorizada de la misma invocación
+    Cuando la reserva termina con <resultado> y solo hay un commit parcial
+    Entonces el bucle <accion>
+    Y cada intento conserva su consumo real
+    Ejemplos:
+      | resultado       | accion                                     |
+      | dictamen válido | continúa con ese dictamen                  |
+      | cuota agotada   | mantiene la espera de cuota de la revisión |
+
+  @metricas
+  Escenario: Una cola parcial no oculta las sesiones ni consume el siguiente evento
+    Dado un registro de agente con sesión S seguido de una última fila JSON incompleta sin salto final
+    Cuando el motor busca la sesión del agente y comienza a observar eventos nuevos
+    Entonces recupera S y la cola pendiente no cuenta como evento
+    Cuando termina de escribirse esa fila con una verificación V
+    Entonces el motor observa V una sola vez entre los eventos nuevos
+
+  @metricas
+  Esquema del escenario: Recuperación explícita de un fragmento entre dos objetos válidos
+    Dado un registro con un consumo de 7 tokens y coste de 0,25 USD en línea 1, <fragmento> en línea 2 y una verificación V en línea 3
+    Cuando el motor consulta su estado
+    Entonces conserva el consumo y V y diagnostica orquestar_metricas.jsonl y la línea 2
+    Y el archivo sigue íntegro y la exportación estricta rechaza emitir totales parciales
+    Cuando se solicita la recuperación de las métricas
+    Entonces queda una copia idéntica byte a byte al original y el registro activo conserva ambas filas válidas en orden
+    Y la exportación contabiliza exactamente 7 tokens, 0,25 USD y una verificación V
+    Cuando se solicita la recuperación por segunda vez
+    Entonces se conservan los mismos dos registros y la exportación sigue contabilizando 7 tokens, 0,25 USD y una verificación V
+    Y la copia de evidencia de la primera recuperación sigue disponible e idéntica byte a byte al original
+
+    Ejemplos:
+      | fragmento                                |
+      | el fragmento JSON inválido `_s": 0}`     |
+      | una fila con la secuencia UTF-8 inválida FF |
+
+  @metricas
+  Escenario: Procesos concurrentes registran eventos tras una escritura interrumpida
+    Dado un registro con una fila válida y un fragmento final de un proceso interrumpido
+    Cuando el motor, un agente, una verificación y el gateway registran simultáneamente 100 eventos cada uno con identificadores únicos y contenido Unicode
+    Entonces se leen los 400 identificadores con su contenido original una sola vez cada uno, además de la fila original
+    Y el fragmento queda identificable con su diagnóstico y disponible para recuperación
+
+  @metricas
+  Escenario: El bucle conserva un paso ya completado antes de observar la corrupción
+    Dado que el registro está vacío al iniciar el paso A y hay un paso B pendiente que depende de A
+    Y A deja su ficha completada en un commit con revisión aprobada
+    Y el registro contiene el consumo de A en la línea 1, un fragmento inválido en la línea 2 y la aprobación en la línea 3
+    Cuando el bucle recoge el resultado de A antes de recuperar las métricas
+    Entonces informa de la corrupción en orquestar_metricas.jsonl, línea 2, sin excepción sin capturar
+    Y en esa ejecución se conservan el commit, la ficha completada, el consumo y la aprobación de A
+    Cuando se recupera el registro y se relanza el bucle antes de ejecutar B
+    Entonces el selector elige B y el número total de ejecuciones de A entre ambos arranques es 1
+
+  @metricas
+  Escenario: El observador recibe la siguiente verificación después de acortarse el registro
+    Dado un registro con un consumo en la línea 1, un fragmento inválido en la línea 2 y la verificación V1 en la línea 3
+    Y un observador de verificaciones nuevas que ya ha recibido V1
+    Cuando se recupera el registro y quedan solo las dos filas válidas
+    Y se registra la verificación V2 al final
+    Entonces la siguiente consulta del mismo observador entrega exactamente V2 una vez
+    Y otra consulta sin más escrituras no entrega verificaciones
+
+  @metricas
+  Escenario: Una escritura que coincide con la recuperación conserva su evento confirmado
+    Dado un registro con los eventos confirmados E1 y E2 separados por una línea cuyos bytes son FF 0A en hexadecimal
+    Cuando se solicita la recuperación y, mientras está en curso, otro proceso solicita registrar E3
+    Y se completan la recuperación y la confirmación de escritura de E3
+    Entonces el registro activo contiene exactamente E1, E2 y E3, una vez cada uno y con su contenido original
+    Y la copia de evidencia conserva los bytes FF 0A entre E1 y E2
