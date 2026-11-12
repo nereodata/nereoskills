@@ -5,11 +5,12 @@ type: funcional
 weight: 120
 dificultad: dificil
 version: "v1.2.0"
-status: planned
+status: blocked
 depende_de: ["T-ADV-0039"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
 created_at: 2026-11-11
 updated_at: 2026-11-12
+pendiente_de: especificador
 ---
 
 # T-ADV-0035 · Pedir intervención humana solo ante una decisión o recurso pendiente del usuario
@@ -26,3 +27,8 @@ Aplicar el mismo criterio a preguntas originadas por un agente, un dictamen o el
 - [ ] **CA-M-4.** Cubrir con proveedores simulados un fallo técnico, un conflicto resoluble por el especificador y una decisión genuinamente humana. Verificar estado, cola y destino a través de los canales existentes.
 - [ ] **CA-M-5.** Aplicar en un único punto la decisión técnica del LLM y el resultado de llamada de T-ADV-0039. Confirmar una acción cuando hay agente autorizado, mandato y condición de salida. Si hay duda sobre el destino, solicitar aclaración dentro del flujo. Una pausa justificada conserva el impedimento y la condición verificable para levantarla.
 - [ ] **CA-M-6.** Con un ítem en espera o pausado, despachar otro independiente que tenga capacidad disponible. Comprobar por separado falta de cuota del rol, falta de un recurso externo y ausencia acreditada de una vía ejecutable.
+
+## Hallazgo de Hades enrutado
+- Destino: `especificador`
+- Decisión: ejecutar especificar
+- Evidencia: Hades /review-spec RECHAZADO. S1 alta (CA-M-4): comprobar por CLI y Telegram el estado, la cola y el destino en los tres recorridos (conflicto de especificación, espera técnica y decisión humana); observar la pregunta concreta antes de responder y su respuesta tras reiniciar. S2 media, resolver: precisar el acceso por suscripción deshabilitada y las reservas autorizadas, conservando el contrato de autenticación/red. Ejecutar especificar sobre la subfase A. Triaje, escenarios y dictamen íntegro en wip/T-ADV-0035, commit 6923ca6, docs/review/spec_reviews/T-ADV-0035-spec-review.md. Las 27 regresiones previas de control de intervenciones y acceso pasaron con --verificar.
