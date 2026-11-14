@@ -523,8 +523,12 @@ def settings_claude_solo_lectura(root: Path | None = None) -> str:
     return json.dumps(politica, ensure_ascii=False, separators=(",", ":"))
 
 
-def _servidores_mcp_proyecto_codex(root: Path) -> list[str]:
-    """Detecta nombres de servidores MCP en `.codex/config.toml` local para desactivarlos."""
+_CAMPOS_MCP_HTTP = ("url", "bearer_token_env_var", "http_headers", "env_http_headers")
+_CAMPOS_MCP_STDIO = ("command", "args", "env", "env_vars", "cwd")
+
+
+def _servidores_mcp_proyecto_codex(root: Path) -> list[tuple[str, str]]:
+    """Detecta servidores MCP en `.codex/config.toml` local y su transporte (`stdio` o `http`)."""
     cfg_local = Path(root) / ".codex" / "config.toml"
     if not cfg_local.is_file() or _es_enlace_o_reparse(cfg_local):
         return []
@@ -535,7 +539,13 @@ def _servidores_mcp_proyecto_codex(root: Path) -> list[str]:
     mcp_servers = datos.get("mcp_servers")
     if not isinstance(mcp_servers, dict):
         return []
-    return sorted(str(k) for k in mcp_servers if str(k) != "proyecto")
+    encontrados: list[tuple[str, str]] = []
+    for nombre, cfg in sorted((str(k), v) for k, v in mcp_servers.items()):
+        if nombre == "proyecto" or not isinstance(cfg, dict):
+            continue
+        es_http = any(k in cfg for k in _CAMPOS_MCP_HTTP) and not any(k in cfg for k in _CAMPOS_MCP_STDIO)
+        encontrados.append((nombre, "http" if es_http else "stdio"))
+    return encontrados
 
 
 def config_mcp_codex(root: Path, ejecutable_python: str | None = None) -> str:
@@ -544,8 +554,12 @@ def config_mcp_codex(root: Path, ejecutable_python: str | None = None) -> str:
     script = json.dumps(str(Path(__file__).resolve()), ensure_ascii=False)
     raiz = json.dumps(str(Path(root).resolve()), ensure_ascii=False)
     entradas = [f'proyecto={{command={py},args=[{script},"--root",{raiz}]}}']
-    for extra in _servidores_mcp_proyecto_codex(root):
-        entradas.append(f"{json.dumps(extra, ensure_ascii=False)}={{enabled=false}}")
+    for extra, transporte in _servidores_mcp_proyecto_codex(root):
+        clave = json.dumps(extra, ensure_ascii=False)
+        if transporte == "http":
+            entradas.append(f'{clave}={{enabled=false,url="http://127.0.0.1:1"}}')
+        else:
+            entradas.append(f"{clave}={{enabled=false,command={py},args=[]}}")
     return f"mcp_servers={{{','.join(entradas)}}}"
 
 
@@ -582,6 +596,7 @@ def comando_conversacion(harness: str, prompt: str, root: Path, sesion: str | No
             prefijo
             + [
                 "--json",
+                "--skip-git-repo-check",
                 "--ignore-user-config",
                 "--ignore-rules",
                 "-c",

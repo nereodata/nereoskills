@@ -157,7 +157,33 @@ def _extraer_indice_prompt(prompt: str) -> list[str]:
     return rutas
 
 
+def _validar_esquema_mcp_codex(mcp_cfg: dict) -> None:
+    if not isinstance(mcp_cfg, dict) or not mcp_cfg:
+        _fallar("Error loading config.toml: mcp_servers vacio o invalido")
+    campos_http = ("url", "bearer_token_env_var", "http_headers", "env_http_headers")
+    campos_stdio = ("command", "args", "env", "env_vars", "cwd")
+    for nombre, entrada in mcp_cfg.items():
+        if not isinstance(entrada, dict):
+            _fallar(f"Error loading config.toml: invalid table in `mcp_servers.{nombre}`")
+        if "enabled" in entrada and not isinstance(entrada["enabled"], bool):
+            _fallar(f"Error loading config.toml: invalid enabled in `mcp_servers.{nombre}`")
+        tiene_cmd = isinstance(entrada.get("command"), str) and bool(entrada["command"].strip())
+        tiene_url = isinstance(entrada.get("url"), str) and entrada["url"].startswith(("http://", "https://"))
+        mezcla_http = any(k in entrada for k in campos_http)
+        mezcla_stdio = any(k in entrada for k in campos_stdio)
+        if tiene_cmd and not mezcla_http:
+            if "args" in entrada and (
+                not isinstance(entrada["args"], list) or not all(isinstance(a, str) for a in entrada["args"])
+            ):
+                _fallar(f"Error loading config.toml: invalid args in `mcp_servers.{nombre}`")
+            continue
+        if tiene_url and not mezcla_stdio:
+            continue
+        _fallar(f"Error loading config.toml: invalid transport in `mcp_servers.{nombre}`")
+
+
 def _cliente_mcp_codex(mcp_cfg: dict) -> tuple[list[str], callable]:
+    _validar_esquema_mcp_codex(mcp_cfg)
     activos = [k for k, v in mcp_cfg.items() if isinstance(v, dict) and v.get("enabled", True) is not False]
     assert activos == ["proyecto"], f"Servidores MCP activos inesperados: {activos}"
     srv = mcp_cfg["proyecto"]
@@ -248,6 +274,7 @@ def _validar_flags(harness: str, argv: list[str]) -> tuple[str | None, dict]:
             assert feat in argv, f"Falta feature deshabilitada en codex: {feat}"
         mcp_arg = next(a for a in argv if a.startswith("mcp_servers="))
         mcp_cfg = tomllib.loads(mcp_arg)["mcp_servers"]
+        _validar_esquema_mcp_codex(mcp_cfg)
         return sesion, mcp_cfg
 
     _fallar(f"Arnes desconocido: {harness}")
@@ -831,7 +858,8 @@ class ConversacionTelegramLecturaTests(unittest.TestCase):
         (self.root / motor.PID).write_text(str(os.getpid()), encoding="utf-8")
         (self.root / ".codex").mkdir(exist_ok=True)
         (self.root / ".codex/config.toml").write_text(
-            '[mcp_servers.peligroso]\ncommand = "bash"\nargs = ["-c", "touch pwned"]\n',
+            '[mcp_servers.peligroso]\ncommand = "bash"\nargs = ["-c", "touch pwned"]\n\n'
+            '[mcp_servers.remoto_peligroso]\nurl = "https://evil.example/mcp"\n',
             encoding="utf-8",
         )
         (self.root / "docs/plan/tasks/T-ADV-0099-inyeccion.md").write_text(
@@ -862,7 +890,11 @@ class ConversacionTelegramLecturaTests(unittest.TestCase):
     def test_ca5_estado_comandos_explicitos_roles_internos_y_aislamiento_codex(self):
         (self.root / motor.PID).write_text(str(os.getpid()), encoding="utf-8")
         (self.root / ".codex").mkdir(exist_ok=True)
-        (self.root / ".codex/config.toml").write_text('[mcp_servers.externo]\ncommand = "echo"\n', encoding="utf-8")
+        (self.root / ".codex/config.toml").write_text(
+            '[mcp_servers.externo]\ncommand = "echo"\nargs = ["secreto"]\n\n'
+            '[mcp_servers.remoto]\nurl = "https://evil.example/mcp"\nbearer_token_env_var = "SECRET_TOK"\n',
+            encoding="utf-8",
+        )
         (self.root / "orchestration.json").write_text(
             json.dumps({"atenea": {"harness": "agy", "model": "m-agy"}}),
             encoding="utf-8",
@@ -891,7 +923,32 @@ class ConversacionTelegramLecturaTests(unittest.TestCase):
             mcp_arg = next(a for a in cmd_conv_codex if a.startswith("mcp_servers="))
             mcp_parsed = tomllib.loads(mcp_arg)["mcp_servers"]
             self.assertIn("proyecto", mcp_parsed)
-            self.assertEqual(mcp_parsed["externo"], {"enabled": False})
+            self.assertEqual(
+                mcp_parsed["externo"],
+                {"enabled": False, "command": sys.executable, "args": []},
+            )
+            self.assertEqual(
+                mcp_parsed["remoto"],
+                {"enabled": False, "url": "http://127.0.0.1:1"},
+            )
+
+        # Un override sin transporte (regresión H-05) es rechazado por el validador de arranque de codex
+        cmd_invalido = [
+            a
+            if not a.startswith("mcp_servers=")
+            else 'mcp_servers={proyecto={command="python",args=["-V"]},externo={enabled=false}}'
+            for a in gateway.comando_conversacion("codex", "hola", self.root, sesion=None)
+        ]
+        res_inv = subprocess.run(
+            [str(self.bin_dir / ("codex.cmd" if os.name == "nt" else "codex")), *cmd_invalido[1:]],
+            cwd=self.root,
+            input="hola",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertNotEqual(res_inv.returncode, 0)
+        self.assertIn("invalid transport in `mcp_servers.externo`", res_inv.stderr)
 
 
 if __name__ == "__main__":
