@@ -2,9 +2,9 @@
 """Lector de solo consulta y servidor MCP stdio para la conversación libre de Telegram.
 
 Acota las herramientas efectivas de la conversación del gateway exclusivamente a
-listar, leer y buscar texto en ficheros dentro de la raíz del proyecto, bloqueando
-secretos locales (.env*, .git), enlaces simbólicos/junctions, rutas fuera del
-proyecto y cualquier acción de escritura, borrado, ejecución o control de procesos.
+consultar ficheros de texto dentro de la raíz del proyecto, bloqueando secretos
+locales (.env*, .git), enlaces simbólicos/junctions, rutas fuera del proyecto y
+cualquier acción de escritura, borrado, ejecución o control de procesos.
 """
 
 import argparse
@@ -15,6 +15,7 @@ import os
 import re
 import stat
 import sys
+import tomllib
 from pathlib import Path
 
 ARNESES_CONVERSACION = ("claude", "codex", "agy")
@@ -30,8 +31,23 @@ DIRECTORIOS_OMITIDOS = frozenset(
         "venv",
     }
 )
+FICHEROS_RAIZ_PRIORITARIOS = frozenset(
+    {
+        "task_config.yaml",
+        "PROJECT.md",
+        "orchestration.json",
+        "orquestar.log",
+        "orquestar_preguntas.json",
+        "orquestar_metricas.jsonl",
+        "orquestar_evidencias.jsonl",
+        "CHANGELOG.md",
+        "README.md",
+    }
+)
 MAX_LINEAS_DEFECTO = 200
 MAX_LINEAS_TOPE = 400
+MAX_INDICE_CONVERSACION = 300
+MAX_CARACTERES_INDICE = 16000
 MAX_CARACTERES_SALIDA = 32768
 MAX_BYTES_BUSQUEDA = 4 * 1024 * 1024
 HERRAMIENTAS_LECTURA = ("listar_ficheros", "leer_fichero", "buscar_texto")
@@ -59,10 +75,12 @@ def _nombre_restringido(nombre: str) -> bool:
     return bajo == ".git" or bajo == ".env" or bajo.startswith(".env.")
 
 
-def resolver_ruta_lectura(root: Path, ruta: str = ".", *, directorio: bool = False) -> tuple[Path, str]:
+def resolver_ruta_lectura(root: Path, ruta: str | None = ".", *, directorio: bool = False) -> tuple[Path, str]:
     """Valida que `ruta` esté estrictamente dentro de `root` y sea apta para lectura."""
-    if not isinstance(ruta, str) or not ruta.strip():
+    if ruta is None or (isinstance(ruta, str) and not ruta.strip()):
         ruta = "."
+    if not isinstance(ruta, str):
+        raise ValueError("La ruta debe ser una cadena de texto.")
     limpia = ruta.strip()
     if "\x00" in limpia:
         raise PermisoLecturaError("Ruta inválida para lectura.")
@@ -151,12 +169,132 @@ def _iterar_ficheros_legibles(base: Path, inicio: Path):
             yield fichero, rel
 
 
-def listar_ficheros(root: Path, directorio: str = ".", patron: str = "*", limite: int = 200) -> str:
+def _enlaces_internos_proyecto(root: Path, limite: int = 64) -> list[str]:
+    """Detecta enlaces simbólicos o junctions dentro del árbol para denegarlos en políticas."""
+    base_cruda = Path(root)
+    if _es_enlace_o_reparse(base_cruda) or not base_cruda.exists():
+        return []
+    base = base_cruda.resolve()
+    enlaces = []
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+        actual = Path(dirpath)
+        continuar = []
+        for d in sorted(dirnames):
+            if d in DIRECTORIOS_OMITIDOS or _nombre_restringido(d):
+                continue
+            candidato = actual / d
+            if _es_enlace_o_reparse(candidato):
+                try:
+                    enlaces.append(candidato.relative_to(base).as_posix())
+                except ValueError:
+                    pass
+            else:
+                continuar.append(d)
+            if len(enlaces) >= limite:
+                return enlaces
+        dirnames[:] = continuar
+        for nombre in sorted(filenames):
+            if _nombre_restringido(nombre):
+                continue
+            candidato = actual / nombre
+            if _es_enlace_o_reparse(candidato):
+                try:
+                    enlaces.append(candidato.relative_to(base).as_posix())
+                except ValueError:
+                    pass
+                if len(enlaces) >= limite:
+                    return enlaces
+    return enlaces
+
+
+def _prefijos_plan_proyecto(base: Path) -> tuple[str, ...]:
+    """Obtiene los prefijos de planificación prioritarios declarados en task_config.yaml."""
+    prefijos = ["docs/plan/"]
+    cfg_path = base / "task_config.yaml"
+    if cfg_path.is_file() and not _es_enlace_o_reparse(cfg_path):
+        try:
+            texto = cfg_path.read_text(encoding="utf-8", errors="replace")
+            for m in re.finditer(r"^\s*path:\s*['\"]?([^'\"#\r\n]+)['\"]?", texto, re.MULTILINE):
+                valor = m.group(1).strip().strip("/").replace("\\", "/")
+                if valor and not valor.startswith(".") and ".." not in valor.split("/"):
+                    con_barra = valor + "/"
+                    if con_barra not in prefijos:
+                        prefijos.append(con_barra)
+        except OSError:
+            pass
+    return tuple(prefijos)
+
+
+def indice_ficheros_conversacion(root: Path, limite: int = MAX_INDICE_CONVERSACION) -> tuple[list[str], int]:
+    """Construye desde disco un índice priorizado de ficheros de texto legibles para el turno actual."""
+    base_cruda = Path(root)
+    if _es_enlace_o_reparse(base_cruda) or not base_cruda.is_dir():
+        return [], 0
+    base = base_cruda.resolve()
+    tope = max(1, min(int(limite if limite is not None else MAX_INDICE_CONVERSACION), 1000))
+    prefijos_plan = _prefijos_plan_proyecto(base)
+    candidatos: list[tuple[int, str]] = []
+
+    for fichero, rel in _iterar_ficheros_legibles(base, base):
+        if _es_binario(fichero):
+            continue
+        if rel in FICHEROS_RAIZ_PRIORITARIOS:
+            prioridad = 0
+        elif rel.startswith(prefijos_plan):
+            prioridad = 1
+        elif rel.startswith(("docs/review/", "docs/requirements/", "docs/")):
+            prioridad = 2
+        else:
+            prioridad = 3
+        candidatos.append((prioridad, rel))
+
+    candidatos.sort()
+    rutas = [rel for _, rel in candidatos[:tope]]
+    return rutas, len(candidatos)
+
+
+def formatear_indice_conversacion(
+    root: Path,
+    limite: int = MAX_INDICE_CONVERSACION,
+    max_caracteres: int = MAX_CARACTERES_INDICE,
+) -> str:
+    """Formatea el índice actual de ficheros legibles en disco para inyectarlo por turno."""
+    rutas, total = indice_ficheros_conversacion(root, limite=limite)
+    if not rutas:
+        return "Índice actual de ficheros legibles en disco (actualizado en este turno): sin ficheros legibles."
+    seleccionadas = []
+    acumulado = 0
+    presupuesto = max(256, int(max_caracteres if max_caracteres is not None else MAX_CARACTERES_INDICE))
+    for r in rutas:
+        coste = len(r) + 3
+        if seleccionadas and acumulado + coste > presupuesto:
+            break
+        seleccionadas.append(r)
+        acumulado += coste
+    if total > len(seleccionadas):
+        cabecera = (
+            f"Índice actual de ficheros legibles en disco "
+            f"(actualizado en este turno; mostrando {len(seleccionadas)} prioritarios de {total}):"
+        )
+    else:
+        cabecera = f"Índice actual de ficheros legibles en disco (actualizado en este turno; {total} ficheros):"
+    return cabecera + "\n" + "\n".join(f"- {r}" for r in seleccionadas)
+
+
+def listar_ficheros(
+    root: Path,
+    directorio: str | None = ".",
+    patron: str | None = "*",
+    limite: int | None = 200,
+) -> str:
     """Lista ficheros legibles dentro del directorio indicado del proyecto."""
     base = Path(root).resolve()
     inicio, rel_dir = resolver_ruta_lectura(base, directorio, directorio=True)
+    if patron is not None and not isinstance(patron, str):
+        raise ValueError("El patrón debe ser una cadena de texto.")
     patron_limpio = (patron or "*").strip() or "*"
-    tope = max(1, min(int(limite or 200), 500))
+    limite_efectivo = 200 if limite is None else _coercer_entero(limite, "limite")
+    tope = max(1, min(limite_efectivo, 500))
     encontrados = []
     truncado = False
 
@@ -177,8 +315,8 @@ def listar_ficheros(root: Path, directorio: str = ".", patron: str = "*", limite
 def leer_fichero(
     root: Path,
     ruta: str,
-    desde_linea: int = 1,
-    max_lineas: int = MAX_LINEAS_DEFECTO,
+    desde_linea: int | None = 1,
+    max_lineas: int | None = MAX_LINEAS_DEFECTO,
 ) -> str:
     """Lee líneas UTF-8 numeradas de un fichero del proyecto (`desde_linea < 0` lee la cola)."""
     if not isinstance(ruta, str) or not ruta.strip():
@@ -187,8 +325,9 @@ def leer_fichero(
     if _es_binario(fichero):
         raise PermisoLecturaError(f"El fichero es binario y no puede leerse como texto: {rel}")
 
-    inicio = int(desde_linea if desde_linea is not None else 1)
-    cantidad = max(1, min(int(max_lineas or MAX_LINEAS_DEFECTO), MAX_LINEAS_TOPE))
+    inicio = 1 if desde_linea is None else _coercer_entero(desde_linea, "desde_linea")
+    max_efectivo = MAX_LINEAS_DEFECTO if max_lineas is None else _coercer_entero(max_lineas, "max_lineas")
+    cantidad = max(1, min(max_efectivo, MAX_LINEAS_TOPE))
 
     if inicio < 0:
         cola = deque(maxlen=min(abs(inicio), MAX_LINEAS_TOPE))
@@ -221,13 +360,19 @@ def leer_fichero(
     return f"Fichero: {rel} (líneas {primera}-{ultima} de {total})\n{cuerpo}"
 
 
-def buscar_texto(root: Path, consulta: str, directorio: str = ".", limite: int = 50) -> str:
+def buscar_texto(
+    root: Path,
+    consulta: str,
+    directorio: str | None = ".",
+    limite: int | None = 50,
+) -> str:
     """Busca texto o expresión regular en los ficheros legibles del proyecto."""
     if not isinstance(consulta, str) or not consulta.strip():
         raise ValueError("Debes indicar el texto o patrón a buscar.")
     base = Path(root).resolve()
     inicio, _ = resolver_ruta_lectura(base, directorio, directorio=True)
-    tope = max(1, min(int(limite or 50), 200))
+    limite_efectivo = 50 if limite is None else _coercer_entero(limite, "limite")
+    tope = max(1, min(limite_efectivo, 200))
     try:
         patron = re.compile(consulta, re.IGNORECASE)
     except re.error:
@@ -258,117 +403,139 @@ def buscar_texto(root: Path, consulta: str, directorio: str = ".", limite: int =
     return cabecera + "\n" + "\n".join(coincidencias)
 
 
+def _coercer_texto(valor, clave: str, defecto: str) -> str:
+    if valor is None:
+        return defecto
+    if not isinstance(valor, str):
+        raise ValueError(f"El parámetro {clave!r} debe ser una cadena de texto.")
+    return valor
+
+
+def _coercer_entero(valor, clave: str) -> int:
+    if isinstance(valor, bool):
+        raise ValueError(f"El parámetro {clave!r} debe ser un número entero.")
+    if isinstance(valor, int):
+        return valor
+    if isinstance(valor, str) and valor.strip():
+        try:
+            return int(valor.strip())
+        except ValueError as error:
+            raise ValueError(f"El parámetro {clave!r} debe ser un número entero.") from error
+    raise ValueError(f"El parámetro {clave!r} debe ser un número entero.")
+
+
+def _arg_entero(args: dict, clave: str, defecto: int) -> int:
+    valor = args.get(clave)
+    if valor is None:
+        return defecto
+    return _coercer_entero(valor, clave)
+
+
 def ejecutar_herramienta(root: Path, nombre: str, argumentos: dict | None = None) -> str:
     """Ejecuta únicamente herramientas de lectura; rechaza cualquier otra acción."""
     args = argumentos if isinstance(argumentos, dict) else {}
     if nombre == "listar_ficheros":
         return listar_ficheros(
             root,
-            directorio=str(args.get("directorio", ".")),
-            patron=str(args.get("patron", "*")),
-            limite=int(args.get("limite", 200)),
+            directorio=_coercer_texto(args.get("directorio"), "directorio", "."),
+            patron=_coercer_texto(args.get("patron"), "patron", "*"),
+            limite=_arg_entero(args, "limite", 200),
         )
     if nombre == "leer_fichero":
         return leer_fichero(
             root,
-            ruta=str(args.get("ruta", "")),
-            desde_linea=int(args.get("desde_linea", 1)),
-            max_lineas=int(args.get("max_lineas", MAX_LINEAS_DEFECTO)),
+            ruta=_coercer_texto(args.get("ruta"), "ruta", ""),
+            desde_linea=_arg_entero(args, "desde_linea", 1),
+            max_lineas=_arg_entero(args, "max_lineas", MAX_LINEAS_DEFECTO),
         )
     if nombre == "buscar_texto":
         return buscar_texto(
             root,
-            consulta=str(args.get("consulta", "")),
-            directorio=str(args.get("directorio", ".")),
-            limite=int(args.get("limite", 50)),
+            consulta=_coercer_texto(args.get("consulta"), "consulta", ""),
+            directorio=_coercer_texto(args.get("directorio"), "directorio", "."),
+            limite=_arg_entero(args, "limite", 50),
         )
     raise PermisoLecturaError(
         f"Acción denegada ({nombre}): la conversación de Telegram solo tiene permiso para consultar ficheros del proyecto."
     )
 
 
-def evaluar_permiso_conversacion(root: Path, accion: str, objetivo: str = "") -> tuple[bool, str]:
-    """Evalúa si una operación está permitida bajo la política efectiva de conversación."""
-    accion_norm = (accion or "").strip().lower()
-    lecturas = {"read", "read_file", "glob", "grep", "listar_ficheros", "leer_fichero", "buscar_texto"}
-    if accion_norm not in lecturas:
-        return False, f"Acción denegada ({accion}): solo se permite consultar ficheros del proyecto."
-    if not objetivo or accion_norm in ("glob", "grep", "listar_ficheros", "buscar_texto"):
-        ruta_obj = objetivo or "."
-        try:
-            base = Path(root).resolve()
-            candidata = Path(ruta_obj)
-            if not candidata.is_absolute():
-                partes = Path(os.path.normpath(ruta_obj)).parts
-                if any(p == ".." or _nombre_restringido(p) for p in partes):
-                    return False, f"Acceso de lectura denegado sobre ruta protegida o externa: {objetivo}"
-                candidata = base / ruta_obj
-            if _es_enlace_o_reparse(candidata):
-                return False, f"Acceso denegado a enlace simbólico: {objetivo}"
-            rel = candidata.resolve().relative_to(base)
-            if any(_nombre_restringido(p) for p in rel.parts):
-                return False, f"Acceso de lectura denegado sobre ruta protegida: {objetivo}"
-            return True, "lectura permitida"
-        except (OSError, ValueError):
-            return False, f"Acceso denegado fuera del proyecto: {objetivo}"
-    try:
-        resolver_ruta_lectura(Path(root), objetivo, directorio=False)
-        return True, "lectura permitida"
-    except PermisoLecturaError as error:
-        return False, str(error)
-    except (FileNotFoundError, ValueError):
-        # El permiso de lectura sobre la ruta interna existe aunque el fichero aún no exista.
-        return True, "lectura permitida"
-
-
 def settings_agy_solo_lectura(root: Path) -> str:
     """Construye la política de sesión de Antigravity limitada a lectura del proyecto."""
     raiz_posix = Path(root).resolve().as_posix()
+    denegados = [
+        "write_file(*)",
+        "command(*)",
+        "unsandboxed(*)",
+        "read_url(*)",
+        "execute_url(*)",
+        "mcp(*)",
+        "read_file(.env)",
+        "read_file(.env.*)",
+        "read_file(**/.env)",
+        "read_file(**/.env.*)",
+        "read_file(.git)",
+        "read_file(.git/**)",
+        "read_file(**/.git/**)",
+    ]
+    for rel_enlace in _enlaces_internos_proyecto(root):
+        denegados.append(f"read_file({rel_enlace})")
+        denegados.append(f"read_file({rel_enlace}/**)")
     politica = {
         "permissions": {
             "allow": [
                 "read_file(.)",
                 f"read_file({raiz_posix})",
             ],
-            "deny": [
-                "write_file(*)",
-                "command(*)",
-                "unsandboxed(*)",
-                "read_url(*)",
-                "execute_url(*)",
-                "mcp(*)",
-                "read_file(.env)",
-                "read_file(.env.*)",
-                "read_file(**/.env)",
-                "read_file(**/.env.*)",
-                "read_file(.git/**)",
-            ],
+            "deny": denegados,
         }
     }
     return json.dumps(politica, ensure_ascii=False, separators=(",", ":"))
 
 
-def settings_claude_solo_lectura() -> str:
+def settings_claude_solo_lectura(root: Path | None = None) -> str:
     """Construye la política de sesión de Claude Code limitada a Read, Glob y Grep."""
+    denegados = [
+        "Bash",
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "WebFetch",
+        "WebSearch",
+        "Read(.env)",
+        "Read(.env.*)",
+        "Read(**/.env)",
+        "Read(**/.env.*)",
+        "Read(.git)",
+        "Read(.git/**)",
+        "Read(**/.git/**)",
+    ]
+    if root is not None:
+        for rel_enlace in _enlaces_internos_proyecto(root):
+            denegados.append(f"Read({rel_enlace})")
+            denegados.append(f"Read({rel_enlace}/**)")
     politica = {
         "permissions": {
             "allow": ["Read", "Glob", "Grep"],
-            "deny": [
-                "Bash",
-                "Write",
-                "Edit",
-                "NotebookEdit",
-                "WebFetch",
-                "WebSearch",
-                "Read(.env)",
-                "Read(.env.*)",
-                "Read(**/.env)",
-                "Read(**/.env.*)",
-                "Read(.git/**)",
-            ],
+            "deny": denegados,
         }
     }
     return json.dumps(politica, ensure_ascii=False, separators=(",", ":"))
+
+
+def _servidores_mcp_proyecto_codex(root: Path) -> list[str]:
+    """Detecta nombres de servidores MCP en `.codex/config.toml` local para desactivarlos."""
+    cfg_local = Path(root) / ".codex" / "config.toml"
+    if not cfg_local.is_file() or _es_enlace_o_reparse(cfg_local):
+        return []
+    try:
+        datos = tomllib.loads(cfg_local.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return []
+    mcp_servers = datos.get("mcp_servers")
+    if not isinstance(mcp_servers, dict):
+        return []
+    return sorted(str(k) for k in mcp_servers if str(k) != "proyecto")
 
 
 def config_mcp_codex(root: Path, ejecutable_python: str | None = None) -> str:
@@ -376,7 +543,10 @@ def config_mcp_codex(root: Path, ejecutable_python: str | None = None) -> str:
     py = json.dumps(ejecutable_python or sys.executable, ensure_ascii=False)
     script = json.dumps(str(Path(__file__).resolve()), ensure_ascii=False)
     raiz = json.dumps(str(Path(root).resolve()), ensure_ascii=False)
-    return f'mcp_servers={{proyecto={{command={py},args=[{script},"--root",{raiz}]}}}}'
+    entradas = [f'proyecto={{command={py},args=[{script},"--root",{raiz}]}}']
+    for extra in _servidores_mcp_proyecto_codex(root):
+        entradas.append(f"{json.dumps(extra, ensure_ascii=False)}={{enabled=false}}")
+    return f"mcp_servers={{{','.join(entradas)}}}"
 
 
 def comando_conversacion(harness: str, prompt: str, root: Path, sesion: str | None = None) -> list[str] | None:
@@ -401,7 +571,7 @@ def comando_conversacion(harness: str, prompt: str, root: Path, sesion: str | No
             "--system-prompt-snapshot",
             "off",
             "--settings",
-            settings_claude_solo_lectura(),
+            settings_claude_solo_lectura(root),
             "--output-format",
             "json",
         ]
@@ -412,12 +582,15 @@ def comando_conversacion(harness: str, prompt: str, root: Path, sesion: str | No
             prefijo
             + [
                 "--json",
+                "--ignore-user-config",
+                "--ignore-rules",
                 "-c",
                 'approval_policy="never"',
             ]
             + sandbox
             + [
-                "--ignore-rules",
+                "-c",
+                "features.hooks=false",
                 "-c",
                 "features.shell_tool=false",
                 "-c",
@@ -428,6 +601,8 @@ def comando_conversacion(harness: str, prompt: str, root: Path, sesion: str | No
                 "features.plugins=false",
                 "-c",
                 "features.multi_agent=false",
+                "-c",
+                "features.skip_host_skill_discovery=true",
                 "-c",
                 config_mcp_codex(root),
                 "-",
@@ -538,7 +713,7 @@ def _procesar_mensaje_mcp(root: Path, mensaje: dict) -> dict | None:
                 "id": msg_id,
                 "result": {"content": [{"type": "text", "text": salida}], "isError": False},
             }
-        except (PermisoLecturaError, FileNotFoundError, ValueError, OSError) as error:
+        except (PermisoLecturaError, FileNotFoundError, ValueError, TypeError, OSError) as error:
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
@@ -562,6 +737,8 @@ def _leer_mensaje_stdio(stream) -> tuple[dict | None, bool]:
             continue
         if texto.lower().startswith("content-length:"):
             longitud = int(texto.split(":", 1)[1].strip())
+            if longitud < 0:
+                raise ValueError("Content-Length negativo")
             while True:
                 cab = stream.readline()
                 if not cab or not cab.strip():
