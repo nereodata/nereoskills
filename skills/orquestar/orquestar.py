@@ -4084,7 +4084,9 @@ def parte(root, docs="docs/requirements"):
     items = backlog(root)
     abiertas = sorted({vkey(i["version"]) for i in items if vkey(i["version"]) and i["status"] not in CERRADO})
     for vk in abiertas[:1]:
-        suyas = [i for i in items if vkey(i["version"]) == vk]
+        suyas = [
+            i for i in items if vkey(i["version"]) == vk and i["status"] not in {"cancelled", "superseded", "rejected"}
+        ]
         v = max((i["version"] for i in suyas if i.get("version")), key=len, default=f"v{vk[0]}.{vk[1]}")
         tareas = [i for i in suyas if i["paso"] == "task-dev"]
         bugs = [i for i in suyas if i["paso"] == "bug-fix"]

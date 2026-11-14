@@ -18,10 +18,9 @@ from adevv.store import write_json_atomic
 
 
 POLITICA_BASE = (
-    "# Política base de Adevv\n"
-    "Autonomía en el procedimiento e invariantes deterministas en los bordes: "
-    "pruebas ejecutables y chequeos en verde, cero efectos laterales externos en tests "
-    "y revisión independiente post-verde solo en superficies críticas o cierre.\n"
+    "# Política base\n"
+    "Prioriza la agilidad: decide autónomamente el camino más simple para cada objetivo, manteniendo módulos cohesivos.\n"
+    "Lo único obligatorio antes de cerrar es verificar el cambio con las pruebas y chequeos del proyecto sin causar efectos laterales externos ni acciones irreversibles.\n"
 )
 
 SUPERFICIES_CRITICAS = (
