@@ -3904,7 +3904,7 @@ def limite_cuota(perfil):
     modelo = str(perfil.get("model") or "").lower()
     if "flash" in modelo:
         return 20_000_000
-    if any(familia in modelo for familia in ("argon", "pro", "opus", "sonnet")):
+    if any(familia in modelo for familia in ("carbon", "argon", "pro", "opus", "sonnet")):
         return 5_000_000
     return 10_000_000
 
