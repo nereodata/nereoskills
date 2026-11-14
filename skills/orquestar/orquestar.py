@@ -139,6 +139,17 @@ _intervencion_spec = importlib.util.spec_from_file_location("adevv_intervencion"
 intervencion = importlib.util.module_from_spec(_intervencion_spec)
 _intervencion_spec.loader.exec_module(intervencion)
 
+try:
+    from . import chequeos
+except ImportError:
+    try:
+        from skills.orquestar import chequeos
+    except ImportError:
+        _chequeos_spec = importlib.util.spec_from_file_location("adevv_chequeos", SKILL.with_name("chequeos.py"))
+        chequeos = importlib.util.module_from_spec(_chequeos_spec)
+        sys.modules["adevv_chequeos"] = chequeos
+        _chequeos_spec.loader.exec_module(chequeos)
+
 
 def solicitar_intervencion(root, iid, pregunta, **opciones):
     """Registra una intervención sin mantener al arnés esperando entrada."""
@@ -620,22 +631,10 @@ def construir_prompt_agente(root, rol, prompt, reanudacion=False, mandato_tempor
         )
         if es_repositorio_fuente_adevv(root):
             cabecera += "Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.\n\n"
-    f_ev = Path(root) / EVIDENCIAS
-    if f_ev.exists():
+    if chequeos.tiene_evidencias(root):
         try:
             clave = arbol(root)
-            estado_cmds = {}
-            orden_cmds = []
-            for l in f_ev.read_text(encoding="utf-8").splitlines():
-                if not l.strip():
-                    continue
-                e = json.loads(l)
-                if e.get("arbol") == clave and e.get("comando"):
-                    c = e["comando"]
-                    if c not in orden_cmds:
-                        orden_cmds.append(c)
-                    estado_cmds[c] = (e.get("codigo") == 0) and not e.get("cambio_en_vuelo")
-            cmds = [c for c in orden_cmds if estado_cmds.get(c)]
+            cmds = chequeos.comandos_verificados_arbol(root, clave_arbol=clave)
             if cmds:
                 cabecera += (
                     f"Verificado en verde sobre este árbol ({clave[:10]}): "
@@ -3451,31 +3450,13 @@ def evento_de(e):
 @contextmanager
 def indice_de_trabajo(root):
     """Captura el contenido rastreable del árbol sin modificar el índice del usuario."""
-    with tempfile.TemporaryDirectory() as tmp:
-        env = {**os.environ, "GIT_INDEX_FILE": str(Path(tmp) / "index")}
-        entradas = subprocess.check_output(["git", "ls-files", "--stage", "-z"], cwd=root)
-        if entradas:
-            subprocess.run(
-                ["git", "update-index", "-z", "--index-info"],
-                cwd=root,
-                env=env,
-                input=entradas,
-                capture_output=True,
-                check=True,
-            )
-        subprocess.run(["git", "add", "-A", "."], cwd=root, env=env, capture_output=True, check=True)
+    with chequeos.indice_de_trabajo(root) as env:
         yield env
 
 
 def arbol(root):
     """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
-    with indice_de_trabajo(root) as env:
-        valor = subprocess.run(
-            ["git", "write-tree"], cwd=root, env=env, capture_output=True, text=True, check=True
-        ).stdout.strip()
-        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", valor):
-            raise RuntimeError("No se pudo calcular una huella Git válida del árbol")
-        return valor
+    return chequeos.arbol_trabajo(root)
 
 
 def suite(root, a=None):
@@ -3498,46 +3479,35 @@ def verificar(root, cmd):
     """Ejecuta cmd sobre el árbol actual, o reutiliza su último resultado real en verde para ese mismo árbol."""
     excluir(root)
     clave = arbol(root)
-    f = root / EVIDENCIAS
-    previas = [json.loads(l) for l in f.read_text(encoding="utf-8").splitlines() if l.strip()] if f.exists() else []
-    mismas = [e for e in previas if e.get("arbol") == clave and e.get("comando") == cmd]
-    if mismas and mismas[-1].get("codigo") == 0 and not mismas[-1].get("cambio_en_vuelo"):
-        print(f"[orquestar] verificación reutilizada: {cmd} ya pasó sobre este mismo árbol ({clave[:10]}).")
+    res = chequeos.verificar_comando(root, cmd, clave_arbol=clave, arbol_fn=arbol)
+    if res.get("reutilizada") and not res.get("compartida_en_vuelo"):
         registrar(
             root,
             {
                 "tipo": "verificacion",
-                "fecha": ahora(),
+                "fecha": res.get("fecha") or ahora(),
                 "comando": cmd,
-                "arbol": clave,
+                "arbol": res.get("arbol") or clave,
                 "reutilizada": True,
                 "codigo": 0,
                 "id": os.environ.get("ORQUESTAR_ID", ""),
             },
         )
         return 0
-    inicio = time.monotonic()
-    with tempfile.TemporaryFile() as captura:
-        codigo = subprocess.run(cmd, shell=True, cwd=root, stdout=captura, stderr=subprocess.STDOUT).returncode
-        captura.seek(0, os.SEEK_END)
-        captura.seek(max(0, captura.tell() - 32768))
-        salida = captura.read().decode("utf-8", errors="replace")
-    if salida:
-        print(salida, end="" if salida.endswith("\n") else "\n", flush=True)
-    fila = {
-        "contrato": "v2",
-        "identidad": clave,
-        "fecha": ahora(),
-        "comando": cmd,
-        "arbol": clave,
-        "codigo": codigo,
-        "salida": salida,
-        "duracion_s": round(time.monotonic() - inicio),
-    }
-    with f.open("a", encoding="utf-8") as out:
-        out.write(json.dumps(fila, ensure_ascii=False) + "\n")
-    metrica = {c: v for c, v in fila.items() if c not in ("salida", "contrato", "identidad")}
-    registrar(root, {"tipo": "verificacion", "reutilizada": False, "id": os.environ.get("ORQUESTAR_ID", ""), **metrica})
+    codigo = int(res.get("codigo", 1))
+    registrar(
+        root,
+        {
+            "tipo": "verificacion",
+            "reutilizada": bool(res.get("reutilizada", False)),
+            "id": os.environ.get("ORQUESTAR_ID", ""),
+            "fecha": res.get("fecha") or ahora(),
+            "comando": cmd,
+            "arbol": res.get("arbol") or clave,
+            "codigo": codigo,
+            "duracion_s": res.get("duracion_s", 0),
+        },
+    )
     return codigo
 
 
@@ -3701,8 +3671,10 @@ def aplicar_diagnostico_suite(root, fichero):
 
 def registrar_fallo_suite(root, version, cmd):
     """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
-    evidencia = root / EVIDENCIAS
-    filas = [json.loads(l) for l in evidencia.read_text(encoding="utf-8").splitlines() if l.strip()]
+    filas = chequeos.leer_evidencias(root)
+    if not filas:
+        evidencia = root / EVIDENCIAS
+        filas = [json.loads(l) for l in evidencia.read_text(encoding="utf-8").splitlines() if l.strip()]
     ultima = next(f for f in reversed(filas) if f["comando"] == cmd and f["codigo"])
     salida = ultima.get("salida") or "(el comando no produjo salida)"
     cola_aviso = salida[-1200:]
@@ -3819,6 +3791,9 @@ def ahora():
 
 def excluir(root):
     """Excluye de git los ficheros del bucle, para no ensuciar el árbol."""
+    if (Path(root) / ".git").is_file():
+        chequeos._excluir_propios(root)
+        return
     res = git("rev-parse", "--git-path", "info/exclude")
     if not res:
         return
