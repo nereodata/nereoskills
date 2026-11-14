@@ -5,13 +5,18 @@ type: funcional
 weight: 120
 dificultad: dificil
 version: "v1.2.0"
-status: in_progress
+status: cancelled
 base_calidad: 8efac2293421d1190f2fb57724aa6e932d964427
 depende_de: ["T-ADV-0039"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
 created_at: 2026-11-11
 updated_at: 2026-11-12
+superseded_by: T-ADV-0041
 ---
+
+> Alcance vigente integrado en T-ADV-0041 y docs/plan/versions/v1.2.md.
+> El contenido siguiente es histórico; no prescribe subfases ni revisiones del nuevo flujo.
+
 
 # T-ADV-0035 · Pedir intervención humana solo ante una decisión o recurso pendiente del usuario
 

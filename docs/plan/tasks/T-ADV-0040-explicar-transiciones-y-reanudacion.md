@@ -5,11 +5,16 @@ type: funcional
 weight: 150
 dificultad: media
 version: "v1.2.0"
-status: planned
+status: cancelled
 depende_de: ["T-ADV-0035"]
 created_at: 2026-11-12
 updated_at: 2026-11-12
+superseded_by: T-ADV-0041
 ---
+
+> Alcance vigente integrado en T-ADV-0041 y docs/plan/versions/v1.2.md.
+> El contenido siguiente es histórico; no prescribe subfases ni revisiones del nuevo flujo.
+
 
 # T-ADV-0040 · Explicar por qué paró el proceso y qué trabajo se retomará
 

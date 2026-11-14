@@ -5,12 +5,17 @@ type: funcional
 weight: 140
 dificultad: media
 version: "v1.2.0"
-status: planned
+status: cancelled
 depende_de: ["T-ADV-0034"]
 origen: "Petición del usuario (2026-11-05): mantener la iniciativa y la paralelización del arnés evitando revisiones paralelas al ciclo controlado por Adevv"
 created_at: 2026-11-05
 updated_at: 2026-11-12
+superseded_by: T-ADV-0041
 ---
+
+> Alcance vigente integrado en T-ADV-0041 y docs/plan/versions/v1.2.md.
+> El contenido siguiente es histórico; no prescribe subfases ni revisiones del nuevo flujo.
+
 
 # T-ADV-0033 · Entregar el contexto vigente del paso y preservar el ciclo de revisión de Adevv
 

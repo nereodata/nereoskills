@@ -6,6 +6,7 @@ weight: 100
 dificultad: media
 version: "v1.2.0"
 status: planned
+depende_de: []
 created_at: 2026-11-12
 updated_at: 2026-11-12
 ---

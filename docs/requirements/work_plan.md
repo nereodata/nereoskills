@@ -75,20 +75,8 @@ Plan del 12 de noviembre de 2026 a partir de Afinn, B-AFN-0185. El LLM elige la 
 
 [B-ADV-0048](../plan/bugs/B-ADV-0048-rechazo-de-reserva-sin-continuidad-tecnica.md) se implementará sobre la base v1.1.3. Primero, acreditar el rechazo de la reserva. Después, entregar la intervención vigente por el camino de Artemisa, también al relanzar una ficha ya afectada. Por último, probar el recorrido desde el bucle con Artemisa disponible y con sus perfiles sin cuota. Reconocer únicamente la frase de Hades dejaría el bug de Afinn bloqueado en disco. El valor del parche se demuestra cuando la investigación llega al agente o queda esperando su propia cuota. El resultado E2E sigue siendo rojo hasta que se acredite la corrección.
 
-### 1.2 · Orden recomendado de implementación
+### 1.2 · Plan vigente desde el 14 de noviembre
 
-La columna de dependencias recoge los resultados que consume cada tarea. Entre líneas independientes, el orden expresa prioridad de trabajo. El especificador puede retomar B-ADV-0031 desde el inicio.
-
-| Orden | Ficha | Entrega | Necesita |
-|---|---|---|---|
-| 1 | [T-ADV-0039](../plan/tasks/T-ADV-0039-resultado-de-cada-llamada-llm.md) · nueva | Un resultado por llamada compartido por el paso principal, los roles internos y el diagnóstico. Cada llamada conserva sus reservas, aclaración y espera. | B-ADV-0048 integrado |
-| 2 | [T-ADV-0035](../plan/tasks/T-ADV-0035-distinguir-intervencion-humana-de-espera-tecnica.md) | Un punto aplica la decisión al ítem y deja constancia del agente asignado, la espera, la pregunta o la pausa. | T-ADV-0039 |
-| 3 | [T-ADV-0034](../plan/tasks/T-ADV-0034-reanudar-desarrollo-desde-el-hallazgo.md) | Reanudar la subfase con el WIP, el hallazgo y las aprobaciones vigentes, incluso tras un corte entre asignación y ejecución. | T-ADV-0035 |
-| 4 | [T-ADV-0033](../plan/tasks/T-ADV-0033-autonomia-del-arnes-y-revisiones-controladas.md) | Entregar al agente el contexto de retoma y la autoridad para elegir el siguiente experimento, con una sola revisión formal. | T-ADV-0034 |
-| 5 | [T-ADV-0040](../plan/tasks/T-ADV-0040-explicar-transiciones-y-reanudacion.md) · nueva | Derivar de la misma transición la explicación de CLI y Telegram sobre la parada del proceso y el próximo trabajo. | T-ADV-0035 |
-| 6 | [T-ADV-0037](../plan/tasks/T-ADV-0037-simplificar-informes-y-medir-revisiones-hades.md) | Simplificar informes y medir por separado intentos técnicos, dictámenes recibidos y hallazgos resueltos. | T-ADV-0039 |
-| 7 | [T-ADV-0036](../plan/tasks/T-ADV-0036-diagnosticar-y-reanudar-cierre-por-etapas.md) | Usar las evidencias compartidas para investigar por etapa y conservar los requisitos del cierre global. | B-ADV-0031 y T-ADV-0034 |
-| 8 | [T-ADV-0038](../plan/tasks/T-ADV-0038-desbloquear-desarrollo-con-respuesta-humana.md) | Incorporar una respuesta humana mediante `/desbloquear` usando el circuito existente de `/responder`. | T-ADV-0035 |
-| En paralelo desde el inicio | [B-ADV-0031](../plan/bugs/B-ADV-0031-duplicacion-circuito-evidencias-y-arbol-entre-orquestar-y-chequeos.md) | Resolver la revisión de especificación pendiente y unificar huellas e historial de comprobaciones de producto. | Ninguna |
-
-Las primeras tres tareas de 1.2 permiten comprobar la recuperación de extremo a extremo antes de ampliar informes, canales y cierre por etapas. La separación interna del código se hace al implantar cada comportamiento, con regresiones por las entradas reales y lectura compatible de las fichas anteriores.
+El [plan de versión](../plan/versions/v1.2.md) sustituye el orden anterior por
+un objetivo integrado con descomposición revisable. T-ADV-0041 coordina la entrega.
+El historial de fichas y los commits anteriores conservan las decisiones previas.

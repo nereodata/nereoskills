@@ -4,9 +4,9 @@ title: "Diagnosticar fallos independientes y reanudar el cierre por etapas"
 type: funcional
 weight: 170
 dificultad: dificil
-version: "v1.2.0"
-status: planned
-depende_de: ["B-ADV-0031", "T-ADV-0034"]
+version: ""
+status: backlog
+depende_de: ["B-ADV-0031", "T-ADV-0041"]
 origen: "Propuestas de optimización de v1.2.0 priorizadas el 2026-11-11 tras revisar Adevv y Afinn"
 created_at: 2026-11-11
 updated_at: 2026-11-12
@@ -25,3 +25,7 @@ Reducir las vueltas completas de reparación en un cierre como B-AFN-0185. Aplic
 - [ ] **CA-M-3.** El diagnóstico distingue una recaída de la misma causa de un fallo recién descubierto en otra etapa. La versión solo supera el cierre cuando todas sus comprobaciones obligatorias están acreditadas.
 - [ ] **CA-M-4.** Reproducir en un proyecto de prueba la secuencia de Afinn con defectos de formato, contenido e integración, incluidos los siete fallos de integración del episodio. Comparar con el cierre anterior el número de repeticiones completas y el tiempo hasta identificar los fallos independientes.
 - [ ] **CA-M-5.** Añadir el episodio del 12 de noviembre. Una salida genérica del comando de cierre puede agrupar fallos de causas distintas. Conservar por separado la evidencia de la suite global, el candidato focal 70/71 y el verde instrumentado. El diagnóstico usa esas diferencias para proponer una investigación y entrega su retoma por T-ADV-0034.
+
+## Replanificación · 14 de noviembre
+
+Optimización avanzada aplazada. El nuevo flujo conserva la validación obligatoria de cierre.
