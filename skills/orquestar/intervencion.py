@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from adevv import contexto_ejecucion, decision_item
 from adevv.revisiones import nombre_version
 
 try:
@@ -284,11 +285,141 @@ def consulta(root, solo_pendientes=False):
     return "\n".join(bloques) or "Sin preguntas pendientes."
 
 
+def _instante_motor(motor):
+    ahora_fn, fecha_fn = getattr(motor, "ahora", None), getattr(motor, "fecha_estado", None)
+    return fecha_fn(ahora_fn()) if callable(ahora_fn) and callable(fecha_fn) else None
+
+
+def _unicos(elementos):
+    vistos = []
+    for elem in elementos:
+        if elem and elem not in vistos:
+            vistos.append(elem)
+    return vistos
+
+
+def _motivos_cuota_global(root, motor):
+    """Describe esperas de cuota activas del bucle o de modelos registrados sin mutar estado."""
+    motivos = []
+    instante = _instante_motor(motor)
+    leer_esp = getattr(motor, "leer_espera", None)
+    if callable(leer_esp):
+        hasta, motivo = leer_esp(root)
+        if hasta and (instante is None or hasta > instante):
+            motivos.append(f"espera de cuota activa ({motivo} hasta {hasta:%H:%M})")
+    marcas_fn = getattr(motor, "marcas_cuota", None)
+    detalle_fn = getattr(motor, "detalle_marca", None)
+    if callable(marcas_fn) and instante is not None:
+        for (arnes, modelo), marca in sorted(marcas_fn(root, instante).items()):
+            if marca["hasta"] > instante:
+                det = detalle_fn(marca, instante) if callable(detalle_fn) else f"agotado hasta {marca['hasta']:%H:%M}"
+                motivos.append(f"espera de cuota en {arnes}/{modelo} ({det})")
+    return _unicos(motivos)
+
+
+def _motivos_item_sin_pregunta(root, motor, fichero, iid, incluir_cuota=False):
+    """Explica por qué un ítem sin pregunta abierta está en espera de cuota o intervención técnica."""
+    motivos = []
+    for d in decision_item.listar(root):
+        if d.get("iid") != iid:
+            continue
+        txt = decision_item.texto_decision(d)
+        if d.get("impedimento") and d["impedimento"] not in txt:
+            txt = f"{txt} ({d['impedimento']})" if txt else f"{iid}: {d['impedimento']}"
+        if txt:
+            motivos.append(txt)
+    texto_ficha = fichero.read_text(encoding="utf-8")
+    fm = motor.frontmatter(fichero)
+    status = str(fm.get("status", "")).strip().lower()
+    pendiente = str(fm.get("pendiente_de", "")).strip().lower()
+    if status == "blocked" and pendiente == "especificador":
+        evid = ""
+        if "## Hallazgo de Hades enrutado" in texto_ficha:
+            bloque = texto_ficha.rsplit("## Hallazgo de Hades enrutado", 1)[-1]
+            m = re.search(r"^- Evidencia:\s*(.+)$", bloque, re.M)
+            evid = m.group(1).strip()[:200] if m else ""
+        motivos.append(
+            f"{iid}: intervención técnica pendiente del especificador (paso especificar)"
+            + (f" — {evid}" if evid else "")
+        )
+    elif status == "blocked" and pendiente == "intervencion_tecnica":
+        cierre_fn = getattr(motor, "intervencion_de_cierre", None)
+        if callable(cierre_fn):
+            encargo, motivo_cierre = cierre_fn(root, iid)
+            if encargo:
+                motivos.append(
+                    f"{iid}: intervención técnica asignada a Artemisa (solicitud {encargo[0]}: {encargo[1]}; {motivo_cierre})"
+                )
+            else:
+                motivos.append(f"{iid}: intervención técnica sin pregunta humana ({motivo_cierre})")
+        else:
+            motivos.append(f"{iid}: intervención técnica sin pregunta humana")
+    elif status == "blocked" and pendiente == "humano":
+        detalle = "bloqueo sin pregunta registrada"
+        if "## Bloqueo sin progreso" in texto_ficha:
+            bloque = texto_ficha.rsplit("## Bloqueo sin progreso", 1)[-1]
+            m = re.search(r"^-\s*(.+)$", bloque, re.M)
+            if m:
+                detalle = m.group(1).strip()
+        motivos.append(f"{iid}: intervención sin pregunta humana abierta ({detalle})")
+    elif status == "completed":
+        revisada_fn = getattr(motor, "revisada", None)
+        if callable(revisada_fn) and not revisada_fn(root, iid):
+            diag_fn = getattr(motor, "diagnostico_revision", None)
+            dirs_fn = getattr(motor, "backlog_dirs", None)
+            diag = (
+                diag_fn(root, iid, fichero, dirs_fn(root) if callable(dirs_fn) else None)
+                if callable(diag_fn)
+                else f"{iid}: pendiente de revisar-tarea"
+            )
+            if diag:
+                motivos.append(diag)
+    if (Path(root) / ".git").exists():
+        try:
+            ctx = contexto_ejecucion.consultar(root, iid)
+            if ctx.get("action") == "pausa_tecnica" and ctx.get("reason"):
+                motivos.append(f"{iid}: pausa técnica ({ctx['reason']})")
+        except ValueError:
+            pass
+    if incluir_cuota:
+        revisada_fn = getattr(motor, "revisada", None)
+        abierta_o_rev = status not in ("completed", "cancelled", "superseded", "rejected") or (
+            status == "completed" and callable(revisada_fn) and not revisada_fn(root, iid)
+        )
+        if abierta_o_rev:
+            motivos.extend(_motivos_cuota_global(root, motor))
+    return _unicos(motivos)
+
+
+def _diagnostico_proyecto_sin_pregunta(root, motor):
+    """Resume esperas de cuota o intervenciones técnicas activas cuando no hay preguntas humanas."""
+    motivos = list(_motivos_cuota_global(root, motor))
+    for d in decision_item.listar(root):
+        txt = decision_item.texto_decision(d)
+        if d.get("impedimento") and d["impedimento"] not in txt:
+            txt = f"{txt} ({d['impedimento']})" if txt else d["impedimento"]
+        if txt:
+            motivos.append(txt)
+    backlog_fn = getattr(motor, "backlog", None)
+    fichero_fn = getattr(motor, "fichero_de", None)
+    if callable(backlog_fn) and callable(fichero_fn):
+        for item in backlog_fn(root):
+            if item.get("status") in ("cancelled", "superseded", "rejected"):
+                continue
+            fichero = fichero_fn(root, item["id"])
+            if fichero:
+                motivos.extend(_motivos_item_sin_pregunta(root, motor, fichero, item["id"], incluir_cuota=False))
+    motivos = _unicos(motivos)
+    if motivos:
+        return "No hay preguntas humanas pendientes; se conserva el estado actual. Motivo: " + "; ".join(motivos)
+    return "Sin preguntas humanas pendientes."
+
+
 def responder(root, motor, usuario, argumento, autorizados):
     """Recibe una respuesta autorizada sin modificar el árbol durante un paso."""
-    if str(usuario) not in autorizados:
+    if str(usuario).strip() not in autorizados:
         return None
-    return recibir(root, motor, usuario, argumento)
+    return recibir(root, motor, str(usuario).strip(), argumento)
 
 
 def recibir(root, motor, usuario, argumento, referencia_obligatoria=False):
@@ -313,11 +444,31 @@ def recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria)
         if referencia.startswith("Q-") and not referencia.startswith(f"Q-{motor.prefijo(root)}-"):
             return "La referencia no pertenece a este proyecto."
         if not q:
-            abiertas = [x for x in preguntas if x["estado"] == "pendiente"]
-            if referencia.startswith(("Q-", "T-", "B-")):
+            if referencia.startswith("Q-"):
                 return "La referencia no existe."
-            if len(abiertas) != 1:
+            if referencia.startswith(("T-", "B-")):
+                pref = motor.prefijo(root)
+                fichero_fn = getattr(motor, "fichero_de", None)
+                fichero = fichero_fn(root, referencia) if callable(fichero_fn) else None
+                if not fichero:
+                    if not referencia.startswith((f"T-{pref}-", f"B-{pref}-")):
+                        return "La referencia no pertenece a este proyecto."
+                    return "La referencia no existe."
+                motivos = _motivos_item_sin_pregunta(root, motor, fichero, referencia, incluir_cuota=True)
+                if motivos:
+                    return (
+                        f"No hay pregunta humana pendiente para {referencia}; se conserva su estado. "
+                        f"Motivo: {'; '.join(motivos)}"
+                    )
+                if any(x["tarea_id"] == referencia and x["estado"] != "pendiente" for x in preguntas):
+                    return "La pregunta ya está cerrada."
+                status = str(motor.frontmatter(fichero).get("status", "")).strip().lower()
+                return f"No hay pregunta humana pendiente para {referencia}; se conserva su estado ({status or 'sin bloqueo'})."
+            abiertas = [x for x in preguntas if x["estado"] == "pendiente"]
+            if len(abiertas) > 1:
                 return "Respuesta ambigua: " + ", ".join(x["id"] for x in abiertas)
+            if not abiertas:
+                return _diagnostico_proyecto_sin_pregunta(root, motor)
             q, texto = abiertas[0], argumento.strip()
         if q.get("proyecto") != str(root.resolve()):
             return "La referencia no pertenece a este proyecto."
@@ -343,14 +494,14 @@ def recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria)
     if motor.pid_vivo(root):
         return f"Respuesta recibida para {qid} ({iid}); se incorporará al terminar el paso en curso"
     estado = motor.estado(root, "docs/requirements")
-    esperando = estado[0] == "PARAR" and "Bloqueo de tarea;" in estado[1]
+    esperando = estado[0] == "PARAR" and ("Bloqueo de tarea;" in estado[1] or "Espera en " in estado[1])
     incorporadas = motor.incorporar_respuestas(root)
-    if (root / motor.PARADA).exists():
-        return f"Respuesta recibida para {qid}; se respeta la parada manual."
     aplicada = any(q["id"] == qid for q in incorporadas)
     actual = next(q for q in listar(root) if q["id"] == qid)
     if not aplicada and actual.get("motivo_insuficiente") and not actual.get("cola"):
         return f"Respuesta recibida para {qid}; sigue bloqueada: {actual['motivo_insuficiente']}"
+    if (root / motor.PARADA).exists():
+        return f"Respuesta recibida para {qid}; se respeta la parada manual."
     tarea = motor.fichero_de(root, iid) if aplicada else None
     reanudable = tarea and motor.frontmatter(tarea).get("status") == "planned"
     if aplicada and not reanudable:
@@ -360,11 +511,16 @@ def recibir_serializado(root, motor, usuario, argumento, referencia_obligatoria)
         pendientes = motor.pendientes_de(items[iid], items)
         if pendientes:
             return f"Respuesta incorporada para {qid}; tarea {iid} en espera de dependencias: {', '.join(pendientes)}."
+        dec = decision_item.leer(root, actual.get("rama"), iid)
+        if decision_item.bloqueada_condicion(root, motor, dec):
+            return f"Respuesta incorporada para {qid}; {decision_item.texto_decision(dec)} (se conserva la espera)."
     if aplicada and esperando:
         motor.en_fondo(root, argumentos=[])
         return f"Respuesta incorporada; tarea {iid} reanudada."
     if aplicada:
         return f"Respuesta incorporada; tarea {iid} elegible para el próximo paso."
+    if actual.get("impedimento_incorporacion"):
+        return f"Respuesta recibida para {qid}; la tarea sigue bloqueada ({actual['impedimento_incorporacion']})."
     return f"Respuesta recibida para {qid}; la tarea sigue bloqueada."
 
 

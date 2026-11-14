@@ -66,7 +66,7 @@ Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, 
 
 ### Orquestador (`/orquestar`)
 
-Si una tarea necesita una decisión sin valor por defecto seguro, `adevv orquestar --preguntar <ID> "<pregunta>" --contexto "<contexto>"` conserva su trabajo y deja continuar las independientes. Consulta `adevv orquestar --preguntas` y responde desde la máquina local con `adevv orquestar --responder <Q-ID> "<respuesta>"`, sin configurar Telegram. También puedes usar `/preguntas` y `/responder <Q-ID> <respuesta>` en Telegram: el motor incorpora la decisión entre pasos y retoma la tarea. `PENDIENTE: <qué falta>` o `INSUFICIENTE: <qué falta>` conserva el bloqueo; una parada manual impide el relanzamiento automático. La CLI admite un ID de tarea cuando identifica una sola pregunta pendiente y registra al operador como `local:<usuario SO>`, sin credenciales de Telegram ni servidor. Recepción en cola, incorporación y lanzamiento son resultados distintos; las dependencias y otras preguntas siguen limitando la reanudación.
+Si una tarea necesita una decisión sin valor por defecto seguro, `adevv orquestar --preguntar <ID> "<pregunta>" --contexto "<contexto>"` conserva su trabajo y deja continuar las independientes. Consulta `adevv orquestar --preguntas` y responde desde la máquina local con `adevv orquestar --responder <Q-ID> "<respuesta>"`, sin configurar Telegram. También puedes usar `/preguntas` y `/responder <Q-ID> <respuesta>` o `/desbloquear <Q-ID> <respuesta>` en Telegram: el motor incorpora la decisión entre pasos y retoma la tarea; si lo que existe es una espera de cuota o una intervención técnica sin pregunta humana, explica el motivo y conserva su estado. `PENDIENTE: <qué falta>` o `INSUFICIENTE: <qué falta>` conserva el bloqueo; una parada manual impide el relanzamiento automático. La CLI admite un ID de tarea cuando identifica una sola pregunta pendiente y registra al operador como `local:<usuario SO>`, sin credenciales de Telegram ni servidor. Recepción en cola, incorporación y lanzamiento son resultados distintos; las dependencias y otras preguntas siguen limitando la reanudación.
 
 Las cuotas con hora de recuperación se respetan; las respuestas sin hora y los errores de créditos permiten comprobar el trabajo pendiente al relanzar y cada 300 segundos (`cuota_reintento_s` en `orchestration.json`). `adevv orquestar --cuota-reset [arnés[/modelo]]` recupera las marcas seleccionadas, o todas sin selector, conservando el histórico. Un bucle esperando cuota lo detecta en un máximo de 30 segundos. `--estado` y `--agentes` muestran si la marca es real o supuesta y su origen; los créditos generan un aviso específico una vez por episodio.
 
@@ -88,7 +88,7 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 │   ├── task-add/          # Registro de tareas en backlog
 │   ├── bug-add/           # Registro de bugs en backlog
 │   ├── orquestar/         # Bucle autónomo de la idea al producto
-│   ├── telegram_gateway/  # Telegram: /estado, /tarea, /bug, /responder, /cerrar
+│   ├── telegram_gateway/  # Telegram: /estado, /tarea, /bug, /responder, /desbloquear, /cerrar
 │   ├── revisar-producto/  # Revisión funcional de una versión y propuestas de mejora
 │   └── ...
 ├── workflows/             # Proxies para slash commands (/task-dev, /bug-fix, etc.)
