@@ -4,12 +4,12 @@ title: "Visor gráfico: chat para gestionar los proyectos sin pasar por los arne
 type: funcional
 weight: 120
 dificultad: dificil
-version: "v1.3.0"
+version: "v1.4.0"
 status: planned
 depende_de: ["T-ADV-0027", "T-ADV-0026"]
-origen: "Petición del usuario: chat en el visor desde el que gestionar los proyectos sin hablar desde Claude, Codex o Gemini (v1.2)"
+origen: "Petición del usuario: chat en el visor desde el que gestionar los proyectos sin hablar desde Claude, Codex o Gemini (movido a v1.4 para dedicar v1.3 a adelgazar el motor)"
 created_at: 2026-10-26
-updated_at: 2026-11-11
+updated_at: 2026-11-14
 ---
 
 # T-ADV-0029: Visor gráfico: chat para gestionar los proyectos sin pasar por los arneses

@@ -4,10 +4,10 @@ title: "Obtener evidencia POSIX real para terminación de descendientes de arnes
 type: bug
 weight: 1001
 dificultad: sencilla
-version: "v1.3.0"
+version: "v1.4.0"
 status: planned
 created_at: 2026-11-11
-updated_at: 2026-11-11
+updated_at: 2026-11-14
 origen: "B-ADV-0032; docs/review/test_reviews/B-ADV-0032-test-review.md; RT-02"
 ---
 

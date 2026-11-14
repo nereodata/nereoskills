@@ -4,12 +4,12 @@ title: "Visor gráfico: registro de proyectos y estado de cada uno"
 type: funcional
 weight: 100
 dificultad: dificil
-version: "v1.3.0"
+version: "v1.4.0"
 status: planned
 depende_de: []
-origen: "Petición del usuario: visor gráfico del estado de los proyectos (v1.2)"
+origen: "Petición del usuario: visor gráfico del estado de los proyectos (movido a v1.4 para dedicar v1.3 a adelgazar el motor)"
 created_at: 2026-10-26
-updated_at: 2026-11-11
+updated_at: 2026-11-14
 ---
 
 # T-ADV-0027: Visor gráfico: registro de proyectos y estado de cada uno

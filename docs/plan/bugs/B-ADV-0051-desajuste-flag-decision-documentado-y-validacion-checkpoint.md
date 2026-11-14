@@ -4,9 +4,9 @@ title: "Desajuste entre la opción CLI --decision documentada en SKILL.md y el p
 type: bug
 weight: 1500
 dificultad: sencilla
-version: ""
-status: backlog
-origen: "T-ADV-0041; revisar-version v1.2 (docs/review/versions/v1.2-arquitectura.md), H-01 🟡"
+version: "v1.3.0"
+status: cancelled
+origen: "T-ADV-0041; absorbido por la reescritura minimalista del motor en v1.3 (T-ADV-0042)"
 created_at: 2026-11-14
 updated_at: 2026-11-14
 ---
