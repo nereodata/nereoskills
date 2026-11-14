@@ -1,7 +1,7 @@
 {
   "atenea": {
     "harness": "agy",
-    "model": "gemini-4-argon",
+    "model": "gemini-4-carbon",
     "effort": "medium",
     "reserva": [
       {
@@ -28,7 +28,7 @@
       },
       {
         "harness": "agy",
-        "model": "gemini-4-argon",
+        "model": "gemini-4-carbon",
         "effort": "medium"
       },
       {
@@ -67,7 +67,7 @@
           },
           {
             "harness": "agy",
-            "model": "gemini-4-argon",
+            "model": "gemini-4-carbon",
             "effort": "medium"
           },
           {
@@ -79,7 +79,7 @@
       },
       "dificil": {
         "harness": "agy",
-        "model": "gemini-4-argon",
+        "model": "gemini-4-carbon",
         "effort": "medium",
         "reserva": [
           {
@@ -104,7 +104,7 @@
   },
   "hades": {
     "harness": "agy",
-    "model": "gemini-4-argon",
+    "model": "gemini-4-carbon",
     "effort": "medium",
     "reserva": [
       {
@@ -126,7 +126,7 @@
         "reserva": [
           {
             "harness": "agy",
-            "model": "gemini-4-argon",
+            "model": "gemini-4-carbon",
             "effort": "medium"
           },
           {
@@ -138,7 +138,7 @@
       },
       "media": {
         "harness": "agy",
-        "model": "gemini-4-argon",
+        "model": "gemini-4-carbon",
         "effort": "medium",
         "reserva": [
           {
@@ -160,7 +160,7 @@
         "reserva": [
           {
             "harness": "agy",
-            "model": "gemini-4-argon",
+            "model": "gemini-4-carbon",
             "effort": "medium"
           },
           {

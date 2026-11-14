@@ -735,3 +735,54 @@ Característica: Continuidad con arneses ausentes
     Y se completan la recuperación y la confirmación de escritura de E3
     Entonces el registro activo contiene exactamente E1, E2 y E3, una vez cada uno y con su contenido original
     Y la copia de evidencia conserva los bytes FF 0A entre E1 y E2
+
+  @T-ADV-0035 @CA-M-1 @CA-M-4 @CA-M-5
+  Esquema del escenario: Aclarar una asignación incompleta antes de despacharla
+    Dado que en un paso de A el proveedor simulado entrega un conflicto entre dos criterios sin identificar responsable
+    Cuando el flujo solicita aclaración y el proveedor designa a <responsable> para <mandato> hasta <salida>
+    Entonces A queda asignada a <responsable> con ese mandato y esa condición
+    Y tanto la consulta --estado en CLI como /estado en Telegram identifican a <responsable> como destino de A y <paso> como su siguiente paso
+    Y al consultar --preguntas y /preguntas la cola humana está vacía en ambos canales
+    Ejemplos:
+      | responsable   | mandato                         | salida                          | paso        |
+      | especificador | reconciliar los dos criterios    | un escenario resuelve el choque | especificar |
+      | artemisa      | reproducir la divergencia en CLI | una prueba reproduce el fallo   | task-dev    |
+
+  @T-ADV-0035 @CA-M-2 @CA-M-4 @CA-M-5
+  Escenario: Conservar una decisión humana al recibir el mismo impedimento tras el reinicio
+    Dado que solo el usuario puede elegir entre los catálogos norte y sur para A y la cola humana está vacía
+    Cuando el proveedor simulado solicita la decisión «¿Qué catálogo debe usar A en producción, norte o sur?»
+    Entonces --estado y /estado muestran que A espera una decisión del usuario
+    Y --preguntas y /preguntas muestran esa única pregunta pendiente con el texto de la elección, la tarea A y la misma referencia
+    Cuando el usuario responde «catálogo norte» a esa referencia, el motor incorpora la respuesta y se reinicia
+    Y el proveedor vuelve a comunicar el mismo impedimento
+    Entonces --preguntas y /preguntas conservan una sola entrada con la referencia original y la respuesta incorporada «catálogo norte»
+    Y A continúa con esa respuesta, --estado y /estado ya no indican espera humana para A y se ha emitido un único aviso de pregunta
+
+  @T-ADV-0035 @CA-M-1 @CA-M-3 @CA-M-4 @CA-M-5 @CA-M-6
+  Esquema del escenario: Despachar trabajo independiente mientras A espera una condición verificable
+    Dado que A espera una revisión, B es independiente con capacidad disponible y C depende de A
+    Cuando el proveedor simulado o el agente comunica <impedimento> y se han considerado las vías autorizadas
+    Entonces A conserva <situacion> y la condición de salida <condicion> incluso al relanzar
+    Y --estado y /estado muestran A en <situacion> con su revisión pendiente y B como siguiente tarea ejecutable
+    Y --preguntas y /preguntas muestran la cola humana vacía
+    Y el motor ejecuta B mientras C sigue pendiente
+    Y repetir el diagnóstico de A con otras palabras mantiene su estado y su contador de avance
+    Cuando se acredita <condicion>
+    Entonces el motor retoma la revisión pendiente de A
+    Ejemplos:
+      | impedimento                            | situacion       | condicion                               |
+      | cuota agotada de todo perfil permitido | espera de cuota | capacidad recuperada del rol requerido  |
+      | servicio de pruebas externo caído      | espera técnica  | servicio de pruebas accesible           |
+      | falta todo ejecutable autorizado       | pausa motivada  | ejecutable autorizado disponible        |
+
+  @T-ADV-0035 @CA-M-1 @CA-M-3 @CA-M-4 @CA-M-6
+  Escenario: Continuar con B tras agotar las vías de revisión de A por suscripción deshabilitada
+    Dado que Hades tiene para A un principal Claude y una única reserva Claude de otro modelo, autorizada y elegible, sin perfil estricto
+    Y B es independiente con capacidad disponible y C depende de A
+    Cuando al solicitar la revisión de A el principal y después la reserva simulados devuelven código 1 y "Your organization has disabled Claude subscription access for Claude Code."
+    Entonces --estado y /estado muestran A en espera técnica con destino a la misma revisión de Hades y B como siguiente tarea ejecutable
+    Y --preguntas y /preguntas muestran la cola humana vacía y el motor ejecuta B mientras C sigue pendiente
+    Y al relanzar y repetirse la denegación con un sufijo explicativo A conserva la espera, el contador de avance y la condición de recuperar acceso de un perfil autorizado
+    Cuando la reserva recupera acceso y puede emitir el dictamen
+    Entonces se retoma la misma revisión de A y el paso recibe ese dictamen

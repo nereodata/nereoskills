@@ -28,4 +28,4 @@ En el mismo directorio que los ficheros de entrada:
 - **Pasos manuales** que requieren a una persona.
 - **Decisiones** (`DEC-xx`).
 
-Lo justo para que `/work-plan` cree las tareas y `/design` diseñe: sin tutoriales, sin versiones de paquetes (salvo incompatibilidad conocida) y sin comparar tipos genéricos de arquitectura.
+Lo justo para que `/work-plan` cree las tareas y el agente desarrollador las implemente sin sobreingeniería: sin tutoriales, sin versiones de paquetes (salvo incompatibilidad conocida) y sin comparar tipos genéricos de arquitectura.

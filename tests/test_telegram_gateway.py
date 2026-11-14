@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from tests import aislamiento_telegram
+from tests import aislamiento_telegram  # noqa: F401
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -104,6 +104,9 @@ class GatewayTests(unittest.TestCase):
                       encoding='utf-8')
         b2 = self.root / 'docs/plan/bugs/B-ADV-0002-bloqueado.md'
         b2.write_text('---\nid: B-ADV-0002\ntitle: "Bloqueado"\nversion: v0.1.0\nstatus: blocked\n---\n',
+                      encoding='utf-8')
+        tc = self.root / 'docs/plan/tasks/T-ADV-0003-cancelada.md'
+        tc.write_text('---\nid: T-ADV-0003\ntitle: "Cancelada"\nversion: v0.1.0\nstatus: cancelled\n---\n',
                       encoding='utf-8')
         with patch.object(motor, 'pid_vivo', return_value=True), \
                 patch.object(motor, 'git', return_value=''):

@@ -2,6 +2,20 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.2.0] - 2026-11-14
+
+### Añadido
+
+- **T-ADV-0038** — Comando `/desbloquear <Q-ID> <respuesta>` (`/unblock`) en el gateway de Telegram apoyado en la operación durable de `/responder`: comparte autorización, validación, persistencia e idempotencia, recupera la tarea en el planificador respetando dependencias y parada manual, y explica el motivo conservando el estado ante esperas de cuota o intervenciones técnicas sin pregunta humana.
+- **T-ADV-0041** — Flujo autónomo ligero activo por defecto (`PROJECT.md` o política base embebida) sin subfases ceremoniales ni revisiones a mitad de tarea: memoria de relevo portable (`--checkpoint`), presupuestos duros separados de cuota, enrutado y esperas locales por ítem (`DECISION_ITEM`), verificación determinista (`unittest` + `ruff`) y revisión independiente post-verde proporcional a superficies críticas.
+- **T-ADV-0039** — Cada llamada entrega su resultado con su objetivo, entradas, perfil y llamada padre. La ratificación de una revisión resuelve su espera anterior y permite continuar tras un rechazo de otro alcance. La cuota del proveedor conserva su recuperación.
+
+### Corregido
+
+- **B-ADV-0031** — Unificado el circuito de evidencias e identidad compuesta del árbol entre `orquestar.py`, `chequeos.py` y `release_tools.py` para reutilizar verificaciones vigentes en árbol principal y worktrees aislados.
+- **B-ADV-0049** — La conversación libre de Telegram consulta en modo estricto de solo lectura los ficheros del proyecto en `claude`, `codex` y `agy` (citando rutas reales y releyendo cambios en disco en turnos posteriores), deniega escrituras, borrados, ejecución de comandos, control de procesos y lectura de `.env*`/`.git`, limpia `CODEX_WINDOWS_REGISTERED_CORE` en Windows y conmuta a reservas ante suscripción deshabilitada o respuesta vacía sin inventar datos.
+- **B-ADV-0050** — Protegidas las consultas Git en entornos aislados sin `git` en `PATH` y corregido el redondeo entero por exceso (`math.ceil`) en esperas de cuota.
+
 ## [1.1.4] - 2026-11-12
 
 ### Corregido

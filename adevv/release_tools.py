@@ -23,6 +23,7 @@ except ImportError:
 
 class ReleaseValidationError(ValueError):
     """Error de validacion antes de publicar una version."""
+
     pass
 
 
@@ -77,6 +78,7 @@ def _get_origin_url(repo_dir: Path, explicit_origin: str | None = None) -> str:
 def obtener_versiones_publicadas(origin_url: str) -> List[str]:
     """Consulta las versiones publicadas (etiquetas anotadas vX.Y.Z) en el origen remoto."""
     from adevv.updater import consultar_versiones_publicadas
+
     versiones, _, _ = consultar_versiones_publicadas(origin_url=origin_url)
     return versiones
 
@@ -102,8 +104,17 @@ def _configuracion(repo_dir: Path, cfg: dict | None = None) -> dict:
 def _ejecutar(root, args, shell=False, timeout=120):
     """Ejecuta una operación no interactiva y acotada con errores visibles."""
     env = {**_get_git_env(), "GIT_MERGE_AUTOEDIT": "no"}
-    result = subprocess.run(args, cwd=root, env=env, shell=shell, capture_output=True,
-                            text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    result = subprocess.run(
+        args,
+        cwd=root,
+        env=env,
+        shell=shell,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
     if result.returncode:
         raise RuntimeError((result.stdout + result.stderr).strip() or f"Error: {args}")
     return result.stdout.strip()
@@ -114,8 +125,9 @@ def _git(root, *args):
     return _ejecutar(root, ["git", *args])
 
 
-def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None = None,
-                        *, cfg: dict | None = None) -> Tuple[bool, str]:
+def validar_publicacion(
+    repo_dir: Path, target_tag: str, origin_url: str | None = None, *, cfg: dict | None = None
+) -> Tuple[bool, str]:
     """Valida versiones, manifiestos, changelog y etiquetas antes de publicar."""
     repo_dir = Path(repo_dir).resolve()
     config = _configuracion(repo_dir, cfg)
@@ -125,9 +137,7 @@ def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None 
     if (repo_dir / "pyproject.toml").exists() or not config:
         pkg_ver = _read_package_version(repo_dir)
         if pkg_ver != norm_target:
-            raise ReleaseValidationError(
-                f"La versión del paquete ({pkg_ver}) no coincide con {target_tag}."
-            )
+            raise ReleaseValidationError(f"La versión del paquete ({pkg_ver}) no coincide con {target_tag}.")
     declared = str((config.get("project") or {}).get("version", "")).lstrip("vV")
     if config and declared != norm_target:
         raise ReleaseValidationError("Versión desalineada del manifiesto task_config.yaml.")
@@ -143,9 +153,7 @@ def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None 
         raise ReleaseValidationError(f"No se pudieron consultar etiquetas remotas: {error}") from error
     refs = [line.split()[-1] for line in remote_tags.splitlines() if line.strip()]
     if f"refs/tags/{target_tag}" in refs or f"refs/tags/{target_tag}^{{}}" in refs:
-        raise ReleaseValidationError(
-            f"{target_tag} ya está publicada: publica {_compute_next_patch(target_tag)}."
-        )
+        raise ReleaseValidationError(f"{target_tag} ya está publicada: publica {_compute_next_patch(target_tag)}.")
     if _git(repo_dir, "tag", "--list", target_tag):
         raise ReleaseValidationError("La etiqueta local ya existe.")
     if (repo_dir / "task_config.yaml").exists():
@@ -156,8 +164,7 @@ def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None 
             raise ReleaseValidationError(f"Versión desalineada del manifiesto: {error}") from error
     changelog = repo_dir / "CHANGELOG.md"
     if not changelog.exists() or not re.search(
-        r"^##\s+\[?v?" + re.escape(norm_target) + r"\]?(?:\s|$)",
-        changelog.read_text(encoding="utf-8"), re.MULTILINE
+        r"^##\s+\[?v?" + re.escape(norm_target) + r"\]?(?:\s|$)", changelog.read_text(encoding="utf-8"), re.MULTILINE
     ):
         raise ReleaseValidationError("Falta el changelog de la versión.")
     return True, "OK"
@@ -165,15 +172,24 @@ def validar_publicacion(repo_dir: Path, target_tag: str, origin_url: str | None 
 
 def _chequeos():
     """Carga el coordinador compartido de chequeos de calidad y release."""
-    ruta = Path(__file__).resolve().parents[1] / "skills" / "orquestar" / "chequeos.py"
-    spec = importlib.util.spec_from_file_location("adevv_chequeos_release", ruta)
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    return modulo
+    try:
+        from skills.orquestar import chequeos as mod
+
+        return mod
+    except ImportError:
+        if "adevv_chequeos_release" in sys.modules:
+            return sys.modules["adevv_chequeos_release"]
+        ruta = Path(__file__).resolve().parents[1] / "skills" / "orquestar" / "chequeos.py"
+        spec = importlib.util.spec_from_file_location("adevv_chequeos_release", ruta)
+        modulo = importlib.util.module_from_spec(spec)
+        sys.modules["adevv_chequeos_release"] = modulo
+        spec.loader.exec_module(modulo)
+        return modulo
 
 
-def publicar_version(repo_dir: Path, target_tag: str, origin_url: str | None = None,
-                     *, rama: str | None = None, cfg: dict | None = None) -> None:
+def publicar_version(
+    repo_dir: Path, target_tag: str, origin_url: str | None = None, *, rama: str | None = None, cfg: dict | None = None
+) -> None:
     """Prepara en aislamiento y publica main y etiqueta en una transacción atómica."""
     root = Path(repo_dir).resolve()
     config = _configuracion(root, cfg)
@@ -211,8 +227,14 @@ def publicar_version(repo_dir: Path, target_tag: str, origin_url: str | None = N
             _git(worktree, "tag", "-a", target_tag, "-m", f"Release {target_tag}")
             created_tag = True
             commit = _git(worktree, "rev-parse", "HEAD")
-            _git(worktree, "push", "--atomic", remote, f"{commit}:refs/heads/main",
-                 f"refs/tags/{target_tag}:refs/tags/{target_tag}")
+            _git(
+                worktree,
+                "push",
+                "--atomic",
+                remote,
+                f"{commit}:refs/heads/main",
+                f"refs/tags/{target_tag}:refs/tags/{target_tag}",
+            )
             published = True
         finally:
             if worktree.exists():

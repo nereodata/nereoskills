@@ -13,6 +13,8 @@ inputs:
 
 ## ▶️ Dos usos
 
+Al solicitar una revisión con `--agente hades`, indica `--revision spec`, `--revision test` o `--revision code`. Conserva ese objetivo al ratificar una entrega. El resultado identifica sus entradas y su llamada padre y persiste dentro del directorio Git. Una ratificación recibida resuelve la espera de la misma revisión y permite continuar después de un rechazo. El registro de cuota del proveedor sigue rigiendo futuras llamadas. Los historiales con alcance insuficiente se muestran como correlación desconocida.
+
 **Te invoca el bucle** (el prompt indica un paso): ejecuta solo ese paso según el modo orquestado y termina.
 
 **Te invoca una persona** (sin paso): no ejecutes pasos tú. El bucle (`orquestar.py`, junto a esta skill) es quien deduce el estado del disco y continúa desde donde toque. Desde la raíz del proyecto:
@@ -99,7 +101,7 @@ Pendiente = sin `completed`, `cancelled` ni `blocked`. Se deduce solo de artefac
 | Tarea o bug pendiente con `perfil` inválido | PARAR: perfil inválido (lo corrige una persona) |
 | `depende_de` con IDs inexistentes, ciclos o versiones posteriores | paso `calcular-dependencias` con los errores en el prompt; si tras `--reintentos` siguen los mismos, PARAR: dependencias inválidas |
 | Rama `release/vX.Y` recién abierta (ninguna tarea empezada), con deuda registrada pendiente y sin `docs/review/versions/vX.Y-deuda.md` | paso `revisar-deuda` |
-| Rama `release/vX.Y` con un ID `completed` sin reporte en `docs/review/code_reviews/` | paso `revisar-tarea` |
+| Rama `release/vX.Y` con un ID `completed` que toca `critical_paths` sin aprobación vigente en `docs/review/code_reviews/` (o con informe inválido/rechazado) | paso `revisar-tarea` |
 | Rama `release/vX.Y` con un ID `blocked` y `pendiente_de: especificador` | paso `especificar` (primero el que más tareas retiene) |
 | Rama `release/vX.Y` con pendientes elegibles (todas sus `depende_de` completadas) | paso `task-dev` / `bug-fix`: el ID en curso, si no el que más tareas desbloquea, y a igualdad el de menor `weight` |
 | Rama `release/vX.Y` sin elegibles ni `docs/review/versions/vX.Y-arquitectura.md` | paso `revisar-version` |
@@ -159,6 +161,10 @@ Si ningún perfil permitido puede revisar, conserva el trabajo y la revisión pe
 
 ## ⚙️ Modo orquestado
 
+### Política autónoma, relevo y puertas en el motor
+
+La política de `PROJECT.md` (o la política base embebida si el proyecto no tiene archivo propio) rige el desarrollo autónomo: las skills definen solo el resultado exigible y el motor aplica en Python los guardarraíles mecánicos. Al cerrar una tarea o bug, el motor verifica determinísticamente la puerta de formato/lint del delta (reabriendo el ítem con el error exacto si falla) y decide según `git diff` si toca superficies críticas (`critical_paths`): solo en ese caso dispara `revisar-tarea` con Hades post-verde, sin exigir archivos `N/A` cuando el cambio queda fuera de superficies críticas. El motor separa presupuestos duros de intentos reales de las esperas de cuota, expone relevo portable mediante `adevv orquestar --checkpoint <ID> --resumen "<estado>" [--siguiente "<qué falta>"]` y admite enrutados o esperas locales por ítem mediante `adevv orquestar --decision <ID> "<json>"` (`DECISION_ITEM {...}`).
+
 ### Intervenciones humanas durante una tarea
 
 Si falta una decisión o recurso sin valor por defecto seguro, ejecuta `adevv orquestar --preguntar <ID> "<pregunta concreta>" --contexto "<contexto>"` y termina el paso. El motor conserva el delta en `wip/<ID>`, registra el bloqueo local y avisa una vez por el evento `respuesta`, con referencia `Q-<PREFIJO>-NNNN`. Continúa las tareas independientes; las dependientes esperan. Los bloqueos globales de requisitos o plataforma conservan su parada global.
@@ -194,7 +200,7 @@ Si el propio bloqueo aún no pudo persistirse por cambios ajenos, se informa de 
 | `revisar-deuda` | Repasa la deuda registrada frente al código actual y a las tareas de vX.Y | **incluir** la que afecta a lo que toca esta versión (mismos módulos o una tarea citada en `origen`): `version: vX.Y.0`, `status: planned` y peso que la ordena antes de las tareas a las que afecta; **cancelar** con motivo la ya resuelta o irrelevante; **dejar** el resto como mejora futura. La deuda no relacionada con la versión no se incluye: la decide el humano | existe `vX.Y-deuda.md` con las tres listas |
 | `task-dev` | `/task-dev <ID>` en modo orquestado | — | tarea `completed` y commit |
 | `bug-fix` | `/bug-fix <ID>` en modo orquestado | — | bug `completed` y commit |
-| `revisar-tarea` | Hades `/review-code` sobre los commits del ID; corrige y repite (regla 5) | sin cambios de código: reporte `N/A` | existe el reporte, o `blocked` |
+| `revisar-tarea` | Hades `/review-code` sobre los commits del ID cuando el cambio toca `critical_paths` (o tiene informe pendiente/rechazado); corrige y repite (regla 5) | cambios fuera de `critical_paths` no exigen archivo `N/A` | aprobación vigente, exención verificada por el motor, o `blocked` |
 | `especificar` | Eres el especificador, no el desarrollador ni Hades: resuelve los hallazgos que Hades dejó al especificador (en la revisión de versión) ajustando el requisito, los escenarios o la `DEC` que fallan | si lo que falta es un recurso externo, `pendiente_de: humano` con la pregunta concreta (qué hace falta y por qué) | el ID en `planned` sin `pendiente_de`, o con `pendiente_de: humano` |
 | `revisar-version` | Hades `/review-code` sobre `git diff main...release/vX.Y`, solo lo transversal: duplicados entre tareas, patrones incoherentes y capas mezcladas. Si el plan de plataforma cambió en la versión, además Hades `/review-design` sobre esas `DEC` | 🔴/🟠 → `/bug-add` en vX.Y; 🟡/🔵 → su destino (`registrar` → deuda registrada) | existe `vX.Y-arquitectura.md` |
 | `revisar-producto` | `/revisar-producto` sobre vX.Y | defectos frente a lo acordado → `/bug-add` en vX.Y | existe `vX.Y-producto.md` con `**Decisión:** PENDIENTE` |

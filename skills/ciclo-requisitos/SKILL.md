@@ -1,27 +1,27 @@
 ---
 name: ciclo-requisitos
-description: Define los requisitos completos de una app o ampliación grande con un ciclo autónomo (encuadre, ideación, spec EARS+Gherkin, críticos independientes, juez y simulacro). Sustituye a /req-analysis en alcances grandes; su salida alimenta /platform-plan.
+description: Define los requisitos completos de una app o ampliación grande con un ciclo autónomo (encuadre, ideación, spec EARS+escenarios, críticos independientes, juez y simulacro). Su salida alimenta /platform-plan.
 inputs:
   - requirements: requirements.md, descripción o material del usuario
   - nombre: (Opcional) nombre de la ampliación si el producto ya existe
 outputs:
   - requirements.md: especificación funcional refinada (entrada de /platform-plan y /work-plan)
-  - req_analysis.md: estado, supuestos, preguntas y decisiones (formato /req-analysis)
+  - req_analysis.md: estado, supuestos, preguntas y decisiones
 ---
 
 # Skill: Ciclo de Requisitos (/ciclo-requisitos)
 
 **Objetivo:** Una especificación funcional que un agente pueda implementar sin preguntar, validada por agentes independientes que critican, añaden, juzgan y simulan la implementación.
 
-**Cuándo:** App nueva o ampliación con varias funcionalidades. Para un cambio acotado basta `/req-analysis`, o `/task-add` → `/task-dev`.
+**Cuándo:** App nueva o ampliación con varias funcionalidades. Para un cambio acotado basta `/task-add` → `/task-dev`.
 
-**Encaje:** Ocupa el lugar de `/req-analysis` en la cadena:
+**Encaje:** Primer eslabón de definición funcional:
 
 ```
 /ciclo-requisitos → /platform-plan → /work-plan → /task-dev
 ```
 
-Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen las skills siguientes) y **no** escribe `.feature`: los crea `/task-dev` cuando desarrolla las tareas cuyos `CA-*` referencian (regla de `/generate-bdd`).
+Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen las skills siguientes) y **no** escribe pruebas ni archivos `.feature` del código fuente.
 
 **Coste:** ~8 subagentes en el caso típico, 11 como máximo.
 
@@ -34,7 +34,7 @@ Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen l
 5. **Defectos primero.** Los defectos detectados en lo ya escrito van a la primera ola, no se aplazan con las mejoras.
 6. **Nada numérico sin comprobar.** Cada tabla de ejemplos y cada escenario con números se recalcula (a mano o con script) contra los requisitos que etiqueta.
 7. **Supuestos visibles.** Todo lo decidido sin el usuario va a `req_analysis.md` con su motivo y valor por defecto.
-8. **Solo requisitos funcionales** (regla crítica de `/req-analysis`). Restricciones técnicas, NFR, cumplimiento normativo o dependencias externas se anotan en `requirements.md §Entradas para /platform-plan`, sin cuantificar ni decidir.
+8. **Solo requisitos funcionales.** Restricciones técnicas, NFR, cumplimiento normativo o dependencias externas se anotan en `requirements.md §Entradas para /platform-plan`, sin cuantificar ni decidir.
 9. **Documentación mínima suficiente.** Cada documento contiene lo justo para que la siguiente fase trabaje sin preguntar. Un requisito solo existe si cambia un comportamiento observable o un límite; los escenarios cubren el camino feliz, los errores y los límites relevantes, sin combinatoria. El nivel de detalle lo marca el tamaño del producto.
 10. **Entrega honesta.** Di qué no se verificó, qué quedó abierto y qué capacidad pedida no tiene entrega garantizada.
 
@@ -44,7 +44,7 @@ Por eso **no** decide tecnología, arquitectura, planes ni versiones (lo hacen l
 <dir>/                        directorio del requirements.md de entrada; en ampliaciones, <dir>/<nombre>/
   requirements.md             EMPIEZA AQUÍ
   funcionalidades/F-xx_*.md   detalle por funcionalidad
-  req_analysis.md             formato /req-analysis
+  req_analysis.md             estado (**Estado:** ASUNCIONES_REALIZADAS | REQUIERE_ACLARACION), supuestos y preguntas
   ciclo/                      trabajo del ciclo (las skills siguientes no lo necesitan)
     alcance.md                ideas, candidatas, defectos D1..Dn, puntuación, selección, cobertura
     revision.md               hallazgos por ronda + decisión (Aceptado/Parcial/Rechazado + motivo) + veredictos
@@ -132,7 +132,7 @@ Escenario: …
 - **Sin ambigüedad:** nada de "rápido", sino "≤ 500 ms con el dataset de referencia". Valores por defecto, límites y unidades explícitos.
 - **Errores tipados. Privacidad por defecto:** opt-in, datos mínimos, nada sensible sale sin declararlo.
 - **Olas posteriores:** lo que dependa de una ola posterior es opcional; si la señal no existe, se omite sin error.
-- **Gherkin** según los estándares de `/generate-bdd` (español, Dado/Cuando/Entonces), más `@olaB` y `@condicionado` si aplica. Tablas de ejemplos para reglas y fórmulas; cada escenario con todas sus precondiciones para que el resultado sea único.
+- **Escenarios Gherkin** en español (`Dado`/`Cuando`/`Entonces`), más `@olaB` y `@condicionado` si aplica. Tablas de ejemplos para reglas y fórmulas; cada escenario con todas sus precondiciones para que el resultado sea único.
 - **Ampliaciones:** cada escenario describe un delta real. Si contradice un escenario o decisión existente, no lo resuelvas: señálalo con `archivo:línea` como PQ.
 
 **6. Revisión.** En paralelo, 2 críticos y el simulacro. Críticos: alcance, simplicidad y valor (realismo, solapamientos; más UX de primer uso, jerga y estados vacíos si el usuario objetivo no es técnico) · privacidad, seguridad y confianza (proporcionada al usuario). El simulacro cubre consistencia e implementabilidad. Integra aplicando la regla 4 y registra cada hallazgo en `ciclo/revision.md`. Las preguntas del simulacro de impacto alto se resuelven en la spec; el resto va a `req_analysis.md`.
