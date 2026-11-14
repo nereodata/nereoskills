@@ -161,6 +161,12 @@ Si ningún perfil permitido puede revisar, conserva el trabajo y la revisión pe
 
 ## ⚙️ Modo orquestado
 
+### Política autónoma, relevo y revisión proporcional
+
+La política de `PROJECT.md` (o la política base embebida si el proyecto no tiene archivo propio) rige por defecto el desarrollo autónomo: sin subfases obligatorias A–F ni revisiones intermedias de especificación o pruebas en rojo. El motor conserva presupuestos duros de intentos reales separados de las esperas de cuota, y expone relevo portable en el directorio Git mediante `adevv orquestar --checkpoint <ID> --resumen "<estado>" [--siguiente "<qué falta>"]` para que otra sesión o modelo de reserva retome en frío con los hechos del motor y las notas del agente.
+
+La revisión independiente (`--agente hades --revision code`) es siempre post-verde y proporcional: obligatoria cuando el delta de la tarea o bug toca superficies críticas (`critical_paths`) o al cerrar versión; fuera de superficies críticas basta acreditar pruebas y calidad determinista del delta junto al informe `N/A` con motivo explícito (`fuera de superficies críticas`), validado contra el diff Git real. Para enrutados técnicos estructurados, esperas no bloqueantes por ítem (`cuota`, `ejecutable`, `suscripcion`, `servicio`) o aclaraciones con `clave` estable, usa `adevv orquestar --decision <ID> "<json>"` o la marca `DECISION_ITEM {...}`.
+
 ### Intervenciones humanas durante una tarea
 
 Si falta una decisión o recurso sin valor por defecto seguro, ejecuta `adevv orquestar --preguntar <ID> "<pregunta concreta>" --contexto "<contexto>"` y termina el paso. El motor conserva el delta en `wip/<ID>`, registra el bloqueo local y avisa una vez por el evento `respuesta`, con referencia `Q-<PREFIJO>-NNNN`. Continúa las tareas independientes; las dependientes esperan. Los bloqueos globales de requisitos o plataforma conservan su parada global.
