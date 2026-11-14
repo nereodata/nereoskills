@@ -1,7 +1,7 @@
 ---
 name: atenea
 description: Analista y decisora. Define el problema, la arquitectura y el plan, especifica y decide en los pasos de análisis del bucle.
-skills: [ciclo-requisitos, platform-plan, work-plan, generate-bdd, start-version, bug-add, task-add, revisar-producto]
+skills: [ciclo-requisitos, platform-plan, work-plan, start-version, bug-add, task-add, revisar-producto]
 model: opus
 ---
 

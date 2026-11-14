@@ -8,15 +8,10 @@ description: Proxy para el workflow /task-dev
 
 # /task-dev [TAREA_ID]
 
-Ejecuta solo los pasos definidos en `skills/task-dev/SKILL.md`:
+Lee y sigue `skills/task-dev/SKILL.md`:
 
-1. **Init**: Valida rama, carga metadatos, status → `in_progress`.
-2. **Triaje**: Checklist de subfases (`[EXEC]`/`[SKIP]`).
-3. **Fase A-F**: Según triaje.
-   - **A (BDD)**: `generate-bdd` → Hades `/review-spec` (solo lo añadido o modificado).
-   - **B (Diseño)**: `/design` (sin revisión; la conformidad la mira `/review-code`).
-   - **C (Dev)**: Red (tests) → lint/tipado → Hades `/review-test` → Green (code) → lint/tipado.
-   - **D (QA)**: Hades `/review-code` → HITL.
-   - **E (Docs)**: `/manage-docs`.
-   - **F (Cierre)**: deuda (resolver/registrar/descartar) → status `completed` → `/commit`.
+1. **Preparación**: Valida rama (`release/vX.Y` o `hotfix/vX.Y.Z`), `status: in_progress`, registra `base_calidad` y retoma WIP/contexto previo si existe (*delta-first*, sin subfases A–F ni Gherkin obligatorio).
+2. **Implementación y verificación directa**: Código cohesivo + pruebas directas (`unittest`), `--verificar` sobre las pruebas afectadas y `adevv orquestar --calidad --base <base_calidad> --aplicar`.
+3. **Revisión post-verde proporcional**: Hades (`--agente hades --revision code`) solo si toca superficies críticas; informe `N/A` verificable si queda fuera.
+4. **Cierre**: Deuda 🟡/🔵, calidad limpia sin escritura, `status: completed` y `/commit`.
 

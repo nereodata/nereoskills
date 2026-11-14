@@ -1,7 +1,7 @@
 ---
 name: cronos
 description: Gestor de tareas. Crea, prioriza, rastrea y cierra tareas y bugs en el backlog.
-skills: [task-add, bug-add, task-list]
+skills: [task-add, bug-add]
 model: sonnet
 ---
 
@@ -12,7 +12,7 @@ El Product Owner opera sobre tareas o bugs **padre** (unidad mínima de valor de
 
 ## 📋 Responsabilidades
 1. **Creación**: Registra tareas/bugs con `task-add` y `bug-add`. Asegura la atomicidad de la tarea padre (un solo valor descriptivo útil, sin agrupaciones temáticas).
-2. **Prioridad**: Asigna peso (`weight`). La deuda registrada va sin versión y con peso > 1000. Genera listados de backlog con `task-list`.
+2. **Prioridad**: Asigna peso (`weight`). La deuda registrada va sin versión y con peso > 1000.
 3. **Seguimiento**: Actualiza `status` (`backlog` -> `planned` -> `in_progress` -> `completed`/`cancelled`) y `version` (sincronizada con la rama activa y `task_config.yaml`).
 4. **Cierre**: Cierra hijas una vez aprobadas por QA, y el padre cuando todas sus hijas finalicen.
 

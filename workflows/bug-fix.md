@@ -8,16 +8,10 @@ description: Proxy para el workflow /bug-fix
 
 # /bug-fix [BUG_ID]
 
-Ejecuta solo los pasos definidos en `skills/bug-fix/SKILL.md`:
+Lee y sigue `skills/bug-fix/SKILL.md`:
 
-1. **Urgencia**: Hotfix (`hotfix/vX.Y.(Z+1)` from latest tag) o Release (`release/vX.Y`).
-2. **Init**: Carga metadatos, status → `in_progress`.
-3. **Triaje**: Checklist de subfases (`[EXEC]`/`[SKIP]`).
-4. **Fase A-F**: Según triaje.
-   - **A (Reproduc.)**: `generate-bdd` (si destapa requisito) → Hades `/review-spec`.
-   - **B (Diseño)**: `/design` (sin revisión; la conformidad la mira `/review-code`).
-   - **C (Fix)**: Red (tests que fallan) → lint/tipado → Hades `/review-test` → Fix (corrección) → lint/tipado.
-   - **D (QA)**: Hades `/review-code` → HITL.
-   - **E (Docs)**: `/manage-docs`.
-   - **F (Cierre)**: deuda (resolver/registrar/descartar) → status `completed` → `/commit fix([ID])`.
+1. **Preparación y diagnóstico**: Rama `hotfix/vX.Y.Z` o `release/vX.Y`, `status: in_progress`, conserva `base_calidad` y localiza la causa raíz sin subfases ceremoniales.
+2. **Prueba discriminante y corrección**: Prueba directa (`unittest`) que discrimine el fallo + corrección limpia, `--verificar` y `adevv orquestar --calidad --base <base_calidad> --aplicar`.
+3. **Revisión post-verde proporcional**: Hades (`--agente hades --revision code`) si toca superficies críticas; `N/A` verificable si queda fuera.
+4. **Cierre**: Deuda 🟡/🔵, calidad limpia sin escritura, `status: completed` y `/commit`.
 

@@ -1,6 +1,6 @@
 ---
 name: review-design
-description: Revisión de la arquitectura (plan de plataforma y sus decisiones) frente a los requisitos; nunca mira código ni diseños de tarea
+description: Revisión de la arquitectura (plan de plataforma y sus decisiones) frente a los requisitos; nunca mira código
 inputs:
   - design_file: Plan de plataforma, o su delta (decisiones de arquitectura nuevas o cambiadas)
 outputs:
@@ -10,7 +10,7 @@ outputs:
 
 # Skill: Review Design (/review-design)
 
-Audita solo la arquitectura: `platform_plan.md` y sus decisiones (`DEC-xx`), frente a los requisitos. Nunca mira el código ni los diseños de tarea (`docs/design/[ID]-design.md`): que el código sea correcto y siga el diseño y la arquitectura lo revisa `/review-code`. Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
+Audita solo la arquitectura: `platform_plan.md` y sus decisiones (`DEC-xx`), frente a los requisitos. Nunca mira el código: que la implementación y sus pruebas sean correctas y respeten la arquitectura lo revisa `/review-code`. Haz la revisión más sencilla y rápida que dé una seguridad razonable de que no se escapa ningún problema 🔴 o 🟠; los 🟡/🔵 se señalan si se ven, sin buscarlos a fondo. Calidad, no perfección.
 
 Sobre un delta (decisiones nuevas o cambiadas), juzga solo ese delta y su encaje con el resto del plan.
 

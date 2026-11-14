@@ -39,40 +39,29 @@ adevv --version
 
 | Agente | Rol | Modelo | Skills que usa | Uso en `task-dev`/`bug-fix` |
 |--------|-----|--------|---------------|------------------------------|
-| **Atenea** | Analista — Define, diseña la arquitectura, planifica y decide | Opus | ciclo-requisitos, platform-plan, work-plan, generate-bdd | Pasos de análisis de `/orquestar` |
-| **Artemisa** | Desarrolladora — Implementa hasta que los tests pasan | Configurable | task-dev, bug-fix | Pasos `task-dev`/`bug-fix` de `/orquestar` |
-| **Hades** | QA — Juez de calidad objetivo e imparcial | Opus | review-spec, review-design, review-test, review-code | **Delegado (aislado)** |
-| **Cronos** | Gestor de tareas — Controla el ciclo de vida del backlog | Sonnet | task-add, bug-add, task-list | Manual (init/cierre van inline) |
-| **Clío** | Documentalista — Registra cambios, documentación y commits | Sonnet | manage-docs, commit | Manual (docs/commit van inline) |
+| **Atenea** | Analista — Define, diseña la arquitectura, planifica y decide | Opus / Argon | ciclo-requisitos, platform-plan, work-plan, start-version, revisar-producto | Pasos de análisis de `/orquestar` |
+| **Artemisa** | Desarrolladora — Implementa con autonomía hasta dejar cheques y tests en verde | Configurable | task-dev, bug-fix | Pasos `task-dev`/`bug-fix` de `/orquestar` |
+| **Hades** | QA — Juez independiente post-verde y de arquitectura | Opus / Argon | review-design, review-code | **Delegado (aislado)** |
+| **Cronos** | Gestor de tareas — Controla el ciclo de vida del backlog | Flash / Sonnet | task-add, bug-add | Manual / altas |
+| **Clío** | Documentalista — Registra cambios, documentación y commits | Flash / Sonnet | manage-docs, commit | Manual / árbol sucio |
 
 ### Quién revisa qué
 
 | Revisión | Cuándo | Mira |
 |---|---|---|
-| `review-spec` | Cada tarea | Escenarios y evals que la tarea añade o modifica |
-| `review-design` | Plan de plataforma y revisión de versión | Arquitectura y sus decisiones; nunca código |
-| `review-test` | Cada tarea, tras el rojo | Cobertura, aserciones, rojo correcto y estabilidad |
-| `review-code` | Cada tarea, tras el verde | Corrección, seguridad, calidad y conformidad con el diseño y la arquitectura |
+| `review-design` | Plan de plataforma y cambios arquitectónicos | Arquitectura y decisiones (`DEC-xx`); nunca código |
+| `review-code` | Post-verde en superficies críticas o cierre de versión | Revisión conjunta de código + pruebas, seguridad y conformidad |
 | `revisar-producto` | Al cerrar versión (opcional) o a mano | El producto en uso: utilidad, diseño y usabilidad; propone mejoras con destino y el usuario decide |
 
 Cada 🟡/🔵 lleva un destino: `resolver` (ahora), `registrar` (bug de deuda, fuera de versión) o `descartar`. Cada 🔴/🟠 lleva quién lo resuelve: `desarrollador`, `especificador` o `humano` (solo recursos externos); el orquestador se lo envía y el resto del trabajo sigue.
 
-### Flujo de Desarrollo Canónico (`task-dev` / `bug-fix`)
+### Flujo de Desarrollo Autónomo (`task-dev` / `bug-fix`)
 
 ```
-📋 Init          → inline:   delta-first, status, versión
-📝 Especificación → inline:   BDD del delta (generate-bdd)
-🔎 review-spec   → Hades:    audita lo añadido o modificado (aislado)
-                 ↓ [HITL: validación de especificación]
-📐 Diseño        → inline:   diseño de la solución (design), sin revisión
-🔴 Red           → inline:   tests que fallan + lint/tipado limpios
-🔎 review-test   → Hades:    audita calidad de tests (aislado)
-🟢 Green/Fix     → inline:   implementación mínima + verificación del triaje + lint/tipado
-                 ↓ [HITL: validación funcional]
-🔎 review-code   → Hades:    audita código y conformidad (aislado)
-📄 Docs          → inline:   manage-docs
-✅ Cierre        → inline:   deuda (resolver/registrar/descartar), cierre de tareas
-💾 Commit        → inline:   commit semántico
+📋 Preparación   → inline:   delta-first, base_calidad, retoma WIP/checkpoint si existe
+🟢 Entrega       → inline:   implementación + pruebas directas (unittest) + --verificar + --calidad (ruff)
+🔎 review-code   → Hades:    auditoría post-verde proporcional (superficies críticas; N/A verificable fuera)
+📄 Docs & Cierre → inline:   manage-docs (si aplica), deuda 🟡/🔵, completed y commit semántico
 ```
 
 ### Orquestador (`/orquestar`)
@@ -89,21 +78,17 @@ Lleva un producto de la idea a su última versión sin parar: requisitos → pla
 
 ```
 ├── agents/                # Agentes (Atenea, Artemisa, Hades, Cronos, Clio)
-├── skills/                # Skills (conocimiento puro — qué hacer)
-│   ├── task-dev/          # Flujo de desarrollo de tareas
-│   ├── bug-fix/           # Flujo de resolución de bugs
-│   ├── design/            # Diseño técnico de la solución
+├── skills/                # Skills ligeras orientadas a guardarraíles
+│   ├── task-dev/          # Ejecución autónoma de tareas
+│   ├── bug-fix/           # Resolución autónoma de bugs
 │   ├── review-design/     # Auditoría de arquitectura
-│   ├── generate-bdd/      # Generación de BDD en español
-│   ├── review-spec/       # Auditoría de BDD + evals
-│   ├── review-test/       # Auditoría de calidad de tests
-│   ├── review-code/       # Auditoría de calidad de código
+│   ├── review-code/       # Auditoría conjunta post-verde (código + pruebas)
 │   ├── manage-docs/       # Documentación minimalista y CHANGELOG
 │   ├── commit/            # Commits semánticos
 │   ├── task-add/          # Registro de tareas en backlog
 │   ├── bug-add/           # Registro de bugs en backlog
-│   ├── orquestar/         # Bucle de la idea al producto
-│   ├── telegram_gateway/  # Telegram: /estado, /tarea y /bug mientras el bucle trabaja
+│   ├── orquestar/         # Bucle autónomo de la idea al producto
+│   ├── telegram_gateway/  # Telegram: /estado, /tarea, /bug, /responder, /cerrar
 │   ├── revisar-producto/  # Revisión funcional de una versión y propuestas de mejora
 │   └── ...
 ├── workflows/             # Proxies para slash commands (/task-dev, /bug-fix, etc.)
