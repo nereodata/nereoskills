@@ -5,7 +5,7 @@ type: funcional
 weight: 180
 version: "v1.2.0"
 status: planned
-dificultad: media
+dificultad: dificil
 depende_de: ["T-ADV-0041"]
 created_at: 2026-11-11
 updated_at: 2026-11-12

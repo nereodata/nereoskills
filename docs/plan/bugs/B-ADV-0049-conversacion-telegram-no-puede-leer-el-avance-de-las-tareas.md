@@ -3,7 +3,7 @@ id: B-ADV-0049
 title: "La conversación de Telegram no puede consultar ficheros sobre el avance de las tareas"
 type: bug
 weight: 100
-dificultad: media
+dificultad: dificil
 version: "v1.2.0"
 status: planned
 depende_de: []
