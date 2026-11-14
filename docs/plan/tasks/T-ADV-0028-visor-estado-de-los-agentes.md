@@ -4,12 +4,12 @@ title: "Visor gráfico: estado de los agentes, cuotas y bloqueos"
 type: funcional
 weight: 110
 dificultad: media
-version: "v1.3.0"
+version: "v1.4.0"
 status: planned
 depende_de: ["T-ADV-0027"]
-origen: "Petición del usuario: visor gráfico del estado de los agentes configurados (v1.2)"
+origen: "Petición del usuario: visor gráfico del estado de los agentes configurados (movido a v1.4 para dedicar v1.3 a adelgazar el motor)"
 created_at: 2026-10-26
-updated_at: 2026-11-11
+updated_at: 2026-11-14
 ---
 
 # T-ADV-0028: Visor gráfico: estado de los agentes, cuotas y bloqueos

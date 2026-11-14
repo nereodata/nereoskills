@@ -1,6 +1,7 @@
 """Pruebas de validación de lanzamiento y alineación de manifiestos."""
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,11 +15,54 @@ from adevv.release_tools import (
     publicar_version,
     validar_publicacion,
 )
-from tests import aislamiento_telegram
+from tests import aislamiento_telegram  # noqa: F401
 
 
 class TestInstallAndRelease(unittest.TestCase):
     """Verifica las reglas de publicación de etiquetas y alineación de versiones."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tpl_dir = tempfile.TemporaryDirectory()
+        tpl_root = Path(cls._tpl_dir.name)
+        cls._tpl_origin = tpl_root / "origin.git"
+        cls._tpl_work = tpl_root / "work"
+        subprocess.run(["git", "init", "--bare", "-q", str(cls._tpl_origin)], check=True, capture_output=True)
+        subprocess.run(["git", "init", "-q", str(cls._tpl_work)], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(cls._tpl_work), "config", "user.name", "Adevv Test"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(cls._tpl_work), "config", "user.email", "test@adevv.local"],
+            check=True,
+            capture_output=True,
+        )
+        (cls._tpl_work / "pyproject.toml").write_text(
+            '[project]\nname = "adevv"\nversion = "0.1.0"\n', encoding="utf-8"
+        )
+        (cls._tpl_work / "task_config.yaml").write_text(
+            'project:\n  name: Adevv\n  version: "v0.1.0"\nrelease:\n  manifests:\n'
+            "    - path: task_config.yaml\n      type: yaml\n      key: project.version\n"
+            "    - path: pyproject.toml\n      type: toml\n      key: project.version\n",
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(cls._tpl_work), "add", "."], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(cls._tpl_work), "commit", "-qm", "chore: initial commit"], check=True, capture_output=True
+        )
+        subprocess.run(["git", "-C", str(cls._tpl_work), "branch", "-M", "main"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(cls._tpl_work), "remote", "add", "origin", "../origin.git"],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(cls._tpl_work), "push", "-q", "origin", "main"], check=True, capture_output=True
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tpl_dir.cleanup()
 
     def setUp(self):
         os.environ.pop("ORQUESTAR_PASO", None)
@@ -35,53 +79,9 @@ class TestInstallAndRelease(unittest.TestCase):
         os.environ["AGY_HOME"] = str(self.agy_home)
 
         self.origin_dir = self.root / "origin.git"
-        subprocess.run(["git", "init", "--bare", str(self.origin_dir)], check=True, capture_output=True)
-
         self.repo_dir = self.root / "work"
-        subprocess.run(["git", "init", str(self.repo_dir)], check=True, capture_output=True)
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "config", "user.name", "Adevv Test"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "config", "user.email", "test@adevv.local"],
-            check=True,
-            capture_output=True,
-        )
-
-        (self.repo_dir / "pyproject.toml").write_text(
-            '[project]\nname = "adevv"\nversion = "0.1.0"\n',
-            encoding="utf-8",
-        )
-        (self.repo_dir / "task_config.yaml").write_text(
-            'project:\n  name: Adevv\n  version: "v0.1.0"\nrelease:\n  manifests:\n'
-            '    - path: task_config.yaml\n      type: yaml\n      key: project.version\n'
-            '    - path: pyproject.toml\n      type: toml\n      key: project.version\n',
-            encoding="utf-8",
-        )
-
-        subprocess.run(["git", "-C", str(self.repo_dir), "add", "."], check=True, capture_output=True)
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "commit", "-m", "chore: initial commit"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "branch", "-M", "main"],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "remote", "add", "origin", str(self.origin_dir)],
-            check=True,
-            capture_output=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(self.repo_dir), "push", "origin", "main"],
-            check=True,
-            capture_output=True,
-        )
+        shutil.copytree(self._tpl_origin, self.origin_dir)
+        shutil.copytree(self._tpl_work, self.repo_dir)
 
     def tearDown(self):
         os.environ.pop("ADEVV_HOME", None)
@@ -118,10 +118,16 @@ class TestInstallAndRelease(unittest.TestCase):
 
     def test_h04_obtener_versiones_publicadas_filtro_y_orden_semver(self):
         """H-04 / RF-F03-02: obtener_versiones_publicadas ignora etiquetas ligeras/pre-releases y ordena por semver."""
-        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.2.0", "-m", "v0.2.0"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.10.0", "-m", "v0.10.0"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo_dir), "tag", "-a", "v0.2.0", "-m", "v0.2.0"], check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo_dir), "tag", "-a", "v0.10.0", "-m", "v0.10.0"], check=True, capture_output=True
+        )
         subprocess.run(["git", "-C", str(self.repo_dir), "tag", "v0.9.0"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.3.0-rc1", "-m", "rc"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo_dir), "tag", "-a", "v0.3.0-rc1", "-m", "rc"], check=True, capture_output=True
+        )
         subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "--tags"], check=True, capture_output=True)
 
         versiones = obtener_versiones_publicadas(str(self.origin_dir))
@@ -164,7 +170,9 @@ class TestInstallAndRelease(unittest.TestCase):
         )
 
         # 2. Validar que los manifiestos coinciden automáticamente en 0.1.0
-        checker_script = Path(__file__).resolve().parents[1] / "skills" / "release" / "scripts" / "check_manifests_versions.py"
+        checker_script = (
+            Path(__file__).resolve().parents[1] / "skills" / "release" / "scripts" / "check_manifests_versions.py"
+        )
         repo_root = Path(__file__).resolve().parents[1]
         env = dict(os.environ)
         current_pp = env.get("PYTHONPATH", "")
@@ -181,7 +189,9 @@ class TestInstallAndRelease(unittest.TestCase):
 
         (self.repo_dir / "CHANGELOG.md").write_text("## [0.1.0]\nCambios\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(self.repo_dir), "add", "CHANGELOG.md"], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(self.repo_dir), "commit", "-m", "docs: changelog"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo_dir), "commit", "-m", "docs: changelog"], check=True, capture_output=True
+        )
 
         # 3. Publicar versión con release_tools
         publicar_version(self.repo_dir, "v0.1.0", origin_url=str(self.origin_dir))
@@ -235,7 +245,9 @@ class TestInstallAndRelease(unittest.TestCase):
         subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "v0.1.0"], check=True)
 
         # Crear commit v0.1.1
-        (self.repo_dir / "pyproject.toml").write_text('[project]\nname = "adevv"\nversion = "0.1.1"\n', encoding="utf-8")
+        (self.repo_dir / "pyproject.toml").write_text(
+            '[project]\nname = "adevv"\nversion = "0.1.1"\n', encoding="utf-8"
+        )
         subprocess.run(["git", "-C", str(self.repo_dir), "commit", "-am", "feat: bump v0.1.1"], check=True)
         subprocess.run(["git", "-C", str(self.repo_dir), "tag", "-a", "v0.1.1", "-m", "v0.1.1"], check=True)
         subprocess.run(["git", "-C", str(self.repo_dir), "push", "origin", "main", "v0.1.1"], check=True)
@@ -312,6 +324,7 @@ class TestInstallAndRelease(unittest.TestCase):
             set_sync_registry("claude", {"version": "0.2.0", "files": {}})
 
             import io
+
             out = io.StringIO()
             err = io.StringIO()
             ret = main_cli(["--version"], out=out, err=err)
@@ -344,10 +357,9 @@ class TestInstallAndRelease(unittest.TestCase):
 
             # Simulamos detección de bucle vivo en C:\SW\Afinn
             with mock.patch("adevv.processes.detectar_procesos_adevv") as mock_proc:
-                mock_proc.return_value = [
-                    {"pid": 1234, "tipo": "bucle", "cwd": r"C:\SW\Afinn"}
-                ]
+                mock_proc.return_value = [{"pid": 1234, "tipo": "bucle", "cwd": r"C:\SW\Afinn"}]
                 import io
+
                 out = io.StringIO()
                 err = io.StringIO()
                 ret = main_cli(["--version"], out=out, err=err)
@@ -382,14 +394,17 @@ class TestInstallAndRelease(unittest.TestCase):
             set_config({"auto_update": True})
             set_sync_registry("claude", {"version": "0.2.0", "files": {}})
             set_sync_registry("codex", {"version": "0.2.0", "files": {}})
-            set_update_state({
-                "last_checked_at": "hace 3 h",
-                "last_checked_status": "al día",
-                "last_applied_at": "el día 20",
-                "last_applied_version": "0.2.0",
-            })
+            set_update_state(
+                {
+                    "last_checked_at": "hace 3 h",
+                    "last_checked_status": "al día",
+                    "last_applied_at": "el día 20",
+                    "last_applied_version": "0.2.0",
+                }
+            )
 
             import io
+
             out = io.StringIO()
             err = io.StringIO()
             ret = main_cli(["--version"], out=out, err=err)

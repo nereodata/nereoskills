@@ -1,582 +1,243 @@
-"""Identidad operativa de versiones y acreditación de revisiones de cierre."""
+"""Identidad de versiones, huella de producto, evidencias y validación de revisiones."""
 
+from datetime import datetime
 import hashlib
+import json
 import os
+from pathlib import Path
 import re
 import subprocess
-from collections import deque
-from html.parser import HTMLParser
-from itertools import chain
-from pathlib import Path
 
 from adevv import contexto_ejecucion
-from adevv.registro_metricas import leer_registros
+from adevv.registro_metricas import bloqueo, leer_registros
 from adevv.yaml_lite import load_yaml
+
+EVIDENCIAS = "orquestar_evidencias.jsonl"
+
+
+def _es_ignorado_huella(rel: str) -> bool:
+    partes = rel.split("/")
+    if ".git" in partes or "__pycache__" in partes or any(p.startswith(".adevv-") for p in partes):
+        return True
+    if len(partes) == 1 and (rel.startswith(("orquestar.", "orquestar_", "telegram.")) or rel == ".env"):
+        return True
+    return False
 
 
 def clave_version(valor):
-    """Devuelve mayor, menor y parche; la omisión del parche equivale a cero."""
+    """Devuelve (mayor, menor, parche); la omisión del parche equivale a cero."""
     m = re.fullmatch(r"v?(\d+)\.(\d+)(?:\.(\d+))?", str(valor or "").strip())
     return (int(m[1]), int(m[2]), int(m[3] or 0)) if m else None
 
 
 def nombre_version(clave):
-    """Conserva parches positivos y la ruta histórica del parche cero."""
+    """Formatea una tupla (mayor, menor, parche) conservando parches positivos."""
     return f"v{clave[0]}.{clave[1]}" + (f".{clave[2]}" if clave[2] else "")
 
 
-def carpetas_maestras(root, cfg):
+def carpetas_maestras(root, cfg=None):
     """Directorios configurados de tareas y bugs maestros."""
+    root = Path(root)
+    if cfg is None:
+        p = root / "task_config.yaml"
+        cfg = (load_yaml(p) or {}) if p.is_file() else {}
     master = (cfg.get("levels") or {}).get("master") or {}
     base = root / master.get("path", "docs/plan/")
     folders = master.get("folders") or {}
-    return tuple(base / folders.get(tipo, master.get(tipo, tipo + "/")) for tipo in ("tasks", "bugs"))
+    return tuple(base / folders.get(t, master.get(t, t + "/")) for t in ("tasks", "bugs"))
 
 
-def huella_producto(root, arbol, carpetas, mandato_temporal=None):
-    """Identifica rutas, modos y objetos Git del producto sin los documentos de seguimiento."""
-    excluidos = tuple(p.relative_to(root).as_posix().encode() + b"/" for p in carpetas) + (b"docs/review/",)
-    entradas = subprocess.check_output(["git", "ls-tree", "-rz", "--full-tree", arbol], cwd=root)
-    producto = hashlib.sha256()
-    temporal = os.fsencode(mandato_temporal) if mandato_temporal is not None else None
-    for entrada in entradas.split(b"\0"):
-        ruta = entrada.partition(b"\t")[2]
-        if entrada and ruta != temporal and not ruta.startswith(excluidos):
-            producto.update(entrada + b"\0")
-    return producto.hexdigest()
+def _rutas_excluidas(root, carpetas=None):
+    root = Path(root)
+    carpetas = carpetas if carpetas is not None else carpetas_maestras(root)
+    excl = []
+    for p in carpetas:
+        try:
+            excl.append(p.resolve().relative_to(root.resolve()).as_posix().rstrip("/") + "/")
+        except ValueError:
+            pass
+    excl.append("docs/review/")
+    return tuple(excl)
 
 
-class CitasHTML(HTMLParser):
-    """Separa el texto propio de las citas y los ejemplos de código HTML."""
-
-    bloques_citados = ("blockquote", "pre")
-    etiquetas = (*bloques_citados, "code", *HTMLParser.CDATA_CONTENT_ELEMENTS)
-    inicio_bloque_html = re.compile(
-        r" {0,3}</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|"
-        r"details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|"
-        r"header|hgroup|hr|html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|"
-        r"p|param|search|section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?=[\s/>]|$)",
-        re.I,
-    )
-    atributos = (
-        r"""(?:\s+[^\s"'<>/=\x00]+(?:\s*=\s*"""
-        r"""(?:'[^']*'|"[^"]*"|[^\s"'=<>`]+))?)*\s*"""
-    )
-    etiqueta = rf"(?:</[a-z][\w-]*\s*>|<[a-z][\w-]*{atributos}/?>)"
-    etiqueta_aislada = re.compile(r" {0,3}" + etiqueta + r"[ \t]*", re.I)
-    inicio_incompleto = re.compile(r"(?!" + etiqueta + r")<(?=/?[a-z])", re.I)
-
-    def __init__(self):
-        super().__init__()
-        self.abiertas = []
-        self.en_bloque_html = False
-        self.visible = []
-        self.bloque = False
-
-    def handle_starttag(self, tag, attrs):
-        if tag in self.etiquetas:
-            if not self.abiertas:
-                self.bloque = self.bloque or tag in self.bloques_citados
-                self.visible.append(" ")
-            self.abiertas.append(tag)
-        elif not self.abiertas:
-            self.visible.append(self.get_starttag_text())
-
-    def handle_endtag(self, tag):
-        if self.abiertas and tag == self.abiertas[-1]:
-            self.abiertas.pop()
-        elif not self.abiertas:
-            self.visible.append(f"</{tag}>")
-
-    def handle_data(self, data):
-        if not self.abiertas:
-            self.visible.append(data)
-
-    def sin_citas(self, linea):
-        """Retiene el texto propio a ambos lados de una cita, incluso entre líneas."""
-        continuacion = self.abiertas or self.rawdata
-        self.bloque = any(tag in self.bloques_citados for tag in self.abiertas)
-        if not linea.strip():
-            self.en_bloque_html = False
-        elif not continuacion and (self.inicio_bloque_html.match(linea) or self.etiqueta_aislada.fullmatch(linea)):
-            self.en_bloque_html = True
-        codigo_sangrado = linea.expandtabs(4).startswith("    ") and not self.en_bloque_html
-        if not continuacion and ("<" not in linea or codigo_sangrado or re.match(r" {0,3}(?:>|`{3,}|~{3,})", linea)):
-            return linea
-        protegida = linea.replace(r"\<", r"\&lt;")
-        self.visible.clear()
-        self.feed(protegida + "\n")
-        visible = "".join(self.visible).rstrip("\n")
-        return visible if visible.strip() else None
+def _git_env():
+    return {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    }
 
 
-CERCO = r" {0,3}(`{3,}|~{3,})"
-
-
-def contenido_de_lista(linea, sangrias, literal):
-    """Separa los marcadores Markdown y la sangría de sus elementos anidados."""
-    contenido = linea.expandtabs(4)
-    if not contenido.strip():
-        return "", "", False
-    espacios = len(contenido) - len(contenido.lstrip(" "))
-    cambio = False
-    while sangrias and espacios < sangrias[-1]:
-        sangrias.pop()
-        cambio = True
-    inicio = sangrias[-1] if sangrias else 0
-    if literal and not cambio:
-        return contenido[inicio:], "", False
-    fin = inicio
-    while marca := re.match(r" {0,3}(?:[-+*]|\d{1,9}[.)]) (?: {0,3}(?=\S))?", contenido[fin:]):
-        fin += marca.end()
-        sangrias.append(fin)
-        cambio = True
-    return contenido[fin:], contenido[inicio:fin], cambio
-
-
-def cierra_cerco(linea, marca):
-    """CommonMark permite cerrar con el mismo signo y longitud igual o mayor."""
-    return re.fullmatch(r" {0,3}" + marca + marca[0] + r"*[ \t]*", linea)
-
-
-def contenido_del_informe(texto):
-    """Retira un cerco Markdown que envuelve el informe entero y conserva los ejemplos internos."""
-    lineas = texto.strip("\r\n").splitlines()
-    if len(lineas) >= 3 and (inicio := re.fullmatch(CERCO + r"(?:markdown|md)?\s*", lineas[0], re.I)):
-        if cierra_cerco(lineas[-1], inicio[1]) and not any(cierra_cerco(l, inicio[1]) for l in lineas[1:-1]):
-            return lineas[1:-1]
-    return lineas
-
-
-def interrumpe_cita(linea):
-    """Reconoce bloques que pueden empezar sin línea en blanco tras un párrafo citado."""
-    return (
-        CitasHTML.inicio_bloque_html.match(linea)
-        or re.match(r" {0,3}<(?:pre|script|style|textarea)(?=[\s>]|$)", linea, re.I)
-        or re.match(r" {0,3}<(?:!--|\?|![A-Z]|!\[CDATA\[)", linea)
-        or re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", linea)
-    )
-
-
-ELEMENTO_CRUDO = (
-    rf"<(?P<crudo>{'|'.join(HTMLParser.CDATA_CONTENT_ELEMENTS)}){CitasHTML.atributos}>"
-    r".*?(?:</(?P=crudo)\s*>|\Z)"
-)
-TOKEN_HTML = re.compile(ELEMENTO_CRUDO + "|" + CitasHTML.etiqueta + r"|<!--.*?(?:-->|\Z)", re.I | re.S)
-FRAGMENTO = re.compile(
-    TOKEN_HTML.pattern + r"|\\[^\w\s]|(?<!`)(?P<marca>`+)(?!`)(?P<codigo>.*?)"
-    r"(?<!`)(?P=marca)(?!`)",
-    re.I | re.S,
-)
-
-
-ENCABEZADO = re.compile(r" {0,3}#{1,6}(?:\s|$)")
-
-
-def ocultar_fragmentos(texto):
-    """Oculta código Markdown y deja intacto el contenido literal de un pre efectivo."""
-    partes = []
-    inicio = 0
-    html = CitasHTML()
-    while inicio < len(texto):
-        literal = "pre" in html.abiertas
-        token = (TOKEN_HTML if literal else FRAGMENTO).search(texto, inicio)
-        if token is None:
-            break
-        partes.append(texto[inicio : token.start()])
-        valor = token[0]
-        if not literal and token["codigo"] is not None:
-            valor = "…"
-        elif literal or re.match(r"<pre(?=[\s/>])", valor, re.I):
-            html.feed(valor)
-        partes.append(valor)
-        inicio = token.end()
-    partes.append(texto[inicio:])
-    return "".join(partes)
-
-
-def parrafo_sin_codigo(linea, pendientes, sangrias):
-    """Procesa los fragmentos en línea una vez por párrafo o encabezado Markdown."""
-    parrafo = [linea]
-    if not ENCABEZADO.match(linea):
-        while pendientes:
-            original = pendientes[0].expandtabs(4)
-            espacios = len(original) - len(original.lstrip(" "))
-            sangria = next((n for n in reversed(sangrias) if n <= espacios), 0)
-            otra = original[sangria:]
-            if (
-                not otra.strip()
-                or interrumpe_cita(otra)
-                or re.match(CERCO, otra)
-                or ENCABEZADO.match(otra)
-                or re.match(r" {0,3}(?:>|(?:[-+*]|0{0,8}1[.)])\s+\S|(?:=+|-+)[ \t]*$)", otra)
-                or (sangrias and sangria < sangrias[-1] and re.match(r" {0,3}(?:[-+*]|\d{1,9}[.)])(?:\s|$)", otra))
-            ):
-                break
-            parrafo.append(pendientes.popleft())
-    return deque(ocultar_fragmentos("\n".join(parrafo)).split("\n"))
-
-
-def lineas_del_informe(texto):
-    """Conserva las declaraciones del informe fuera de citas y ejemplos de código."""
-    abierto = ""
-    parrafo_citado = False
-    citas_html = CitasHTML()
-    sangrias = []
-    pendientes = deque(contenido_del_informe(CitasHTML.inicio_incompleto.sub("&lt;", texto)))
-    preparadas = deque()
-    while preparadas or pendientes:
-        preparada = bool(preparadas)
-        original = (preparadas or pendientes).popleft()
-        literal = abierto or citas_html.en_bloque_html or citas_html.abiertas or citas_html.rawdata
-        linea, marcador, cambio_lista = contenido_de_lista(original, sangrias, literal)
-        if cambio_lista:
-            citas_html = CitasHTML()
-            if marcador:
-                parrafo_citado = False
-            abierto = ""
-        if parrafo_citado and not citas_html.cdata_elem and interrumpe_cita(linea):
-            parrafo_citado = False
-        if not abierto:
-            if (
-                not preparada
-                and ("`" in linea or sangrias)
-                and linea.strip()
-                and not (
-                    citas_html.en_bloque_html
-                    or citas_html.rawdata
-                    or citas_html.cdata_elem
-                    or "pre" in citas_html.abiertas
+def huella_producto(root, arbol=None, carpetas=None):
+    """SHA-256 determinista del código/archivos de producto excluyendo plan, revisiones y estado efímero."""
+    root = Path(root).resolve()
+    excluidos = _rutas_excluidas(root, carpetas)
+    digest = hashlib.sha256()
+    tiene_git = (root / ".git").exists()
+    if arbol and tiene_git:
+        try:
+            entradas = subprocess.check_output(
+                ["git", "ls-tree", "-rz", "--name-only", "--full-tree", arbol],
+                cwd=root,
+                env=_git_env(),
+                stderr=subprocess.DEVNULL,
+            )
+            rutas = sorted({x.decode("utf-8", errors="replace") for x in entradas.split(b"\0") if x})
+            for rel in rutas:
+                if rel.startswith(excluidos) or _es_ignorado_huella(rel):
+                    continue
+                contenido = subprocess.check_output(
+                    ["git", "show", f"{arbol}:{rel}"], cwd=root, env=_git_env(), stderr=subprocess.DEVNULL
                 )
-                and not (
-                    interrumpe_cita(linea)
-                    or citas_html.etiqueta_aislada.fullmatch(linea)
-                    or re.match(r" {0,3}(?:>|`{3,}|~{3,})| {4}", linea)
-                )
-            ):
-                preparadas = parrafo_sin_codigo(linea, pendientes, sangrias)
-                linea = preparadas.popleft()
-            visible = citas_html.sin_citas(linea)
-            if visible is None:
-                if citas_html.bloque or not linea.strip():
-                    parrafo_citado = False
-                yield None
-                continue
-            linea = visible
-        marca = re.match(CERCO, linea)
-        contenido = linea.strip()
-        if abierto:
-            if cierra_cerco(linea, abierto):
-                abierto = ""
-        elif marca:
-            abierto = marca[1]
-            parrafo_citado = False
-        elif contenido.startswith(">"):
-            citado = re.sub(r"^(?:> ?)+", "", contenido)
-            bloque = re.match(r" {0,3}(?:#{1,6}(?:\s|$)|`{3,}|~{3,}|(?:=+|-+)\s*$)", citado)
-            parrafo_citado = bool(citado.strip() and not bloque and not citado.startswith(("    ", "\t")))
-        elif parrafo_citado and contenido and not re.match(r" {0,3}(?:#{1,6}|[-+*]|\d+[.)])\s", linea):
-            yield None
-            continue
-        else:
-            parrafo_citado = False
-            yield None if linea.startswith("    ") else (marcador + contenido).strip().replace("**", "")
-            continue
-        yield None
+                digest.update(rel.encode("utf-8") + b"\0")
+                digest.update(hashlib.sha256(contenido).digest() + b"\0")
+            return digest.hexdigest()
+        except (OSError, subprocess.CalledProcessError):
+            pass
 
+    candidatos = None
+    if tiene_git:
+        try:
+            salida = subprocess.check_output(
+                ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+                cwd=root,
+                env=_git_env(),
+                stderr=subprocess.DEVNULL,
+            )
+            if isinstance(salida, bytes):
+                candidatos = [x.decode("utf-8", errors="replace") for x in salida.split(b"\0") if x]
+        except (OSError, subprocess.CalledProcessError):
+            candidatos = None
+    if candidatos is None:
+        candidatos = [
+            p.relative_to(root).as_posix()
+            for p in root.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(root).parts
+        ]
 
-def cabecera_informe(texto):
-    """Lee el veredicto, el producto y la referencia opcional al rechazo reevaluado."""
-    lineas = iter(lineas_del_informe(texto))
-    for line in lineas:
-        if not line:
+    for rel in sorted(set(candidatos)):
+        if rel.startswith(excluidos) or _es_ignorado_huella(rel):
             continue
-        formal = re.match(
-            r"^(?:[-#]+\s*)?Veredicto(?: formal)?(?: final)?:\s*(?:✅\s*)?(APROBADO|RECHAZADO|N/A)(?=$|[\s.,;—(])",
-            line,
-            re.I,
-        )
-        simple = re.fullmatch(r"(APROBADO|RECHAZADO|N/A)[.]?", line, re.I)
-        if formal or simple:
-            siguiente = next((l for l in lineas if l != ""), None)
-            huella = re.fullmatch(r"Producto revisado:\s*(.*)", siguiente or "", re.I)
-            if huella:
-                siguiente = next((l for l in lineas if l != ""), None)
-            rechazo = re.fullmatch(r"Rechazo reevaluado:\s*([a-f0-9]{40}|[a-f0-9]{64})", siguiente or "", re.I)
-            return (formal or simple)[1].upper(), huella[1] if huella else None, rechazo[1].lower() if rechazo else None
-    return "", None, None
+        fp = root / rel
+        if fp.is_file():
+            digest.update(rel.encode("utf-8") + b"\0")
+            digest.update(hashlib.sha256(fp.read_bytes()).digest() + b"\0")
+    return digest.hexdigest()
 
 
 def declaracion(texto):
-    """Devuelve el veredicto propio y la huella de producto declarada."""
-    return cabecera_informe(texto)[:2]
-
-
-def config_maestras(root):
-    """Obtiene las carpetas para consultas independientes de la CLI."""
-    path = root / "task_config.yaml"
-    cfg = load_yaml(path) if path.exists() else {}
-    return carpetas_maestras(root, cfg or {})
-
-
-def maestro_por_id(iid, carpetas):
-    """Localiza una ficha histórica cuyo nombre de archivo puede diferir del ID."""
-    for carpeta in carpetas:
-        for path in carpeta.glob("*.md"):
-            cabecera = re.match(r"^---\s*\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
-            if cabecera and (load_yaml(cabecera[1]) or {}).get("id") == iid:
-                return path
-    return None
-
-
-def commit_del_intento(root, iid):
-    """Recupera el último HEAD atribuido al ID que pertenece a la historia actual."""
-    for fila in reversed(leer_registros(root, tolerar_ultima=True)):
-        commit = fila.get("commit_producto")
-        if (
-            fila.get("tipo") == "paso"
-            and fila.get("id") == iid
-            and isinstance(commit, str)
-            and re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", commit)
-            and subprocess.run(
-                ["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=root, capture_output=True
-            ).returncode
-            == 0
-        ):
-            return commit
-    return None
-
-
-def palabras_informe(texto):
-    """Identifica el cuerpo histórico aunque al restaurarlo se sangre, cite o intercale una nota."""
-    cuerpo = []
-    cerco = ""
-    for linea in contenido_del_informe(texto):
-        contenido = linea.strip().lstrip("> \t")
-        marca = re.match(r"(`{3,}|~{3,})", contenido)
-        if cerco:
-            if marca and marca[0].startswith(cerco) and not contenido[marca.end() :].strip():
-                cerco = ""
-            else:
-                cuerpo.extend(re.findall(r"\w+", contenido.casefold()))
+    """Extrae (veredicto, huella) de las líneas propias del informe (ignorando cercos de código y citas)."""
+    en_cerco = False
+    veredicto = ""
+    huella = None
+    for cruda in (texto or "").splitlines()[:40]:
+        linea = cruda.strip()
+        if linea.startswith(("```", "~~~")):
+            en_cerco = not en_cerco
             continue
-        if marca:
-            cerco = marca[0]
+        if en_cerco or linea.startswith(">"):
             continue
-        contenido = contenido.lstrip("#-* \t").replace("**", "")
-        if re.match(r"(?:Producto revisado|Rechazo reevaluado|Veredicto(?: final)?):", contenido, re.I):
-            continue
-        if not re.fullmatch(r"APROBADO\.?|RECHAZADO\.?|N/A\.?", contenido, re.I):
-            cuerpo.extend(re.findall(r"\w+", contenido.casefold()))
-    return cuerpo
-
-
-def informes_confirmados(root, ruta, historial):
-    """Lee en orden de emisión las revisiones de la ruta, incluidas sus eliminaciones."""
-    for sha in reversed(historial):
-        commit = sha.decode("ascii")
-        blob = subprocess.run(["git", "show", f"{commit}:{ruta}"], cwd=root, capture_output=True)
-        yield commit, "" if blob.returncode else blob.stdout.decode("utf-8")
-
-
-def acreditacion_anterior(root, ruta, historial, texto, carpetas):
-    """Atribuye cada edición al producto y la referencia de su emisión original."""
-    buscado = cabecera_informe(texto)[0]
-    previo = emision = huella = referencia = ultimo_rechazo = None
-    informe_emitido = ""
-    aprobaciones = []
-    revocadas = 0
-    for commit, informe in chain(informes_confirmados(root, ruta, historial), [(None, texto)]):
-        veredicto, declarada, reevaluado = cabecera_informe(informe)
-        if veredicto != previo or (declarada is not None and declarada != huella):
-            emision, huella, referencia = commit, declarada, reevaluado
-            informe_emitido = informe
-        elif reevaluado:
-            referencia = reevaluado
-        previo = veredicto
-        if commit and veredicto == "RECHAZADO":
-            ultimo_rechazo = commit
-            revocadas = len(aprobaciones)
-        elif commit and veredicto == buscado:
-            aprobaciones.append((emision, huella, informe))
-    if ultimo_rechazo and referencia:
-        return emision, huella, referencia != ultimo_rechazo
-    if not revocadas:
-        return emision, huella, False
-    producto_actual = huella
-    if producto_actual is None and emision:
-        producto_actual = huella_producto(root, emision, carpetas)
-    palabras = palabras_informe(informe_emitido if huella is None else texto)
-    for origen, declarada, historico in aprobaciones[:revocadas]:
-        anteriores = palabras_informe(historico)
-        comparar_productos = huella is not None or (not anteriores and bool(palabras))
-        if comparar_productos and producto_actual is not None:
-            producto = declarada if declarada is not None else huella_producto(root, origen, carpetas)
-            if producto != producto_actual:
+        if not veredicto:
+            m = re.search(
+                r"(?:^|[#*\-\s])veredicto\**\s*:\s*[^A-Za-z0-9N/]*(APROBADO|RECHAZADO|N/A)\b",
+                linea,
+                re.I,
+            ) or re.match(r"^\**\s*(APROBADO|RECHAZADO|N/A)\s*\**$", linea, re.I)
+            if m:
+                veredicto = m.group(1).upper()
                 continue
-        actuales = iter(palabras)
-        if all(p in actuales for p in anteriores):
-            return emision, huella, True
-    return emision, huella, False
+        if huella is None:
+            mh = re.match(r"Producto revisado:\s*([0-9a-fA-F]{12,64})\b", linea)
+            if mh:
+                huella = mh.group(1).lower()
+    return veredicto, huella
 
 
-def _tiene_padre(root, sha):
-    return (
-        bool(sha)
-        and subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{sha}^"], cwd=root, capture_output=True
-        ).returncode
-        == 0
-    )
-
-
-def _exenta_sin_informe(root, iid, ficha, carpetas, objetivo):
-    """Exime de fichero N/A a cierres confirmados cuyos commits del ID no tocan superficies críticas."""
+def motivo_informe(path):
+    """Valida el veredicto formal de un informe de revisión."""
     try:
-        ruta_inf = f"docs/review/code_reviews/{iid}-code-review.md"
-        if subprocess.check_output(["git", "log", "-1", "--format=%H", "--", ruta_inf], cwd=root, text=True).strip():
-            return False
-        carpetas = carpetas or config_maestras(root)
-        ficha = ficha or maestro_por_id(iid, carpetas)
-        if not ficha:
-            return False
-        ficha_rel = ficha.relative_to(root).as_posix()
-        if subprocess.check_output(["git", "status", "--porcelain", "--", ficha_rel], cwd=root, text=True).strip():
-            return False
-        cierre = subprocess.check_output(
-            [
-                "git",
-                "log",
-                "-1",
-                "--format=%H",
-                "-G",
-                """^status:[[:space:]]*['"]?completed['"]?([[:space:]]|$)""",
-                "--",
-                ficha_rel,
-            ],
-            cwd=root,
-            text=True,
-        ).strip()
-        if not _tiene_padre(root, cierre):
-            return False
-        por_id = subprocess.check_output(
-            ["git", "log", "--format=%H", "--fixed-strings", f"--grep={iid}"], cwd=root, text=True
-        ).splitlines()
-        commits = {sha for sha in (*por_id, cierre, objetivo or "") if _tiene_padre(root, sha)}
-        excluidos = tuple(p.relative_to(root).as_posix() + "/" for p in carpetas) + ("docs/review/",)
-        cambiados = set()
-        for sha in commits:
-            rutas = subprocess.check_output(
-                ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd=root, text=True
-            ).splitlines()
-            cambiados.update(r for r in rutas if r and not r.startswith(excluidos))
-        return bool(cambiados) and not bool(contexto_ejecucion.toca_superficie_critica(root, cambiados))
-    except (OSError, subprocess.CalledProcessError, ValueError):
-        return False
-
-
-def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
-    """Contrasta la aprobación con el producto del cierre del ID, también tras relanzar."""
-    root = Path(root)
-    informe = root / "docs/review/code_reviews" / f"{iid}-code-review.md"
-    motivo = motivo_informe(informe)
-    if (
-        motivo == "informe ausente"
-        and (root / ".git").exists()
-        and _exenta_sin_informe(root, iid, ficha, carpetas, objetivo)
-    ):
+        texto = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "informe ausente"
+    except (OSError, UnicodeError):
+        return "informe ilegible"
+    veredicto, _ = declaracion(texto)
+    if veredicto == "APROBADO":
         return ""
-    if motivo or not (root / ".git").exists():
-        return motivo
-    carpetas = carpetas or config_maestras(root)
-    ficha = ficha or maestro_por_id(iid, carpetas)
-    if not ficha:
-        return "falta la ficha del producto revisado"
-    ruta = informe.relative_to(root).as_posix()
-    actual = informe.read_text(encoding="utf-8")
-    confirmar = objetivo is not None
+    if veredicto == "RECHAZADO":
+        return "informe rechazado"
+    if veredicto == "N/A":
+        if re.search(
+            r"Motivo:\s*.*(?:sin cambios de c[oó]digo|sin c[oó]digo|no hay cambios de c[oó]digo|fuera de superficies cr[ií]ticas|sin superficies cr[ií]ticas)",
+            texto,
+            re.I,
+        ):
+            return ""
+        return "N/A sin justificación de ausencia de código"
+    return "informe sin veredicto formal"
+
+
+def _archivos_cambiados_item(root: Path, iid: str, ficha: Path | None) -> list[str]:
+    if not (root / ".git").exists():
+        return []
     try:
-        historial = subprocess.check_output(["git", "log", "--format=%H", "--", ruta], cwd=root).splitlines()
-        emision, huella, restaurado = acreditacion_anterior(root, ruta, historial, actual, carpetas)
-        if restaurado:
-            return "aprobación restaurada anterior al rechazo"
-        if objetivo is None:
-            cierre = subprocess.check_output(
+        commits = []
+        if ficha and ficha.exists():
+            c_ficha = subprocess.check_output(
                 [
                     "git",
                     "log",
                     "-1",
                     "--format=%H",
                     "-G",
-                    """^status:[[:space:]]*['"]?completed['"]?([[:space:]]|$)""",
+                    r"^status:\s*['\"]?completed",
                     "--",
                     ficha.relative_to(root).as_posix(),
                 ],
                 cwd=root,
+                env=_git_env(),
                 text=True,
+                stderr=subprocess.DEVNULL,
             ).strip()
-            objetivo = cierre or "HEAD"
-            referencia_informe = emision or (historial[0].decode("ascii") if historial else None)
-            for posterior in (referencia_informe, commit_del_intento(root, iid)):
-                if (
-                    posterior
-                    and subprocess.run(["git", "merge-base", "--is-ancestor", objetivo, posterior], cwd=root).returncode
-                    == 0
-                ):
-                    objetivo = posterior
-        if huella is not None:
-            vigente = huella == huella_producto(root, objetivo, carpetas)
-        elif emision:
-            vigente = emision == objetivo or huella_producto(root, emision, carpetas) == huella_producto(
-                root, objetivo, carpetas
-            )
-        else:
-            vigente = not confirmar and not historial
-        if vigente and cabecera_informe(actual)[0] == "N/A" and _es_exencion_proporcional(actual):
-            cambiados = subprocess.check_output(
-                ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", objetivo], cwd=root, text=True
-            ).splitlines()
-            if contexto_ejecucion.toca_superficie_critica(root, cambiados):
-                return "N/A improcedente: el cambio toca superficies críticas"
-    except (OSError, subprocess.CalledProcessError, UnicodeError):
-        return "no se pudo acreditar el producto revisado"
-    return "" if vigente else "informe anterior al cambio de producto"
+            if c_ficha:
+                commits.append(c_ficha)
+        c_grep = subprocess.check_output(
+            ["git", "log", "--format=%H", "-F", f"--grep={iid}"],
+            cwd=root,
+            env=_git_env(),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).splitlines()
+        commits.extend(c.strip() for c in c_grep if c.strip() and c.strip() not in commits)
+        if not commits:
+            return []
+        salida = subprocess.check_output(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", *commits],
+            cwd=root,
+            env=_git_env(),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        excl = _rutas_excluidas(root)
+        return sorted({r.strip() for r in salida.splitlines() if r.strip() and not r.strip().startswith(excl)})
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return []
 
 
-def _es_exencion_proporcional(texto):
-    return any(
-        re.match(r"Motivo:\s*.*(?:fuera de superficies cr[ií]ticas|sin superficies cr[ií]ticas)", linea or "", re.I)
-        for linea in lineas_del_informe(texto)
-    )
-
-
-def motivo_informe(path):
-    """Interpreta el dictamen formal de un informe de revisión."""
-    try:
-        texto = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return "informe ausente"
-    except (OSError, UnicodeError):
-        return "informe ilegible"
-    veredicto, _ = declaracion(texto)
-    if veredicto.upper() == "APROBADO":
-        return ""
-    if veredicto.upper() == "RECHAZADO":
-        return "informe rechazado"
-    if veredicto.upper() == "N/A":
-        if any(
-            re.match(
-                r"Motivo:\s*.*(?:sin cambios de c[oó]digo|sin c[oó]digo|no hay cambios de c[oó]digo)", linea or "", re.I
-            )
-            for linea in lineas_del_informe(texto)
-        ) or _es_exencion_proporcional(texto):
+def motivo_revision(root, iid, ficha=None, carpetas=None):
+    """Devuelve '' si la revisión del ítem está aprobada o exenta por no tocar superficies críticas."""
+    root = Path(root)
+    informe = root / "docs" / "review" / "code_reviews" / f"{iid}-code-review.md"
+    if not informe.is_file():
+        cambiados = _archivos_cambiados_item(root, iid, Path(ficha) if ficha else None)
+        if cambiados and not contexto_ejecucion.toca_superficie_critica(root, cambiados):
             return ""
-        return "N/A sin justificación de ausencia de código"
-    return "informe sin veredicto formal"
+        return "informe ausente"
+    return motivo_informe(informe)
 
 
 def diagnostico_revision(root, iid, ficha=None, carpetas=None):
-    """Añade la última causa de cuota y la vía de recuperación sin invocar modelos."""
+    """Describe el bloqueo de revisión añadiendo causa de cuota si Hades quedó sin cuota."""
     motivo = motivo_revision(root, iid, ficha, carpetas)
     if not motivo:
         return ""
@@ -590,14 +251,16 @@ def diagnostico_revision(root, iid, ficha=None, carpetas=None):
 
 
 def pendientes_cierre(root, version, cfg=None):
-    """Enumera maestros abiertos o completados sin revisión válida de este parche."""
+    """Enumera maestros abiertos o completados sin revisión válida de la versión indicada."""
     root = Path(root)
     if cfg is None:
-        path = root / "task_config.yaml"
-        cfg = (load_yaml(path) or {}) if path.exists() else {}
+        p = root / "task_config.yaml"
+        cfg = (load_yaml(p) or {}) if p.is_file() else {}
     carpetas = carpetas_maestras(root, cfg)
     pendientes = []
     for carpeta in carpetas:
+        if not carpeta.is_dir():
+            continue
         for path in sorted(carpeta.glob("*.md")):
             texto = path.read_text(encoding="utf-8")
             m = re.match(r"^---\s*\n(.*?)\n---", texto, re.S)
@@ -612,3 +275,58 @@ def pendientes_cierre(root, version, cfg=None):
             elif status not in {"cancelled", "superseded", "rejected"}:
                 pendientes.append(f"{iid}: trabajo pendiente ({status or 'sin estado'}).")
     return pendientes
+
+
+def evidencia_vigente(root: Path, huella: str, comando: str) -> bool:
+    """Comprueba si comando ya pasó en verde para la misma huella de producto."""
+    archivo = Path(root) / EVIDENCIAS
+    if not archivo.is_file():
+        return False
+    cmd_norm = " ".join(comando.strip().split())
+    exito = False
+    for linea in archivo.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not linea.strip():
+            continue
+        try:
+            d = json.loads(linea)
+        except json.JSONDecodeError:
+            continue
+        if d.get("huella") == huella and " ".join(str(d.get("comando", "")).strip().split()) == cmd_norm:
+            exito = d.get("codigo") == 0
+    return exito
+
+
+def registrar_evidencia(root: Path, huella: str, comando: str, codigo: int, duracion_s: int = 0) -> None:
+    """Persiste el resultado de una verificación vinculada a su huella de producto."""
+    root = Path(root)
+    fila = {
+        "fecha": datetime.now().isoformat(timespec="seconds"),
+        "huella": huella,
+        "comando": " ".join(comando.strip().split()),
+        "codigo": int(codigo),
+        "duracion_s": int(duracion_s),
+    }
+    with bloqueo(root):
+        with (root / EVIDENCIAS).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(fila, ensure_ascii=False) + "\n")
+
+
+def verificar_restriccion_release(root: Path, actor: str, accion: str, cfg: dict | None = None) -> None:
+    """Valida políticas opcionales task_config.yaml::release.restricciones."""
+    if cfg is None:
+        p = Path(root) / "task_config.yaml"
+        cfg = (load_yaml(p) or {}) if p.is_file() else {}
+    restricciones = ((cfg.get("release") or {}).get("restricciones") or {}).get(accion)
+    if isinstance(restricciones, dict) and restricciones.get("permitido") is False:
+        raise ValueError(f"Acción de release '{accion}' deshabilitada por configuración.")
+    if isinstance(restricciones, list) and actor not in restricciones:
+        raise ValueError(f"El actor '{actor}' no está autorizado para '{accion}'.")
+
+
+def ejecutar_preflight_worktree(root: Path, worktree: Path, command: str, ejecutar_fn, timeout: float = 600) -> None:
+    """Ejecuta un comando de preflight salvo que su huella de producto ya esté acreditada en verde."""
+    huella = huella_producto(worktree)
+    if evidencia_vigente(root, huella, command):
+        return
+    ejecutar_fn(worktree, command, shell=True, timeout=timeout)
+    registrar_evidencia(root, huella, command, 0)

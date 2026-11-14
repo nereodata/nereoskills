@@ -4,9 +4,9 @@ title: "Contadores de pausa_tecnica en adevv/contexto_ejecucion.py no conectados
 type: bug
 weight: 1500
 dificultad: media
-version: ""
-status: backlog
-origen: "T-ADV-0041, T-ADV-0038; revisar-version v1.2 (docs/review/versions/v1.2-arquitectura.md), H-02 🟡"
+version: "v1.3.0"
+status: cancelled
+origen: "T-ADV-0041, T-ADV-0038; absorbido por la reescritura minimalista del motor en v1.3 (T-ADV-0042)"
 created_at: 2026-11-14
 updated_at: 2026-11-14
 ---

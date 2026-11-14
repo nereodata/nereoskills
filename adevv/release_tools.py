@@ -1,6 +1,5 @@
 """Herramientas de validacion de lanzamiento y etiquetado para adevv."""
 
-import importlib.util
 import os
 import re
 import subprocess
@@ -10,7 +9,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from adevv.yaml_lite import load_yaml
-from adevv.revisiones import pendientes_cierre
+from adevv.revisiones import ejecutar_preflight_worktree, pendientes_cierre
 
 try:
     import tomllib
@@ -170,23 +169,6 @@ def validar_publicacion(
     return True, "OK"
 
 
-def _chequeos():
-    """Carga el coordinador compartido de chequeos de calidad y release."""
-    try:
-        from skills.orquestar import chequeos as mod
-
-        return mod
-    except ImportError:
-        if "adevv_chequeos_release" in sys.modules:
-            return sys.modules["adevv_chequeos_release"]
-        ruta = Path(__file__).resolve().parents[1] / "skills" / "orquestar" / "chequeos.py"
-        spec = importlib.util.spec_from_file_location("adevv_chequeos_release", ruta)
-        modulo = importlib.util.module_from_spec(spec)
-        sys.modules["adevv_chequeos_release"] = modulo
-        spec.loader.exec_module(modulo)
-        return modulo
-
-
 def publicar_version(
     repo_dir: Path, target_tag: str, origin_url: str | None = None, *, rama: str | None = None, cfg: dict | None = None
 ) -> None:
@@ -219,7 +201,7 @@ def publicar_version(
                 raise ReleaseValidationError("release.preflight_timeout debe ser positivo y finito (segundos).")
             for command in (config.get("release") or {}).get("preflight", []):
                 try:
-                    _chequeos().ejecutar_preflight_worktree(root, worktree, command, _ejecutar, timeout=timeout)
+                    ejecutar_preflight_worktree(root, worktree, command, _ejecutar, timeout=timeout)
                 except (RuntimeError, subprocess.TimeoutExpired) as error:
                     raise RuntimeError(f"Fallo de preflight: {error}") from error
             if _git(worktree, "status", "--porcelain"):

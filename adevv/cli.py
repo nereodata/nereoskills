@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO
+from typing import List, Optional, TextIO
 
 from adevv import __version__, migrate, processes, updater
 from adevv.store import (
@@ -110,8 +110,6 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
     version_activa = act.get("version", __version__) if act else __version__
     origen_dir = get_active_version_dir()
 
-    bucles_vivos = processes.hay_bucles_en_marcha()
-
     desfasados = []
     for target_key in DESTINOS.keys():
         plan = planificar_sincronizacion(target_key, origen_dir, version_activa)
@@ -121,9 +119,11 @@ def _resincronizar_desfasados_al_arrancar(out: TextIO, err: TextIO) -> None:
             desfasados.append((target_key, plan["nombre"], v_reg))
 
     if not desfasados:
-        if act and not bucles_vivos:
+        if act and not processes.hay_bucles_en_marcha():
             updater.limpiar_versiones_antiguas()
         return
+
+    bucles_vivos = processes.hay_bucles_en_marcha()
 
     if bucles_vivos:
         lista_bucles = ", ".join(processes.formatear_proceso_ui(b) for b in bucles_vivos)

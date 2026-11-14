@@ -10,6 +10,7 @@ Verifica:
 import importlib.util
 import io
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -21,7 +22,7 @@ from unittest.mock import patch
 
 from adevv.cli import main_cli
 from adevv.store import set_config
-from tests import aislamiento_telegram
+from tests import aislamiento_telegram  # noqa: F401
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -31,6 +32,7 @@ def _pid_is_alive(pid: int) -> bool:
     if os.name == "nt":
         try:
             import ctypes
+
             kernel32 = ctypes.windll.kernel32
             handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
             if handle:
@@ -53,8 +55,10 @@ def _kill_pid_tree(pid: int) -> None:
         return
     if os.name == "nt":
         resultado = subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True,
-            text=True, timeout=10,
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if resultado.returncode and _pid_is_alive(pid):
             raise RuntimeError(f"No se pudo terminar el proceso temporal {pid}: {resultado.stderr.strip()}")
@@ -74,31 +78,71 @@ class LimpiezaProcesoTests(unittest.TestCase):
     """La limpieza no oculta fallos de permisos ni supone un cierre inmediato."""
 
     def test_informa_taskkill_denegado(self):
-        with (patch.object(os, 'name', 'nt'),
-              patch(__name__ + '._pid_is_alive', return_value=True),
-              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'Acceso denegado'))):
-            with self.assertRaisesRegex(RuntimeError, 'Acceso denegado'):
+        with (
+            patch.object(os, "name", "nt"),
+            patch(__name__ + "._pid_is_alive", return_value=True),
+            patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "Acceso denegado")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Acceso denegado"):
                 _kill_pid_tree(12345)
 
     def test_espera_hasta_confirmar_salida(self):
-        with (patch.object(os, 'name', 'nt'),
-              patch(__name__ + '._pid_is_alive', side_effect=[True, True, False]),
-              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)),
-              patch.object(time, 'sleep') as esperar):
+        with (
+            patch.object(os, "name", "nt"),
+            patch(__name__ + "._pid_is_alive", side_effect=[True, True, False]),
+            patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)),
+            patch.object(time, "sleep") as esperar,
+        ):
             _kill_pid_tree(12345)
         esperar.assert_called_once_with(0.05)
 
     def test_cierre_que_no_termina_agota_plazo(self):
-        with (patch.object(os, 'name', 'nt'),
-              patch(__name__ + '._pid_is_alive', return_value=True),
-              patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)),
-              patch.object(time, 'monotonic', side_effect=[0, 6])):
+        with (
+            patch.object(os, "name", "nt"),
+            patch(__name__ + "._pid_is_alive", return_value=True),
+            patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], 0)),
+            patch.object(time, "monotonic", side_effect=[0, 6]),
+        ):
             with self.assertRaises(TimeoutError):
                 _kill_pid_tree(12345)
 
 
 class TestCliCommands(unittest.TestCase):
     """Pruebas completas de despacho CLI, validaciones y auto-inicialización."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tpl_dir = tempfile.TemporaryDirectory()
+        cls._tpl_proj = Path(cls._tpl_dir.name) / "tpl"
+        cls._tpl_proj.mkdir()
+        cls._build_dummy_project(cls._tpl_proj, "PRJ", "v0.1.0")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tpl_dir.cleanup()
+
+    @staticmethod
+    def _build_dummy_project(folder: Path, prefix="PRJ", version="v0.1.0"):
+        subprocess.run(["git", "init", "-q", str(folder)], check=True)
+        subprocess.run(["git", "-C", str(folder), "config", "user.name", "Tester"], check=True)
+        subprocess.run(["git", "-C", str(folder), "config", "user.email", "tester@adevv.local"], check=True)
+        (folder / "task_config.yaml").write_text(
+            f'project:\n  name: TestProj\n  prefix: "{prefix}"\n  version: "{version}"\n'
+            f'levels:\n  master:\n    path: docs/plan/\n    tasks: tasks/\n    bugs: bugs/\n    id_prefix: "{prefix}"\n'
+            f'validation:\n  command: "python -m unittest"\n'
+            f"release:\n  manifests:\n    - path: task_config.yaml\n      type: yaml\n      key: project.version\n",
+            encoding="utf-8",
+        )
+        (folder / "docs" / "requirements").mkdir(parents=True, exist_ok=True)
+        (folder / "docs" / "requirements" / "requirements.md").write_text("# Requisitos\n", encoding="utf-8")
+        (folder / "docs" / "requirements" / "req_analysis.md").write_text("# Analisis\n", encoding="utf-8")
+        (folder / "docs" / "requirements" / "platform_plan.md").write_text("# Platform Plan\n", encoding="utf-8")
+        (folder / "docs" / "requirements" / "platform_review.md").write_text(
+            "**Veredicto:** APROBADO\n", encoding="utf-8"
+        )
+        (folder / "docs" / "requirements" / "work_plan.md").write_text("# Work Plan\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(folder), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(folder), "commit", "-qm", "init"], check=True)
 
     def setUp(self):
         isolated_environment = patch.dict(os.environ)
@@ -129,33 +173,38 @@ class TestCliCommands(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def _init_dummy_project(self, folder: Path, prefix="PRJ", version="v0.1.0"):
-        subprocess.run(["git", "init", "-q", str(folder)], check=True)
-        subprocess.run(["git", "-C", str(folder), "config", "user.name", "Tester"], check=True)
-        subprocess.run(["git", "-C", str(folder), "config", "user.email", "tester@adevv.local"], check=True)
-        (folder / "task_config.yaml").write_text(
-            f'project:\n  name: TestProj\n  prefix: "{prefix}"\n  version: "{version}"\n'
-            f'levels:\n  master:\n    path: docs/plan/\n    tasks: tasks/\n    bugs: bugs/\n    id_prefix: "{prefix}"\n'
-            f'validation:\n  command: "python -m unittest"\n'
-            f'release:\n  manifests:\n    - path: task_config.yaml\n      type: yaml\n      key: project.version\n',
-            encoding="utf-8",
-        )
-        (folder / "docs" / "requirements").mkdir(parents=True, exist_ok=True)
-        (folder / "docs" / "requirements" / "requirements.md").write_text("# Requisitos\n", encoding="utf-8")
-        (folder / "docs" / "requirements" / "req_analysis.md").write_text("# Analisis\n", encoding="utf-8")
-        (folder / "docs" / "requirements" / "platform_plan.md").write_text("# Platform Plan\n", encoding="utf-8")
-        (folder / "docs" / "requirements" / "platform_review.md").write_text("**Veredicto:** APROBADO\n", encoding="utf-8")
-        (folder / "docs" / "requirements" / "work_plan.md").write_text("# Work Plan\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(folder), "add", "."], check=True)
-        subprocess.run(["git", "-C", str(folder), "commit", "-m", "init"], check=True)
+        if prefix == "PRJ" and version == "v0.1.0":
+            shutil.copytree(self._tpl_proj, folder, dirs_exist_ok=True)
+            return
+        self._build_dummy_project(folder, prefix=prefix, version=version)
 
-    def _ejecutar_cli(self, args, cwd: Path):
+    def _ejecutar_cli(self, args, cwd: Path, en_proceso: bool = True):
         """Ejecuta main_cli capturando código, stdout, stderr y SystemExit."""
         out = io.StringIO()
         err = io.StringIO()
         old_cwd = Path.cwd()
+
+        def _fast_dispatch(script_path: Path, script_args: list[str], o_stream, e_stream) -> int:
+            if script_path.name == "orquestar.py" and en_proceso:
+                import contextlib
+                from tests.test_orquestar import motor as _motor
+
+                with contextlib.redirect_stdout(o_stream), contextlib.redirect_stderr(e_stream):
+                    try:
+                        return _motor.main(script_args)
+                    except SystemExit as sex:
+                        if isinstance(sex.code, str) and sex.code:
+                            e_stream.write(sex.code + "\n")
+                        return sex.code if isinstance(sex.code, int) else 1
+            return _orig_dispatch(script_path, script_args, o_stream, e_stream)
+
+        from adevv import cli as _cli_mod
+
+        _orig_dispatch = _cli_mod._despachar_script
         try:
             os.chdir(cwd)
-            code = main_cli(args, out=out, err=err)
+            with patch("adevv.cli._despachar_script", side_effect=_fast_dispatch):
+                code = main_cli(args, out=out, err=err)
             return code, out.getvalue(), err.getvalue()
         except SystemExit as ex:
             msg = str(ex.code) if ex.code is not None else ""
@@ -169,7 +218,7 @@ class TestCliCommands(unittest.TestCase):
         project.mkdir()
         self._init_dummy_project(project)
 
-        code_adevv, out_adevv, err_adevv = self._ejecutar_cli(["orquestar", "--estado"], project)
+        code_adevv, out_adevv, err_adevv = self._ejecutar_cli(["orquestar", "--estado"], project, en_proceso=False)
 
         # Ejecución directa del script original
         script_orquestar = self.repo_root / "skills" / "orquestar" / "orquestar.py"
@@ -196,7 +245,15 @@ class TestCliCommands(unittest.TestCase):
 
         env = {**os.environ, "PYTHONPATH": str(self.repo_root)}
         proc = subprocess.run(
-            [sys.executable, "-m", "adevv.cli", "orquestar", "--fondo", "--cmd", f'"{sys.executable}" "{dummy_harness}"'],
+            [
+                sys.executable,
+                "-m",
+                "adevv.cli",
+                "orquestar",
+                "--fondo",
+                "--cmd",
+                f'"{sys.executable}" "{dummy_harness}"',
+            ],
             cwd=project,
             capture_output=True,
             text=True,
@@ -210,9 +267,11 @@ class TestCliCommands(unittest.TestCase):
         child_pid = None
 
         try:
-            # Esperar a los 5 segundos tal como exige @CA-F02-02
-            time.sleep(5)
-            self.assertTrue(pid_file.exists(), "orquestar.pid no existe a los 5 segundos")
+            limite = time.monotonic() + 5.0
+            while time.monotonic() < limite and not (pid_file.exists() and log_file.exists()):
+                time.sleep(0.1)
+            time.sleep(0.3)
+            self.assertTrue(pid_file.exists(), "orquestar.pid no existe")
             child_pid = int(pid_file.read_text(encoding="utf-8").strip())
             self.assertTrue(_pid_is_alive(child_pid), f"El proceso en segundo plano (PID {child_pid}) no sigue vivo")
 
@@ -245,21 +304,27 @@ class TestCliCommands(unittest.TestCase):
         # 2. release completitud
         code_comp, out_comp, _ = self._ejecutar_cli(["release", "completitud", "--version", "v0.1.0"], project)
         script_comp = self.repo_root / "skills" / "release" / "scripts" / "check_release_completeness.py"
-        res_comp = subprocess.run([sys.executable, str(script_comp), "--version", "v0.1.0"], cwd=project, capture_output=True, text=True)
+        res_comp = subprocess.run(
+            [sys.executable, str(script_comp), "--version", "v0.1.0"], cwd=project, capture_output=True, text=True
+        )
         self.assertEqual(code_comp, res_comp.returncode)
         self.assertEqual(out_comp.strip(), res_comp.stdout.strip())
 
         # 3. release changelog
         code_ch, out_ch, _ = self._ejecutar_cli(["release", "changelog", "--version", "v0.1.0"], project)
         script_ch = self.repo_root / "skills" / "release" / "scripts" / "generate_changelog_section.py"
-        res_ch = subprocess.run([sys.executable, str(script_ch), "--version", "v0.1.0"], cwd=project, capture_output=True, text=True)
+        res_ch = subprocess.run(
+            [sys.executable, str(script_ch), "--version", "v0.1.0"], cwd=project, capture_output=True, text=True
+        )
         self.assertEqual(code_ch, res_ch.returncode)
         self.assertEqual(out_ch.strip(), res_ch.stdout.strip())
 
         # 4. telegram --estado
         code_tg, out_tg, _ = self._ejecutar_cli(["telegram", "--estado"], project)
         script_tg = self.repo_root / "skills" / "telegram_gateway" / "gateway.py"
-        res_tg = subprocess.run([sys.executable, str(script_tg), "--estado"], cwd=project, capture_output=True, text=True, encoding="utf-8")
+        res_tg = subprocess.run(
+            [sys.executable, str(script_tg), "--estado"], cwd=project, capture_output=True, text=True, encoding="utf-8"
+        )
         self.assertEqual(code_tg, res_tg.returncode)
         self.assertEqual(out_tg.strip(), res_tg.stdout.strip())
 
@@ -276,7 +341,9 @@ class TestCliCommands(unittest.TestCase):
         code, out, err = self._ejecutar_cli(["orquestar"], project)
         self.assertNotEqual(code, 0)
         combined = out + "\n" + err
-        self.assertIn("orchestration.json: hades.instructions apunta a .agents/agents/hades.md, que no existe.", combined)
+        self.assertIn(
+            "orchestration.json: hades.instructions apunta a .agents/agents/hades.md, que no existe.", combined
+        )
 
     def test_ca_f02_07_local_elements_shadowing_or_submodule_stops_launch_not_estado(self):
         """CA-M-4 / @CA-F02-07: elementos locales que ocultan o .agents/.gitmodules impiden lanzar pero no estado."""
@@ -309,9 +376,13 @@ class TestCliCommands(unittest.TestCase):
             self.assertNotEqual(code_run, 0)
             combined = out_run + "\n" + err_run
             if elem_rel == ".agents":
-                self.assertIn("Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.", combined)
+                self.assertIn(
+                    "Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.", combined
+                )
             else:
-                self.assertIn("Este proyecto tiene skills, agentes o workflows propios que ocultan los de Adevv", combined)
+                self.assertIn(
+                    "Este proyecto tiene skills, agentes o workflows propios que ocultan los de Adevv", combined
+                )
                 self.assertIn(elem_rel, combined.replace("\\", "/"))
 
         # Caso .gitmodules con entrada .agents
@@ -322,7 +393,10 @@ class TestCliCommands(unittest.TestCase):
 
         code_gm, out_gm, err_gm = self._ejecutar_cli(["orquestar"], proj_gm)
         self.assertNotEqual(code_gm, 0)
-        self.assertIn("Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.", out_gm + "\n" + err_gm)
+        self.assertIn(
+            "Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.",
+            out_gm + "\n" + err_gm,
+        )
 
     def test_ca_f02_08_new_project_auto_initialization(self):
         """CA-M-5 / @CA-F02-08: auto-inicialización con commit mínimo y mensaje informativo."""
@@ -354,7 +428,9 @@ class TestCliCommands(unittest.TestCase):
             self.assertIn(f'id_prefix: "{expected_prefix}"', content)
 
             # Verificar mensaje en una línea mostrado
-            self.assertIn(f"inicializado repositorio Git y task_config.yaml (prefijo: {expected_prefix})", out + "\n" + err)
+            self.assertIn(
+                f"inicializado repositorio Git y task_config.yaml (prefijo: {expected_prefix})", out + "\n" + err
+            )
 
             # Verificar que el commit inicial solo lleva task_config.yaml y .gitignore
             proc_files = subprocess.run(
@@ -431,9 +507,10 @@ class TestCliCommands(unittest.TestCase):
         (mock_installed / "agents" / "atenea.md").write_text("# ATENEA\n", encoding="utf-8")
         (mock_installed / "agents" / "hades.md").write_text("# HADES\n", encoding="utf-8")
 
-        with patch("adevv.store.get_active_version_dir", return_value=mock_installed), \
-             patch("skills.orquestar.orquestar.get_active_version_dir", return_value=mock_installed, create=True):
-
+        with (
+            patch("adevv.store.get_active_version_dir", return_value=mock_installed),
+            patch("skills.orquestar.orquestar.get_active_version_dir", return_value=mock_installed, create=True),
+        ):
             # Caso C: proyecto estándar
             proj_c = self.root / "proj_c"
             proj_c.mkdir()
@@ -460,13 +537,17 @@ class TestCliCommands(unittest.TestCase):
             prompt_agente = motor.construir_prompt_agente(proj_c, "hades", "Revisa X")
             expected_hades = f'"{mock_installed / "agents" / "hades.md"}"'.replace("\\", "/")
             self.assertIn(expected_hades, prompt_agente.replace("\\", "/"))
-            self.assertIn(f'"{mock_installed / "skills"}/<nombre>/SKILL.md"'.replace("\\", "/"), prompt_agente.replace("\\", "/"))
+            self.assertIn(
+                f'"{mock_installed / "skills"}/<nombre>/SKILL.md"'.replace("\\", "/"), prompt_agente.replace("\\", "/")
+            )
 
             # Caso repositorio fuente de Adevv (@CA-F02-10)
             prompt_fuente = motor.construir_prompt_paso(self.repo_root, "ciclo-requisitos", None)
             self.assertIn(expected_skill, prompt_fuente.replace("\\", "/"))
-            self.assertIn('Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta', prompt_fuente)
-            self.assertIn('nunca la copia instalada', prompt_fuente)
+            self.assertIn(
+                "Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta", prompt_fuente
+            )
+            self.assertIn("nunca la copia instalada", prompt_fuente)
 
     def test_h02_version_es_consulta_pura_sin_efectos_secundarios(self):
         """H-02: adevv --version no invoca evaluar_comprobacion_actualizacion."""
@@ -494,10 +575,16 @@ class TestCliEnvironment(unittest.TestCase):
                     fixture.setUp()
                     self.assertTrue(all(key not in os.environ for key in keys))
                     child = subprocess.run(
-                        [sys.executable, "-c",
-                         "import os; print(any(k in os.environ for k in "
-                         "('TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USER_IDS')))"],
-                        capture_output=True, text=True, check=True, timeout=10,
+                        [
+                            sys.executable,
+                            "-c",
+                            "import os; print(any(k in os.environ for k in "
+                            "('TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_USER_IDS')))",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                        timeout=10,
                     )
                     self.assertEqual(child.stdout.strip(), "False")
                 finally:

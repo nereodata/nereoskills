@@ -10,7 +10,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from adevv import __version__, processes
 from adevv._build import is_symlink_or_junction
@@ -388,7 +388,7 @@ def sincronizar_destinos(
         version = act.get("version", __version__) if act else __version__
 
     resultados: Dict[str, Any] = {}
-    bloqueada = sincronizacion_bloqueada()
+    bloqueada: Optional[bool] = None
 
     for destino_key in DESTINOS.keys():
         plan = planificar_sincronizacion(destino_key, origen_dir, version, forzar=forzar)
@@ -406,6 +406,10 @@ def sincronizar_destinos(
                 "rutas_ignoradas": [],
             }
             continue
+
+        sin_cambios = plan.get("sin_cambios", False)
+        if not sin_cambios and bloqueada is None:
+            bloqueada = sincronizacion_bloqueada()
 
         if bloqueada:
             sin_cambios = plan.get("sin_cambios", False)
