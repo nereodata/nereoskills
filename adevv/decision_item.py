@@ -21,7 +21,12 @@ def _tiene_git(root):
 
 def _git(root, *args, env=None, entrada=None, check=True):
     datos = entrada.encode("utf-8") if isinstance(entrada, str) else entrada
-    res = subprocess.run(["git", *args], cwd=root, env=env, input=datos, capture_output=True)
+    try:
+        res = subprocess.run(["git", *args], cwd=root, env=env, input=datos, capture_output=True)
+    except OSError as exc:
+        if check:
+            raise RuntimeError(str(exc))
+        return subprocess.CompletedProcess(["git", *args], 1, b"", str(exc).encode("utf-8"))
     if check and res.returncode:
         raise RuntimeError(res.stderr.decode("utf-8", "replace").strip())
     return res

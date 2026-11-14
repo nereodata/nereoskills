@@ -5,7 +5,7 @@ type: bug
 weight: 10
 dificultad: media
 version: "v1.2"
-status: planned
+status: completed
 depende_de: []
 created_at: 2026-11-14
 suite_cierre: true
@@ -17,6 +17,20 @@ suite_accion: ninguna
 ---
 
 # B-ADV-0050: La suite falla al cerrar la versión
+
+## Causa raíz
+1. `adevv/decision_item.py` y `adevv/contexto_ejecucion.py` invocaban comandos git mediante `subprocess.run` asumiendo disponibilidad de `git` en PATH y sin capturar `OSError`. Cuando `os.environ` se aislaba o no contenía PATH (como en tests de avisos de Telegram con `clear=True`), `subprocess.run` lanzaba `FileNotFoundError: [WinError 2]`.
+2. En `adevv/llamadas.py`, la propiedad `Resultado.restante` calculaba el tiempo restante con resta en punto flotante `self.espera_s - (time.time_ns() - self.orden) / 1_000_000_000`, devolviendo un `float` fraccionario (ej. `299.99...`) en lugar de redondear al entero superior mediante `math.ceil`, lo que rompía la verificación de espera en segundos enteros en `test_subagent_out_of_credits_triggers_quota_wait_in_loop`.
+
+## Solución
+1. En `adevv/decision_item.py`, capturar `OSError` en `_git` devolviendo `CompletedProcess` con código 1 cuando `check=False`.
+2. En `adevv/contexto_ejecucion.py`, capturar `OSError` en `_git` y lanzar `ValueError` consistente.
+3. En `adevv/llamadas.py`, redondear `Resultado.restante` con `math.ceil` en segundos enteros.
+
+## Verificación
+- `adevv orquestar --calidad --base HEAD`
+- `adevv orquestar --verificar "python -m unittest tests.test_orquestar.AvisosTelegramTests.test_quota_wait_and_quota_stop_notify tests.test_orquestar.EscaladaTests.test_subagent_out_of_credits_triggers_quota_wait_in_loop"`
+- Suite `tests.test_orquestar` completa en verde.
 
 ## Descripción del fallo
 La suite completa de cierre devuelve un código distinto de cero. Debe pasar antes de revisar o cerrar la versión.

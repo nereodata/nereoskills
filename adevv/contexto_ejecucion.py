@@ -135,7 +135,10 @@ def toca_superficie_critica(root, rutas):
 
 
 def _git(root, *args):
-    resultado = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
+    try:
+        resultado = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
+    except OSError as exc:
+        raise ValueError("No se puede obtener el contexto Git: " + str(exc))
     if resultado.returncode:
         raise ValueError("No se puede obtener el contexto Git: " + resultado.stderr.decode("utf-8", "replace").strip())
     return resultado.stdout.decode("utf-8", "replace").strip()
