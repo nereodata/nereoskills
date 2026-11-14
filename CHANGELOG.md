@@ -9,6 +9,10 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 - **T-ADV-0041** — Flujo autónomo ligero activo por defecto (`PROJECT.md` o política base embebida) sin subfases ceremoniales ni revisiones a mitad de tarea: memoria de relevo portable (`--checkpoint`), presupuestos duros separados de cuota, enrutado y esperas locales por ítem (`DECISION_ITEM`), verificación determinista (`unittest` + `ruff`) y revisión independiente post-verde proporcional a superficies críticas.
 - **T-ADV-0039** — Cada llamada entrega su resultado con su objetivo, entradas, perfil y llamada padre. La ratificación de una revisión resuelve su espera anterior y permite continuar tras un rechazo de otro alcance. La cuota del proveedor conserva su recuperación.
 
+### Corregido
+
+- **B-ADV-0049** — La conversación libre de Telegram consulta en modo estricto de solo lectura los ficheros del proyecto en `claude`, `codex` y `agy` (citando rutas reales y releyendo cambios en disco en turnos posteriores), deniega escrituras, borrados, ejecución de comandos, control de procesos y lectura de `.env*`/`.git`, limpia `CODEX_WINDOWS_REGISTERED_CORE` en Windows y conmuta a reservas ante suscripción deshabilitada o respuesta vacía sin inventar datos.
+
 ## [1.1.4] - 2026-11-12
 
 ### Corregido
