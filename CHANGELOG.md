@@ -2,7 +2,7 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
-## [1.2.0] - En desarrollo
+## [1.2.0] - 2026-11-14
 
 ### Añadido
 
@@ -12,7 +12,9 @@ Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
 ### Corregido
 
+- **B-ADV-0031** — Unificado el circuito de evidencias e identidad compuesta del árbol entre `orquestar.py`, `chequeos.py` y `release_tools.py` para reutilizar verificaciones vigentes en árbol principal y worktrees aislados.
 - **B-ADV-0049** — La conversación libre de Telegram consulta en modo estricto de solo lectura los ficheros del proyecto en `claude`, `codex` y `agy` (citando rutas reales y releyendo cambios en disco en turnos posteriores), deniega escrituras, borrados, ejecución de comandos, control de procesos y lectura de `.env*`/`.git`, limpia `CODEX_WINDOWS_REGISTERED_CORE` en Windows y conmuta a reservas ante suscripción deshabilitada o respuesta vacía sin inventar datos.
+- **B-ADV-0050** — Protegidas las consultas Git en entornos aislados sin `git` en `PATH` y corregido el redondeo entero por exceso (`math.ceil`) en esperas de cuota.
 
 ## [1.1.4] - 2026-11-12
 
