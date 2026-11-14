@@ -8,6 +8,10 @@ Adevv prioriza la agilidad con calidad suficiente y mantenible: **invariantes du
 - **Un solo motor hacia delante:** Este flujo autónomo es el camino por defecto. Si un proyecto consumidor aún no tiene `PROJECT.md`, aplica una política mínima por defecto; se mantiene compatibilidad de lectura con artefactos anteriores sin sostener dos flujos de ejecución paralelos.
 
 ## 2. Guardarraíles deterministas (bordes duros)
+- **Comandos de verificación del proyecto:**
+  - Pruebas dirigidas: `python -m unittest <modulo_de_prueba>` (o `adevv orquestar --verificar "<comando>"`).
+  - Formato y lint: `python -m ruff format` y `python -m ruff check`.
+  - Limpieza de instrucciones distribuibles: `python -m unittest tests/test_instructions_cleanliness.py`.
 - **Pruebas directas:** `unittest` ejecutable por entradas reales con proveedores simulados. Los tests de bugs deben discriminar el fallo original. Gherkin es opcional y solo cuenta si está enlazado al runner sin omisiones silenciosas.
 - **Mantenibilidad automática:** Chequeos rápidos de formato, lint (`ruff`) y modularidad estructural pesan más que instrucciones largas en prosa. Evitar seguir engordando monolitos.
 - **Cero efectos laterales en verificación:** Prohibido enviar mensajes reales a Telegram, publicar, instalar globalmente o tocar credenciales durante pruebas.

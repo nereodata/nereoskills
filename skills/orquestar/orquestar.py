@@ -577,11 +577,10 @@ def construir_prompt_paso(root, paso, arg):
             pass
     if (Path(root) / "PROJECT.md").is_file():
         extra += " Sigue la política de `PROJECT.md` en la raíz del proyecto."
-    if config(root).get("hades") is not False:
+    if config(root).get("hades") is not False and paso not in ("task-dev", "bug-fix"):
         extra += (
-            " Lanza las revisiones de Hades con `adevv orquestar --agente hades --prompt-file <mandato>`. "
-            "Añade --revision spec para especificación, --revision test para pruebas o --revision code "
-            "para código. Al ratificar una entrega conserva ese objetivo y sus entradas."
+            " Cuando el paso requiera a Hades, lánzalo con `adevv orquestar --agente hades --prompt-file <mandato>` "
+            "(--revision code cuando revise código). Al ratificar una entrega conserva ese objetivo y sus entradas."
         )
 
     nota_fuente = ""
@@ -3005,6 +3004,54 @@ def revision_sin_dictamen(filas, paso, iid):
     return any(r.espera_s is None for r in llamadas.pendientes(llamadas.desde_metricas(filas)))
 
 
+def validar_puerta_delta(root, iid, base_sha):
+    """Ejecuta en el motor la puerta determinista de formato/lint sobre el delta antes de aceptar completed."""
+    if not iid or not base_sha or len(base_sha) != 40 or not (Path(root) / ".git").exists():
+        return True
+    fichero = fichero_de(root, iid)
+    if not fichero or frontmatter(fichero).get("status") != "completed":
+        return True
+    spec = importlib.util.spec_from_file_location("adevv_calidad", SKILL.with_name("calidad.py"))
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    from contextlib import redirect_stderr, redirect_stdout
+    from io import StringIO
+
+    buf = StringIO()
+    with redirect_stdout(buf), redirect_stderr(buf):
+        rc = modulo.ejecutar(root, base_sha, False, verificar)
+    detalle = buf.getvalue().strip()
+    if rc == 0:
+        return True
+    print(f"[orquestar] puerta determinista en rojo para {iid}; reabriendo para corrección.", flush=True)
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    cabecera, cuerpo = reescribir_frontmatter(
+        fichero.read_text(encoding="utf-8"), {"status": "in_progress", "updated_at": hoy}
+    )
+    fichero.write_text(cabecera + "\n---\n" + cuerpo, encoding="utf-8")
+    rel = fichero.relative_to(root).as_posix()
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain", "--", rel], cwd=root, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+    if porcelain:
+        subprocess.run(["git", "add", "--", rel], cwd=root, check=False)
+        subprocess.run(
+            ["git", "commit", "-qm", f"chore(orquestar): [{iid}] - reabrir por puerta determinista en rojo"],
+            cwd=root,
+            check=False,
+        )
+    try:
+        contexto_ejecucion.guardar_checkpoint(
+            root,
+            iid,
+            impedimento=(detalle or "Fallo en puerta determinista de formato/lint")[-2000:],
+            siguiente="Corregir el fallo determinista del delta y volver a cerrar limpio.",
+        )
+    except ValueError:
+        pass
+    return False
+
+
 def cierre_revisado(root, paso, iid, base):
     """Acredita que el trabajo revisado quedó completo y confirmado durante el paso."""
     head = git("rev-parse", "HEAD")
@@ -4751,6 +4798,8 @@ def bucle(a, root):
                     ausente = True
                     break
                 codigo, m, salida = resultado
+                if paso in ("task-dev", "bug-fix") and arg and not codigo:
+                    validar_puerta_delta(root, arg, env["ORQUESTAR_BASE"])
                 if paso in DESARROLLO:
                     head = git("rev-parse", "HEAD")
                     if head and head != env["ORQUESTAR_BASE"]:

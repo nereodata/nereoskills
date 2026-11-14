@@ -288,21 +288,15 @@ sys.exit(1 if modo == fallo else 0)
             self.assertEqual(motor.main(), 0)
             gateway.assert_not_called()
 
-    def test_instrucciones_de_ambos_flujos_y_hades_exigen_calidad(self):
+    def test_puerta_determinista_en_motor_y_hades_sin_ensuciar_skills_de_ejecucion(self):
         raiz = Path(__file__).resolve().parents[2]
         for flujo in ("task-dev", "bug-fix"):
             texto = (raiz / "skills" / flujo / "SKILL.md").read_text(encoding="utf-8")
             with self.subTest(flujo=flujo):
-                self.assertIn("--calidad --base", texto)
-                self.assertIn("--aplicar", texto)
-                self.assertIn("base_calidad", texto)
-                self.assertIn("mediante el verificador", texto)
-                cierre = texto.split("## Cierre")[1]
-                self.assertLess(cierre.index("--calidad --base"), cierre.index("status: completed"))
-                self.assertIn("Solo en verde", cierre)
-                self.assertIn("cualquier fallo devuelve el estado a `in_progress`", cierre)
-                self.assertIn("escritura", cierre)
-                self.assertIn("--verificar", cierre)
+                self.assertIn("PROJECT.md", texto)
+                self.assertIn("status: completed", texto)
+                self.assertNotIn("base_calidad", texto)
+                self.assertNotIn("--calidad", texto)
         texto = (raiz / "skills/review-code/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("--calidad --base", texto)
         self.assertIn("sin escritura", texto)
@@ -311,6 +305,27 @@ sys.exit(1 if modo == fallo else 0)
         self.assertIn("sin aprobación hasta corregirlo", texto)
         self.assertIn("No uses `--aplicar`", texto)
         self.assertIn("ambas etapas mediante `--verificar`", texto)
+
+        self.escribir("pyproject.toml", "[tool.ruff]\n")
+        self.escribir(
+            "task_config.yaml",
+            (
+                'project:\n  name: Demo\n  prefix: DEMO\n  version: "v1.0.0"\n'
+                "levels:\n  master:\n    id_prefix: DEMO\n    path: docs/plan/\n"
+                "    folders:\n      tasks: tasks/\n      bugs: bugs/\n"
+            ),
+        )
+        self.escribir("uno.py", "import os\n")
+        self.escribir(
+            "docs/plan/tasks/T-DEMO-0001.md",
+            '---\nid: T-DEMO-0001\ntitle: Demo\nversion: "v1.0.0"\nstatus: completed\n---\n# Demo\n',
+        )
+        ficha = self.root / "docs/plan/tasks/T-DEMO-0001.md"
+        self.git("add", ".")
+        self.git("commit", "-qm", "feat: [T-DEMO-0001] - cambio con import sin usar")
+        with patch.object(motor, "verificar", return_value=1):
+            self.assertFalse(motor.validar_puerta_delta(self.root, "T-DEMO-0001", self.base))
+        self.assertEqual(motor.frontmatter(ficha).get("status"), "in_progress")
 
 
 if __name__ == "__main__":

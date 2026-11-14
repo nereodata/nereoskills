@@ -420,11 +420,72 @@ def acreditacion_anterior(root, ruta, historial, texto, carpetas):
     return emision, huella, False
 
 
+def _tiene_padre(root, sha):
+    return (
+        bool(sha)
+        and subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{sha}^"], cwd=root, capture_output=True
+        ).returncode
+        == 0
+    )
+
+
+def _exenta_sin_informe(root, iid, ficha, carpetas, objetivo):
+    """Exime de fichero N/A a cierres confirmados cuyos commits del ID no tocan superficies críticas."""
+    try:
+        ruta_inf = f"docs/review/code_reviews/{iid}-code-review.md"
+        if subprocess.check_output(["git", "log", "-1", "--format=%H", "--", ruta_inf], cwd=root, text=True).strip():
+            return False
+        carpetas = carpetas or config_maestras(root)
+        ficha = ficha or maestro_por_id(iid, carpetas)
+        if not ficha:
+            return False
+        ficha_rel = ficha.relative_to(root).as_posix()
+        if subprocess.check_output(["git", "status", "--porcelain", "--", ficha_rel], cwd=root, text=True).strip():
+            return False
+        cierre = subprocess.check_output(
+            [
+                "git",
+                "log",
+                "-1",
+                "--format=%H",
+                "-G",
+                """^status:[[:space:]]*['"]?completed['"]?([[:space:]]|$)""",
+                "--",
+                ficha_rel,
+            ],
+            cwd=root,
+            text=True,
+        ).strip()
+        if not _tiene_padre(root, cierre):
+            return False
+        por_id = subprocess.check_output(
+            ["git", "log", "--format=%H", "--fixed-strings", f"--grep={iid}"], cwd=root, text=True
+        ).splitlines()
+        commits = {sha for sha in (*por_id, cierre, objetivo or "") if _tiene_padre(root, sha)}
+        excluidos = tuple(p.relative_to(root).as_posix() + "/" for p in carpetas) + ("docs/review/",)
+        cambiados = set()
+        for sha in commits:
+            rutas = subprocess.check_output(
+                ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha], cwd=root, text=True
+            ).splitlines()
+            cambiados.update(r for r in rutas if r and not r.startswith(excluidos))
+        return bool(cambiados) and not bool(contexto_ejecucion.toca_superficie_critica(root, cambiados))
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return False
+
+
 def motivo_revision(root, iid, ficha=None, carpetas=None, objetivo=None):
     """Contrasta la aprobación con el producto del cierre del ID, también tras relanzar."""
     root = Path(root)
     informe = root / "docs/review/code_reviews" / f"{iid}-code-review.md"
     motivo = motivo_informe(informe)
+    if (
+        motivo == "informe ausente"
+        and (root / ".git").exists()
+        and _exenta_sin_informe(root, iid, ficha, carpetas, objetivo)
+    ):
+        return ""
     if motivo or not (root / ".git").exists():
         return motivo
     carpetas = carpetas or config_maestras(root)

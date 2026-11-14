@@ -170,6 +170,62 @@ class PoliticaYContinuidadTests(unittest.TestCase):
         self.git("commit", "-qm", "feat: toca release_tools")
         self.assertIn("superficies críticas", revisiones.motivo_revision(self.root, "T-DEMO-0002"))
 
+    def test_exencion_automatica_sin_archivo_na_y_disparo_en_superficie_critica(self):
+        self.escribir("app/saludo.py", "def hola():\n    return 'hola'\n")
+        self.escribir(
+            "docs/plan/tasks/T-DEMO-0001.md",
+            ('---\nid: T-DEMO-0001\ntitle: Demo\nversion: "v1.2.0"\nstatus: completed\ndepende_de: []\n---\n# Demo\n'),
+        )
+        self.git("add", ".")
+        self.git("commit", "-qm", "feat: [T-DEMO-0001] - saludo fuera de superficies críticas")
+
+        self.assertFalse((self.root / "docs/review/code_reviews/T-DEMO-0001-code-review.md").exists())
+        self.assertEqual(revisiones.motivo_revision(self.root, "T-DEMO-0001"), "")
+        self.assertEqual(revisiones.pendientes_cierre(self.root, "v1.2"), [])
+        self.assertEqual(motor.estado(self.root, "docs/requirements")[:2], ("PASO", "revisar-version"))
+
+        # Si toca superficie crítica sin informe, el motor exige revisar-tarea automáticamente
+        self.escribir("adevv/release_tools.py", "# cambio crítico\n")
+        self.escribir(
+            "docs/plan/tasks/T-DEMO-0003.md",
+            (
+                '---\nid: T-DEMO-0003\ntitle: Critica\nversion: "v1.2.0"\n'
+                "status: completed\ndepende_de: []\n---\n# Critica\n"
+            ),
+        )
+        self.git("add", ".")
+        self.git("commit", "-qm", "feat: [T-DEMO-0003] - toca superficie crítica")
+        self.assertEqual(revisiones.motivo_revision(self.root, "T-DEMO-0003"), "informe ausente")
+        self.assertEqual(motor.estado(self.root, "docs/requirements")[:3], ("PASO", "revisar-tarea", "T-DEMO-0003"))
+
+        # Borrar un informe histórico RECHAZADO jamás otorga exención automática
+        self.escribir(
+            "docs/review/code_reviews/T-DEMO-0001-code-review.md",
+            "**Veredicto:** RECHAZADO\n- 🔴 Fallo grave (`para: desarrollador`)\n",
+        )
+        self.git("add", ".")
+        self.git("commit", "-qm", "docs(review): rechazo histórico")
+        (self.root / "docs/review/code_reviews/T-DEMO-0001-code-review.md").unlink()
+        self.git("add", "-A")
+        self.git("commit", "-qm", "chore: intento de borrar rechazo")
+        self.assertEqual(revisiones.motivo_revision(self.root, "T-DEMO-0001"), "informe ausente")
+
+    def test_puerta_delta_reabre_ficha_y_deja_checkpoint_con_error_ruff(self):
+        base = self.git("rev-parse", "HEAD")
+        self.escribir("pyproject.toml", "[tool.ruff]\n")
+        self.escribir("app/sucio.py", "import os\n\ndef f():\n    return 1\n")
+        ficha = self.escribir(
+            "docs/plan/tasks/T-DEMO-0001.md",
+            ('---\nid: T-DEMO-0001\ntitle: Demo\nversion: "v1.2.0"\nstatus: completed\ndepende_de: []\n---\n# Demo\n'),
+        )
+        self.git("add", ".")
+        self.git("commit", "-qm", "feat: [T-DEMO-0001] - cierre con lint en rojo")
+
+        self.assertFalse(motor.validar_puerta_delta(self.root, "T-DEMO-0001", base))
+        self.assertEqual(motor.frontmatter(ficha).get("status"), "in_progress")
+        ctx = contexto_ejecucion.consultar(self.root, "T-DEMO-0001")
+        self.assertIn("F401", ctx["checkpoint"]["impedimento"])
+
     def test_modularidad_y_lint_de_modulos_nuevos(self):
         raiz_repo = Path(__file__).resolve().parents[1]
         for rel in ("adevv/contexto_ejecucion.py", "adevv/decision_item.py"):
