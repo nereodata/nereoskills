@@ -64,7 +64,13 @@ class OrquestadorLigeroTests(unittest.TestCase):
             self.assertEqual(motor.estado(self.root), ("PASO", "start-version", "v0.1"))
 
         with patch.object(motor, "git", return_value="release/v0.1"):
-            # Bug va antes que tarea aunque tenga mayor weight
+            # Bug va antes que tarea aunque tenga mayor weight cuando ambos están planned
+            self.assertEqual(motor.estado(self.root), ("PASO", "bug-fix", "B-DEM-0001", "release/v0.1"))
+
+            # Una tarea in_progress tiene prioridad sobre un bug planned
+            self.tarea("T-DEM-0001", "in_progress", weight=10)
+            self.assertEqual(motor.estado(self.root), ("PASO", "task-dev", "T-DEM-0001", "release/v0.1"))
+            self.tarea("T-DEM-0001", "planned", weight=10)
             self.assertEqual(motor.estado(self.root), ("PASO", "bug-fix", "B-DEM-0001", "release/v0.1"))
 
             # Completar bug y aprobar revisión -> pasa a T-DEM-0001 (T-DEM-0002 depende de T-DEM-0001)

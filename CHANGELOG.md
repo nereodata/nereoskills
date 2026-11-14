@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.1] - 2026-11-15
+
+### Corregido
+
+- **orquestar** — Priorizado el estado `in_progress` sobre `bug-fix` en la ordenación de ítems elegibles de `skills/orquestar/orquestar.py`, de modo que una tarea ya iniciada se termine antes de atender bugs pendientes en estado `planned`.
+
 ## [1.3.0] - 2026-11-14
 
 ### Cambiado

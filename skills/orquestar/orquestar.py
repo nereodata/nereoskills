@@ -471,7 +471,7 @@ def estado(root: Path, docs: str = "docs/requirements") -> tuple:
         if item["status"] == "completed" and not revisada(root, item["id"]):
             return ("PASO", "revisar-tarea", item["id"], rama_actual)
 
-    # 2. Siguiente tarea o bug elegible (bugs primero, luego por weight)
+    # 2. Siguiente tarea o bug elegible (en curso primero, luego bugs, luego por weight)
     elegibles = [
         i
         for i in suyas
@@ -481,8 +481,8 @@ def estado(root: Path, docs: str = "docs/requirements") -> tuple:
     if elegibles:
         elegibles.sort(
             key=lambda i: (
-                0 if i["paso"] == "bug-fix" else 1,
                 0 if i["status"] == "in_progress" else 1,
+                0 if i["paso"] == "bug-fix" else 1,
                 i["weight"],
                 i["id"],
             )
