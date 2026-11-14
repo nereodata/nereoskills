@@ -361,11 +361,14 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
         set_config({"auto_update": True, "disabled_targets": []})
         set_update_state({})
 
+        self.patch_procesos = patch("adevv.processes.detectar_procesos_adevv", return_value=[])
+        self.mock_procesos = self.patch_procesos.start()
         self.patch_bucles = patch("adevv.processes.hay_bucles_en_marcha", return_value=[])
         self.mock_bucles = self.patch_bucles.start()
 
     def tearDown(self):
         self.patch_bucles.stop()
+        self.patch_procesos.stop()
         os.environ.pop("ADEVV_HOME", None)
         os.environ.pop("CLAUDE_HOME", None)
         os.environ.pop("CODEX_HOME", None)

@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import os
 import re
 import sys
 from pathlib import Path
@@ -34,7 +33,7 @@ from adevv.revisiones import clave_version, pendientes_cierre
 
 # Force UTF-8 stdout to avoid cp1252 crashes on Windows when item
 # titles contain unicode characters.
-if hasattr(sys.stdout, "buffer"):
+if __name__ == "__main__" and hasattr(sys.stdout, "buffer"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 
@@ -121,13 +120,13 @@ def get_search_globs(config_path: Path):
     return list(dict.fromkeys(globs)), None
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Verifica que todas las tareas y bugs de una release esten cerradas."
     )
     parser.add_argument("--version", required=True, help="Version target (ej. v1.2.0)")
     parser.add_argument("--dir", default=".", help="Directorio raiz del proyecto")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     root_dir = Path(args.dir)
     config_path = root_dir / "task_config.yaml"

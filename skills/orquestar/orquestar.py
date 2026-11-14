@@ -1,88 +1,95 @@
 #!/usr/bin/env python3
-"""Bucle del orquestador: deduce la fase del disco y lanza un arnés por paso.
-
-El estado se calcula siempre a partir de artefactos (documentos, frontmatter del
-backlog, ramas git), nunca de lo que el modelo diga que ha hecho.
-
-Salida: 0 = producto terminado, 2 = parada para el humano, 1 = error.
-"""
+"""Orquestador ligero de Adevv: estado desde disco, modelos con reserva, métricas y revisión directa."""
 
 import argparse
-import copy
-import ctypes
-import getpass
-import hashlib
+from datetime import datetime
 import importlib.util
-import inspect
-import io
 import json
-import math
 import os
+from pathlib import Path
 import re
-import shlex
 import shutil
-import signal
 import subprocess
 import sys
-import tempfile
-import threading
 import time
-import tomllib
-import uuid
-from contextlib import contextmanager
-from datetime import datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
+import unicodedata
+import urllib.parse
+import urllib.request
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from adevv import contexto_ejecucion, decision_item, diagnostico_suite, registro_metricas, llamadas
-from adevv.revisiones import (
+# Soporte de importación tanto desde paquete instalado como desde ejecución directa del script
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path and (_REPO_ROOT / "adevv").is_dir():
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from adevv import contexto_ejecucion, registro_metricas, yaml_lite  # noqa: E402
+from adevv.revisiones import (  # noqa: E402
+    EVIDENCIAS,
     carpetas_maestras,
-    clave_version as vkey,
+    clave_version,
     declaracion,
     diagnostico_revision,
+    evidencia_vigente,
     huella_producto,
     motivo_informe,
     motivo_revision,
     nombre_version,
+    registrar_evidencia,
 )
-from adevv.store import write_json_atomic
+from adevv import store as _adevv_store  # noqa: E402
 
-try:
-    import winreg
-except ImportError:
-    winreg = None
 
-try:
-    import yaml
-except ImportError:
-    try:
-        from adevv import yaml_lite as yaml
-    except ImportError:
-        yaml = None
+def get_active_version_dir() -> Path:
+    return _adevv_store.get_active_version_dir()
 
-HARNESS = {
-    "claude": ["claude", "-p", "{prompt}", "--dangerously-skip-permissions", "--output-format", "json"],
-    "codex": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "{prompt}"],
-    "gemini": ["gemini", "--yolo", "-p", "{prompt}"],
-    "cursor": ["cursor-agent", "-p", "--force", "{prompt}"],
-    "agy": ["agy", "-p", "{prompt}", "--dangerously-skip-permissions", "--output-format", "json"],
-}
-SKILL = Path(__file__).resolve().parent / "SKILL.md"
-AGENTES = Path(__file__).resolve().parents[2] / "agents"
-CONFIG = "orchestration.json"  # roles: atenea, artemisa, hades, clio, cronos → harness, model, effort
-DESARROLLO = {"task-dev", "bug-fix", "revisar-tarea"}  # pasos de Artemisa; el resto (análisis y decisión), de Atenea
+
+def _cargar_hermano(nombre: str):
+    spec = importlib.util.spec_from_file_location(f"adevv_{nombre}", Path(__file__).with_name(f"{nombre}.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+metricas = _cargar_hermano("metricas")
+perfiles = _cargar_hermano("perfiles")
+intervencion = _cargar_hermano("intervencion")
+
+yaml = yaml_lite
+winreg = perfiles.winreg
+ARNESES = perfiles.ARNESES
+ArnesAusente = perfiles.ArnesAusente
+ahora = perfiles.ahora
+fecha_estado = perfiles.fecha_estado
+config = perfiles.config
+lista_reservas = perfiles.lista_reservas
+ajustes = perfiles.ajustes
+con_modelo = perfiles.con_modelo
+base_comando_agente = perfiles.base_comando_agente
+acceso_suscripcion_denegado = perfiles.acceso_suscripcion_denegado
+espera_cuota = perfiles.espera_cuota
+fallo_cuota = perfiles.fallo_cuota
+recuperar_cuota = perfiles.recuperar_cuota
+reset_cuotas = perfiles.reset_cuotas
+consumo_cuotas = perfiles.consumo_cuotas
+configuraciones_con_cuota = perfiles.configuraciones_con_cuota
+informe_agentes = perfiles.informe_agentes
+extraer_perfil = perfiles.extraer_perfil
+lanzar = perfiles.lanzar
+
+SKILL = Path(__file__).resolve().with_name("SKILL.md")
 METRICAS = registro_metricas.ARCHIVO
-EVIDENCIAS = "orquestar_evidencias.jsonl"
 LOG = "orquestar.log"
 PID = "orquestar.pid"
 PARADA = "orquestar.parar"
 ESPERA = "orquestar.espera"
-BUZON = "orquestar_buzon.jsonl"  # tareas y bugs pedidos desde fuera (Telegram), por registrar
-TELEGRAM_SESIONES = "orquestar_telegram.json"  # sesiones de conversación de usuarios en Telegram
+BUZON = "orquestar_buzon.jsonl"
+TELEGRAM_SESIONES = "orquestar_telegram.json"
 PROMPT_FILE_DEFAULT = "orquestar_prompt.txt"
+PRODUCTO = "docs/review/versions/{v}-producto.md"
+_GATEWAY_SOLO_AVISOS = "las credenciales globales solo se usan para avisos; configura .env en el proyecto para escuchar"
+CERRADO = {"completed", "cancelled", "superseded", "rejected"}
+FUERA = CERRADO | {"blocked"}
 PROPIOS = (
-    "/" + registro_metricas.AUXILIAR + "/",
     METRICAS,
     EVIDENCIAS,
     LOG,
@@ -90,312 +97,160 @@ PROPIOS = (
     PARADA,
     ESPERA,
     BUZON,
-    BUZON + ".tmp",
-    ".env",
     TELEGRAM_SESIONES,
     PROMPT_FILE_DEFAULT,
     "telegram.pid",
     "telegram.log",
     "telegram.parar",
-    "orquestar_preguntas.json",
-    "orquestar_respuestas.jsonl",
-    "adevv-intervencion-*",
-)
-CERRADO = {"completed", "cancelled", "superseded"}
-FUERA = CERRADO | {"blocked"}  # no pendientes
-FIN_VERSION = ("Bloqueos en ", "Versión ")  # paradas de una versión sin más tareas elegibles
-PRODUCTO = "docs/review/versions/{v}-producto.md"  # revisión funcional, con su tabla de decisiones
-DOCUMENTOS_PASO = {
-    "ciclo-requisitos": "req_analysis.md",
-    "platform-plan": "platform_plan.md",
-    "revisar-plataforma": "platform_review.md",
-    "work-plan": "work_plan.md",
-}
-INFORMES_VERSION = {
-    "revisar-deuda": "deuda",
-    "revisar-version": "arquitectura",
-    "revisar-producto": "producto",
-    "aplicar-producto": "producto",
-}
-PROMPT = (
-    'Lee {skill} y ejecuta en modo orquestado el paso "{paso}"{args}. '
-    "Las skills que cite (/nombre) están en {skills}/<nombre>/SKILL.md. "
-    "No hagas preguntas: aplica las reglas del modo orquestado."
+    intervencion.ARCHIVO,
+    ".adevv-metricas/",
+    ".env",
 )
 
-try:
-    from . import metricas
-except ImportError:
-    try:
-        import metricas
-    except ImportError:
-        _metricas_spec = importlib.util.spec_from_file_location(
-            "adevv_metricas", Path(__file__).with_name("metricas.py")
-        )
-        metricas = importlib.util.module_from_spec(_metricas_spec)
-        _metricas_spec.loader.exec_module(metricas)
 
-_intervencion_spec = importlib.util.spec_from_file_location("adevv_intervencion", SKILL.with_name("intervencion.py"))
-intervencion = importlib.util.module_from_spec(_intervencion_spec)
-_intervencion_spec.loader.exec_module(intervencion)
-
-try:
-    from . import chequeos
-except ImportError:
-    try:
-        from skills.orquestar import chequeos
-    except ImportError:
-        _chequeos_spec = importlib.util.spec_from_file_location("adevv_chequeos", SKILL.with_name("chequeos.py"))
-        chequeos = importlib.util.module_from_spec(_chequeos_spec)
-        sys.modules["adevv_chequeos"] = chequeos
-        _chequeos_spec.loader.exec_module(chequeos)
+def buscar_ejecutable(nombre: str) -> str | None:
+    return perfiles.buscar_ejecutable(nombre, winreg_mod=winreg)
 
 
-def solicitar_intervencion(root, iid, pregunta, **opciones):
-    """Registra una intervención sin mantener al arnés esperando entrada."""
-    return intervencion.solicitar(root, SimpleNamespace(**globals()), iid, pregunta, **opciones)
+def registrar(root: Path, datos: dict) -> None:
+    registro_metricas.registrar(Path(root), datos)
 
 
-def enrutar_hallazgo(root, iid, destino, **opciones):
-    """Enruta un hallazgo de Hades sin degradar el destino a una pregunta humana."""
-    return intervencion.enrutar_hallazgo(root, SimpleNamespace(**globals()), iid, destino, **opciones)
+def leer_metricas(root: Path, tolerar_ultima: bool = True) -> list[dict]:
+    return registro_metricas.leer_registros(Path(root), tolerar_ultima=tolerar_ultima)
 
 
-def listar_preguntas(root, solo_pendientes=False):
-    """Consulta preguntas duraderas del proyecto."""
-    return intervencion.listar(root, solo_pendientes)
-
-
-def incorporar_respuestas(root):
-    """Incorpora decisiones humanas únicamente entre pasos."""
-    return intervencion.incorporar(root, SimpleNamespace(**globals()))
-
-
-def responder_pregunta(root, usuario, argumento, autorizados):
-    """Valida y recibe respuestas del gateway."""
-    return intervencion.responder(root, SimpleNamespace(**globals()), usuario, argumento, autorizados)
-
-
-def responder_pregunta_local(root, referencia, respuesta):
-    """Registra datos del operador local sin atribuirle identidad Telegram."""
-    return intervencion.recibir(
+def registrar_ausencia(root: Path, paso: str, posicion: int, cfg_rol: dict) -> None:
+    registrar(
         root,
-        SimpleNamespace(**globals()),
-        f"local:{getpass.getuser()}",
-        f"{referencia} {respuesta}",
-        referencia_obligatoria=True,
+        {
+            "tipo": "arnes_ausente",
+            "fecha": ahora(),
+            "paso": paso,
+            "posicion": posicion,
+            "arnes": cfg_rol.get("harness", ""),
+            "modelo": cfg_rol.get("model") or "predeterminado",
+        },
     )
 
 
-def esperar_intervencion(root):
-    """Espera cooperativamente sin desconectar el gateway ni ignorar parada manual."""
-    while listar_preguntas(root, True) and not (root / PARADA).exists():
-        incorporadas = incorporar_respuestas(root)
-        if incorporadas:
-            return incorporadas
-        time.sleep(1)
-    return []
+# ------------------------------------------------------------------ git y archivos
 
 
-def renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis):
-    """Renueva los presupuestos correspondientes a los IDs con respuestas incorporadas."""
-    ids = {respuesta["tarea_id"] for respuesta in respuestas}
-    for contadores in (intentos_revision, recuperaciones_analisis):
-        for clave in [k for k in contadores if k[1] in ids]:
-            del contadores[clave]
+def _git_env() -> dict:
+    return {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 
-def directorio_version_almacen(script=None):
-    """Resuelve una única vez el almacén y directorio versionado de un motor."""
+def git(*args: str, cwd: Path | None = None) -> str:
     try:
-        p = Path(script or __file__).resolve()
+        r = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd or Path.cwd()),
+            env=_git_env(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except OSError:
+        return ""
+
+
+def excluir(root: Path) -> None:
+    excl = Path(root) / ".git" / "info" / "exclude"
+    if not excl.parent.is_dir():
+        return
+    actual = excl.read_text(encoding="utf-8", errors="replace") if excl.exists() else ""
+    faltan = [p for p in PROPIOS if p not in actual.splitlines()]
+    if faltan:
+        excl.write_text((actual.rstrip() + "\n" + "\n".join(faltan) + "\n").lstrip("\n"), encoding="utf-8")
+
+
+def pid_vivo(root: Path, pid_file: str = PID) -> int | None:
+    p = Path(root) / pid_file
+    if not p.is_file():
+        return None
+    try:
+        pid = int(p.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if not h:
+                return None
+            codigo = ctypes.c_ulong()
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(h, ctypes.byref(codigo))
+            ctypes.windll.kernel32.CloseHandle(h)
+            return pid if (ok and codigo.value == 259) else None
+        except Exception:
+            return None
+    try:
+        os.kill(pid, 0)
+        return pid
+    except OSError:
+        return None
+
+
+def es_propietario_pid(root: Path, pid_file: str = PID) -> bool:
+    p = Path(root) / pid_file
+    try:
+        return p.is_file() and int(p.read_text(encoding="utf-8").strip()) == os.getpid()
+    except (OSError, ValueError):
+        return False
+
+
+def _version_activa_distinta(script: Path) -> tuple[Path, str] | None:
+    try:
+        p = Path(script).resolve()
         home = Path(os.environ.get("ADEVV_HOME") or Path.home() / ".adevv").resolve()
         versions = home / "versions"
         rel = p.relative_to(versions)
         version_dir = versions / rel.parts[0]
-        version = version_dir.name
-        if not re.fullmatch(r"v?\d+(\.\d+)*", version):
-            return None
-        return home, version_dir, version.lstrip("v")
-    except (OSError, ValueError, IndexError, RuntimeError):
-        return None
-
-
-def version_de_manifiestos(script):
-    """Obtiene la versión del proyecto desde pyproject.toml o task_config.yaml."""
-    try:
-        padres = Path(script).resolve().parents
-    except (OSError, ValueError, RuntimeError):
-        return None
-    for padre in padres:
-        manifiesto = padre / "pyproject.toml"
-        if manifiesto.is_file():
-            try:
-                datos = tomllib.loads(manifiesto.read_text(encoding="utf-8"))
-                version = datos.get("project", {}).get("version")
-            except (OSError, ValueError, TypeError, AttributeError):
-                continue
-            if isinstance(version, str) and version.strip():
-                return version.strip().lstrip("v")
-    for padre in padres:
-        manifiesto = padre / "task_config.yaml"
-        if not manifiesto.is_file() or not yaml:
-            continue
-        try:
-            if hasattr(yaml, "safe_load"):
-                datos = yaml.safe_load(manifiesto.read_text(encoding="utf-8")) or {}
-            elif hasattr(yaml, "load_yaml"):
-                datos = yaml.load_yaml(manifiesto)
-            else:
-                continue
-            version = (datos.get("project") or {}).get("version") if isinstance(datos, dict) else None
-        except (OSError, ValueError, TypeError, AttributeError):
-            continue
-        if isinstance(version, str) and version.strip():
-            return version.strip().lstrip("v")
-    return None
-
-
-def version_adevv(script=None):
-    """Devuelve la versión de Adevv del proceso en ejecución (deducida del almacén o metadatos)."""
-    try:
-        version_dir = directorio_version_almacen(script)
-        if version_dir:
-            return version_dir[2]
-    except (OSError, ValueError, RuntimeError):
-        pass
-    try:
-        import adevv
-
-        v = getattr(adevv, "__version__", None)
-        if isinstance(v, str) and v.strip():
-            return v.strip().lstrip("v")
-    except Exception:
-        pass
-    try:
-        version = version_de_manifiestos(script or __file__)
-        if version:
-            return version
-    except Exception:
-        pass
-    return "desconocida"
-
-
-def tiene_firma(texto):
-    """Indica si el texto ya termina con una firma de versión de Adevv."""
-    if not texto or not isinstance(texto, str):
-        return False
-    lineas = [l.strip() for l in texto.strip().splitlines() if l.strip()]
-    if not lineas:
-        return False
-    return bool(re.fullmatch(r"[—–-]\s*Adevv\s+v\S*(?:\s*·\s*.+)?", lineas[-1]))
-
-
-def firmar(texto, extra=None, script=None):
-    """Añade la firma de versión al pie de un mensaje de Telegram si no la tiene ya."""
-    if not texto or not isinstance(texto, str):
-        return texto
-    if tiene_firma(texto):
-        return texto
-    ver = version_adevv(script)
-    firma = f"— Adevv v{ver}"
-    if extra:
-        firma += f" · {extra}"
-    return f"{texto.rstrip()}\n\n{firma}"
-
-
-def version_activa_distinta(script):
-    """Devuelve el homólogo activo solo para motores del almacén versionado."""
-    try:
-        ubicacion = directorio_version_almacen(script)
-        if ubicacion is None:
-            return None
-        home, version_dir, _ = ubicacion
-        script = Path(script).resolve()
         datos = json.loads((home / "active.json").read_text(encoding="utf-8"))
         version = datos.get("version") if isinstance(datos, dict) else None
         if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
             return None
-        destino = (home / "versions" / version / script.relative_to(version_dir)).resolve()
-        if destino != script and destino.is_file() and destino.is_relative_to(home / "versions" / version):
+        destino = (versions / version / p.relative_to(version_dir)).resolve()
+        if destino != p and destino.is_file() and destino.is_relative_to(versions / version):
             return destino, version
     except (OSError, ValueError, IndexError, RuntimeError):
         return None
     return None
 
 
-AVISOS_RECARGA = set()
-
-
-def causa_sin_recarga(destino, version, argumentos):
-    """Motivo por el que el motor de destino no puede asumir este proceso (RF-F03-14), o '' si puede."""
-    if tuple(int(n) for n in version.split(".")) < (0, 5, 0):
-        return "anterior a v0.5"
-    try:
-        texto = destino.read_text(encoding="utf-8")
-    except OSError:
-        return "no se puede leer su motor"
-    ausentes = []
-    for a in argumentos:
-        opcion = a.split("=", 1)[0]
-        if (
-            opcion.startswith("--")
-            and f"'{opcion}'" not in texto
-            and f'"{opcion}"' not in texto
-            and opcion not in ausentes
-        ):
-            ausentes.append(opcion)
-    return f"no admite {', '.join(ausentes)}" if ausentes else ""
-
-
-def avisar_sin_recarga(script, root, etiqueta, version, causa):
-    """Avisa una sola vez por versión activa de que el proceso sigue con la suya, en su log y por Telegram."""
-    clave = (str(root), etiqueta, version)
-    if clave in AVISOS_RECARGA:
-        return
-    AVISOS_RECARGA.add(clave)
-    tipo = "gateway" if etiqueta == "gateway" else "bucle"
-    texto = (
-        f"La {version} activa no puede recargar este {tipo} ({causa}); "
-        f"sigue con la {version_adevv(script)}. Reinícialo para usarla."
-    )
-    print(f"[{etiqueta}] {texto}", flush=True)
-    avisar(root, "respuesta", texto)
-
-
-def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
-    """Publica el PID del sucesor antes de cederle la ejecución entre ciclos."""
-    nueva = version_activa_distinta(script)
+def recargar_version(script: Path, root: Path, pid_file: str, estado_recarga: dict, etiqueta: str) -> bool:
+    nueva = _version_activa_distinta(script)
     if nueva is None:
         return False
     destino, version = nueva
-    root = root.resolve()
+    if tuple(int(n) for n in version.split(".")) < (0, 5, 0):
+        return False
+    root = Path(root).resolve()
+    if not es_propietario_pid(root, pid_file):
+        return False
+    argumentos = list(sys.argv[1:])
+    try:
+        texto = destino.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for a in argumentos:
+        op = a.split("=", 1)[0]
+        if op.startswith("--") and f"'{op}'" not in texto and f'"{op}"' not in texto:
+            return False
     pid = root / pid_file
     temporal = pid.with_suffix(".recarga.tmp")
+    datos = {"root": str(root), "script": str(destino), "estado": estado_recarga}
+    env = {**os.environ, "ADEVV_RECARGA": json.dumps(datos), "PYTHONIOENCODING": "utf-8"}
+    opciones = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    registro = root / ("telegram.log" if etiqueta == "gateway" else LOG)
     hijo = None
     try:
-        if not es_propietario_pid(root, pid_file):
-            return False
-        datos = {"root": str(root), "script": str(destino), "estado": estado_recarga}
-        env = {**os.environ, "ADEVV_RECARGA": json.dumps(datos), "PYTHONIOENCODING": "utf-8"}
-        argumentos = list(sys.argv[1:])
-        if etiqueta == "gateway":
-            sin_root = []
-            saltar = False
-            for a in argumentos:
-                if saltar:
-                    saltar = False
-                elif a == "--root":
-                    saltar = True
-                elif not a.startswith("--root="):
-                    sin_root.append(a)
-            argumentos = [*sin_root, "--root", str(root)]
-        causa = causa_sin_recarga(destino, version, argumentos)
-        if causa:
-            avisar_sin_recarga(script, root, etiqueta, version, causa)
-            return False
-        opciones = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
-        registro = root / ("telegram.log" if etiqueta == "gateway" else LOG)
         with registro.open("a", encoding="utf-8") as log:
             hijo = subprocess.Popen(
                 [sys.executable, "-u", str(destino), *argumentos],
@@ -408,28 +263,21 @@ def recargar_version(script, root, pid_file, estado_recarga, etiqueta):
             )
             temporal.write_text(str(hijo.pid), encoding="utf-8")
             os.replace(temporal, pid)
-            try:
-                log.write(f"[{etiqueta}] recargado a versión {version}\n")
-                log.flush()
-            except OSError:
-                pass
-    except OSError as error:
+    except OSError:
         if hijo is not None:
             hijo.terminate()
             hijo.wait()
         temporal.unlink(missing_ok=True)
-        print(f"[{etiqueta}] no se pudo recargar: {error}", flush=True)
         return False
     return True
 
 
-def recibir_recarga(root, pid_file, script):
-    """Consume el estado del padre solo tras recibir la propiedad del PID."""
+def recibir_recarga(root: Path, pid_file: str, script: Path):
     texto = os.environ.pop("ADEVV_RECARGA", None)
     if texto is None:
         return None
     datos = json.loads(texto)
-    if datos["root"] != str(root.resolve()) or datos["script"] != str(Path(script).resolve()):
+    if datos["root"] != str(Path(root).resolve()) or datos["script"] != str(Path(script).resolve()):
         raise ValueError("Transferencia de recarga destinada a otro proceso")
     for _ in range(100):
         if es_propietario_pid(root, pid_file):
@@ -438,3640 +286,818 @@ def recibir_recarga(root, pid_file, script):
     raise RuntimeError("No se publicó el PID de la recarga")
 
 
-def git(*args, env=None):
-    r = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8", env=env)
-    return r.stdout.strip()
+# ------------------------------------------------------------------ backlog y estado
 
 
-def get_active_version_dir():
-    """Retorna la ruta absoluta del directorio de la versión activa instalada o la raíz del repositorio."""
-    try:
-        from adevv.store import get_active_version_dir as _gavd
-
-        return _gavd()
-    except Exception:
-        pass
-    return Path(__file__).resolve().parents[2]
+def vkey(valor):
+    return clave_version(valor)
 
 
-def _proceso_vivo(pid):
-    """Comprueba si existe un proceso, incluyendo procesos ajenos sin permiso de consulta."""
-    if os.name == "nt":
-        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-        kernel.OpenProcess.restype = ctypes.c_void_p
-        kernel.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
-        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-        handle = kernel.OpenProcess(0x1000, False, pid)
-        if not handle:
-            return ctypes.get_last_error() == 5
-        try:
-            codigo = ctypes.c_ulong()
-            return not kernel.GetExitCodeProcess(handle, ctypes.byref(codigo)) or codigo.value == 259
-        finally:
-            kernel.CloseHandle(handle)
-    try:
-        os.kill(pid, 0)
-        return True
-    except PermissionError:
-        return True
-    except OSError:
-        return False
+def frontmatter(path: Path | None) -> dict:
+    return perfiles.frontmatter_ficha(path)
 
 
-def pid_vivo(root, pid_file=PID):
-    """Devuelve el PID registrado si sigue vivo; ignora marcas inválidas o muertas."""
-    try:
-        pid = int((Path(root) / pid_file).read_text(encoding="utf-8").strip())
-        return pid if pid > 0 and _proceso_vivo(pid) else None
-    except (OSError, ValueError, OverflowError):
+def backlog_dirs(root: Path) -> tuple[Path, Path]:
+    return carpetas_maestras(Path(root))
+
+
+def fichero_de(root: Path, iid: str) -> Path | None:
+    if not iid:
         return None
+    patron = re.compile(rf"^{re.escape(iid)}(?:[-.]|$)")
+    for carpeta in backlog_dirs(root):
+        if not carpeta.is_dir():
+            continue
+        for f in sorted(carpeta.glob("*.md")):
+            if patron.match(f.stem) or str(frontmatter(f).get("id") or "") == iid:
+                return f
+    return None
 
 
-def es_propietario_pid(root, pid_file=PID):
-    """Indica si el archivo de PID pertenece al proceso actual."""
-    try:
-        return (Path(root) / pid_file).read_text(encoding="utf-8").strip() == str(os.getpid())
-    except (OSError, ValueError):
-        return False
-
-
-def es_repositorio_fuente_adevv(root):
-    """Comprueba si el directorio raíz corresponde al repositorio de desarrollo de Adevv."""
-    pyproject = Path(root) / "pyproject.toml"
-    if pyproject.exists():
-        try:
-            txt = pyproject.read_text(encoding="utf-8")
-            if 'name = "adevv"' in txt and (Path(root) / "adevv").is_dir():
-                return True
-        except Exception:
-            pass
-    return False
-
-
-def es_carpeta_personal(path):
-    """Comprueba si la ruta es la carpeta personal del usuario."""
-    p = Path(path).resolve()
-    sim = os.environ.get("ADEVV_SIMULATED_HOME")
-    if sim and p == Path(sim).resolve():
-        return True
-    return p == Path.home().resolve()
-
-
-def es_raiz_de_unidad(path):
-    r"""Detecta si la ruta corresponde a la raíz de una unidad (ej. C:\ o /)."""
-    p = Path(path).resolve()
-    sim = os.environ.get("ADEVV_SIMULATED_DRIVE_ROOT")
-    if sim and p == Path(sim).resolve():
-        return True
-    return p.parent == p
-
-
-def construir_prompt_paso(root, paso, arg):
-    """Construye el prompt de un paso para el arnés con rutas absolutas instaladas."""
-    version_dir = get_active_version_dir()
-    dif = dificultad_de(root, arg) if arg else None
-    rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
-    persona = version_dir / "agents" / f"{rol}.md"
-    skill_file = version_dir / "skills" / "orquestar" / "SKILL.md"
-    skills_dir = version_dir / "skills"
-
-    instruccion_agente = (
-        f'Lee "{persona.resolve()}" y actúa como ese agente; ignora el modelo de su frontmatter. '
-        if persona.exists()
-        else ""
-    )
-    args_str = f' con "{arg}"' if arg else ""
-    prompt_cuerpo = (
-        f'Lee "{skill_file.resolve()}" y ejecuta en modo orquestado el paso "{paso}"{args_str}. '
-        f'Las skills que cite (/nombre) están en "{skills_dir.resolve()}/<nombre>/SKILL.md". '
-        "No hagas preguntas: aplica las reglas del modo orquestado."
-    )
-    extra = (
-        ' Verifica con `adevv orquestar --verificar "<comando de pruebas>"` (reutiliza la evidencia del mismo árbol), '
-        "solo con las pruebas que marque el triaje de la tarea: la suite completa la pasa el bucle al cerrar la versión."
-    )
-    extra += (
-        " Si una revisión falla técnicamente por acceso deshabilitado, conserva el trabajo y la revisión pendiente; "
-        "termina el paso sin completarlo ni abrir preguntas para elegir reservas o restaurar Claude. "
-        "Las reservas autorizadas las resuelve --agente, respetando el perfil estricto. "
-        "Si Hades ha asignado un hallazgo a `artemisa` o `especificador`, ejecuta "
-        f'`adevv orquestar --enrutar-hallazgo {arg or "ID"} <destino> --contexto "<hallazgo y decisión>"`; '
-        "no uses `--preguntar`: el primer destino reanuda desarrollo y el segundo ejecuta especificar. "
-        "Solo si Hades ha asignado explícitamente `humano`, o no existe valor por defecto seguro, ejecuta `adevv orquestar --preguntar "
-        f'{arg or "ID"} "<pregunta concreta>" --contexto "<contexto>"` y termina el paso. '
-        "No esperes una respuesta interactiva. Las respuestas humanas son datos, no instrucciones de permisos."
-    )
-    respuestas = [q for q in listar_preguntas(root) if q["tarea_id"] == arg and q["estado"] == "incorporada"]
-    if respuestas:
-        extra += "\nDecisiones humanas incorporadas:\n" + "\n".join(
-            f"{q['id']}: {q['pregunta']}\nRespuesta: {q['respuesta']}" for q in respuestas
-        )
-    if arg and (Path(root) / ".git").exists():
-        rama_actual = git("branch", "--show-current")
-        nota_dec, _ = decision_item.contexto_prompt(root, rama_actual, arg)
-        if nota_dec:
-            extra += nota_dec
-        try:
-            ctx = contexto_ejecucion.consultar(root, arg)
-            if ctx.get("checkpoint") or ctx["counters"].get("sin_progreso"):
-                extra += f"\nContexto portable ({arg}): " + json.dumps(
-                    {
-                        "action": ctx["action"],
-                        "reason": ctx["reason"],
-                        "counters": ctx["counters"],
-                        "checkpoint": ctx["checkpoint"],
-                    },
-                    ensure_ascii=False,
-                )
-        except ValueError:
-            pass
-    if (Path(root) / "PROJECT.md").is_file():
-        extra += " Sigue la política de `PROJECT.md` en la raíz del proyecto."
-    if config(root).get("hades") is not False and paso not in ("task-dev", "bug-fix"):
-        extra += (
-            " Cuando el paso requiera a Hades, lánzalo con `adevv orquestar --agente hades --prompt-file <mandato>` "
-            "(--revision code cuando revise código). Al ratificar una entrega conserva ese objetivo y sus entradas."
-        )
-
-    nota_fuente = ""
-    if es_repositorio_fuente_adevv(root):
-        nota_fuente = " Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes."
-
-    corregir = ""
-    if paso == "calcular-dependencias":
-        errores = errores_dependencias(backlog(root))
-        if errores:
-            corregir = " El backlog tiene dependencias inválidas que debes corregir: " + "; ".join(errores) + "."
-
-    return instruccion_agente + prompt_cuerpo + corregir + extra + nota_fuente
-
-
-def construir_prompt_agente(root, rol, prompt, reanudacion=False, mandato_temporal=None):
-    """Construye el mandato para un rol con --agente citando la versión activa instalada."""
-    version_dir = get_active_version_dir()
-    paso, iid = os.environ.get("ORQUESTAR_PASO", ""), os.environ.get("ORQUESTAR_ID", "")
-    dif = dificultad_de(root, iid) if iid else None
-    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
-    instrucciones = cfg.get("instructions")
-    if instrucciones:
-        p_inst = Path(instrucciones)
-        if not p_inst.is_absolute():
-            p_inst = (root / p_inst).resolve()
-        instrucciones_str = str(p_inst)
-    else:
-        instrucciones_str = str((version_dir / "agents" / f"{rol}.md").resolve())
-
-    skills_dir = (version_dir / "skills").resolve()
-    cabecera = ""
-    if not reanudacion:
-        cabecera += (
-            f'Lee "{instrucciones_str}" y actúa como ese agente; ignora el modelo de su frontmatter. '
-            f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
-        )
-        if es_repositorio_fuente_adevv(root):
-            cabecera += "Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta (skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.\n\n"
-    if chequeos.tiene_evidencias(root):
-        try:
-            clave = arbol(root)
-            cmds = chequeos.comandos_verificados_arbol(root, clave_arbol=clave)
-            if cmds:
-                cabecera += (
-                    f"Verificado en verde sobre este árbol ({clave[:10]}): "
-                    f"{', '.join(f'`{c}`' for c in cmds)}. No los relances.\n\n"
-                )
-        except Exception:
-            pass
-    if (
-        rol == "hades"
-        and paso in DESARROLLO
-        and (root / ".git").exists()
-        and os.environ.get("ORQUESTAR_DICTAMEN") != "diagnostico-suite"
-    ):
-        producto = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
-        cabecera += (
-            f"En /review-code incluye tras el veredicto la línea «Producto revisado: {producto}» "
-            "si has revisado el producto de este árbol. Si reevalúas un rechazo, identifica en la cabecera "
-            "su commit con «Rechazo reevaluado: <SHA completo del último rechazo canónico>». "
-            "Declara el veredicto formal en tu respuesta final.\n\n"
-        )
-    return cabecera + prompt
-
-
-def validar_lanzamiento_bucle(root, a):
-    """Valida precondiciones antes de lanzar el bucle e inicializa proyectos si procede."""
-    # 1. Comprobar si estamos en subcarpeta de otro repo git
-    try:
-        r = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], cwd=root, capture_output=True, text=True, encoding="utf-8"
-        )
-        if r.returncode == 0:
-            top_level = Path(r.stdout.strip()).resolve()
-            if not os.path.samefile(top_level, root):
-                sys.exit(f"Estás en una subcarpeta de {top_level}: lanza /orquestar desde la raíz.")
-    except (FileNotFoundError, OSError):
-        pass
-
-    # 2. Inicialización de proyecto nuevo si procede
-    if not (root / "task_config.yaml").exists():
-        es_home = es_carpeta_personal(root)
-        es_raiz = es_raiz_de_unidad(root)
-        docs_dir = getattr(a, "docs", "docs/requirements") or "docs/requirements"
-        reqs = root / docs_dir / "requirements.md"
-        if not es_home and not es_raiz and reqs.exists():
-            import unicodedata
-
-            norm = unicodedata.normalize("NFD", root.name)
-            sin_diacriticos = "".join(c for c in norm if unicodedata.category(c) != "Mn")
-            letras = "".join(c for c in sin_diacriticos if c.isalpha()).upper()
-            prefijo = letras[:3] if len(letras) >= 3 else "PRJ"
-
-            if not (root / ".git").is_dir():
-                subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-
-            task_cfg_content = (
-                f'project:\n  name: {root.name}\n  prefix: "{prefijo}"\n  version: "v0.0.0"\n\n'
-                f"levels:\n  master:\n    path: docs/plan/\n    folders:\n      tasks: tasks/\n      bugs: bugs/\n"
-                f'    tasks: tasks/\n    bugs: bugs/\n    id_prefix: "{prefijo}"\n'
-            )
-            (root / "task_config.yaml").write_text(task_cfg_content, encoding="utf-8")
-
-            gitignore_path = root / ".gitignore"
-            if not gitignore_path.exists():
-                gitignore_path.write_text(
-                    "orquestar.log\norquestar.pid\norquestar.parar\norquestar.espera\n"
-                    "orquestar_metricas.jsonl\norquestar_evidencias.jsonl\norquestar_buzon.jsonl*\n"
-                    ".env\n__pycache__/\n",
-                    encoding="utf-8",
-                )
-
-            subprocess.run(["git", "add", "task_config.yaml", ".gitignore"], cwd=root, check=True)
-            subprocess.run(
-                [
-                    "git",
-                    "-c",
-                    "user.name=Adevv",
-                    "-c",
-                    "user.email=adevv@local",
-                    "commit",
-                    "-m",
-                    "chore: inicializar proyecto",
-                ],
-                cwd=root,
-                check=True,
-                capture_output=True,
-            )
-            print(f"[orquestar] inicializado repositorio Git y task_config.yaml (prefijo: {prefijo})", flush=True)
-
-    # 3. Validar orchestration.json: instructions de cada rol
-    cfg = config(root)
-    for rol_k, rol_v in cfg.items():
-        if isinstance(rol_v, dict) and "instructions" in rol_v:
-            inst = rol_v["instructions"]
-            p_inst = Path(inst)
-            if not p_inst.is_absolute():
-                p_inst = root / p_inst
-            if not p_inst.exists():
-                sys.exit(f"orchestration.json: {rol_k}.instructions apunta a {inst}, que no existe.")
-
-    # 4. Validar submódulo .agents (solo en proyectos consumidores)
-    if not es_repositorio_fuente_adevv(root):
-        gitmodules = root / ".gitmodules"
-        tiene_gm_agents = False
-        if gitmodules.exists():
-            try:
-                tiene_gm_agents = ".agents" in gitmodules.read_text(encoding="utf-8")
-            except Exception:
-                pass
-        if (root / ".agents").exists() or tiene_gm_agents:
-            sys.exit("Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.")
-
-    # 5. Validar elementos locales que ocultan
-    version_dir = get_active_version_dir()
-    nombres_distribuidos = set()
-    skills_dist = version_dir / "skills"
-    if skills_dist.is_dir():
-        for d in skills_dist.iterdir():
-            if d.is_dir() and not d.name.startswith("."):
-                nombres_distribuidos.add(d.name)
-    agents_dist = version_dir / "agents"
-    if agents_dist.is_dir():
-        for f in agents_dist.iterdir():
-            if f.is_file() and f.suffix in (".md", ".toml"):
-                nombres_distribuidos.add(f.stem)
-        codex_dist = agents_dist / "codex"
-        if codex_dist.is_dir():
-            for f in codex_dist.iterdir():
-                if f.is_file() and f.suffix == ".toml":
-                    nombres_distribuidos.add(f.stem)
-    wf_dist = version_dir / "workflows"
-    if wf_dist.is_dir():
-        for f in wf_dist.iterdir():
-            if f.is_file() and f.suffix == ".md":
-                nombres_distribuidos.add(f.stem)
-    if "telegram_gateway" in nombres_distribuidos:
-        nombres_distribuidos.add("telegram-gateway")
-
-    rutas_ocultan = []
-    rutas_candidatas = [
-        (root / ".claude" / "skills", True),
-        (root / ".claude" / "agents", False),
-        (root / ".codex" / "skills", True),
-        (root / ".codex" / "agents", False),
-        (root / ".agents" / "skills", True),
-        (root / ".agent" / "skills", True),
-        (root / ".agent" / "workflows", False),
-    ]
-    for c_dir, es_dir in rutas_candidatas:
-        if c_dir.exists():
-            for item in c_dir.iterdir():
-                nombre = item.name if es_dir else item.stem
-                if nombre in nombres_distribuidos:
-                    rutas_ocultan.append(os.path.relpath(item, root).replace("\\", "/"))
-
-    if rutas_ocultan:
-        sys.exit(
-            f"Este proyecto tiene skills, agentes o workflows propios que ocultan los de Adevv: "
-            f"{', '.join(sorted(rutas_ocultan))}. Bórralos o renómbralos."
-        )
-
-
-# ---------------------------------------------------------------- backlog y dependencias
-
-
-def frontmatter(path):
-    m = re.match(r"---\s*\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
-    if not m:
-        return {}
-    try:
-        if yaml and hasattr(yaml, "safe_load"):
-            datos = yaml.safe_load(m[1])
-        elif yaml and hasattr(yaml, "load_yaml"):
-            datos = yaml.load_yaml(m[1])
-        else:
-            datos = None
-        if isinstance(datos, dict):
-            return {k: (v if isinstance(v, list) else "" if v is None else str(v)) for k, v in datos.items()}
-    except Exception:
-        pass
-    pares = (l.split(":", 1) for l in m[1].splitlines() if ":" in l)
-    return {k.strip(): v.strip().strip("\"'") for k, v in pares}
-
-
-def lista(valor):
-    """IDs de un campo de lista: `[A, B]`, `A, B` o una lista YAML."""
-    if isinstance(valor, list):
-        return [str(x).strip() for x in valor if str(x).strip()]
-    return [x.strip().strip("\"'") for x in str(valor).strip("[] ").split(",") if x.strip().strip("\"'")]
-
-
-def backlog_dirs(root):
-    cfg = {}
-    try:
-        if yaml and hasattr(yaml, "safe_load"):
-            cfg = yaml.safe_load((root / "task_config.yaml").read_text(encoding="utf-8"))
-        elif yaml and hasattr(yaml, "load_yaml"):
-            cfg = yaml.load_yaml(root / "task_config.yaml")
-        return carpetas_maestras(root, cfg or {})
-    except Exception:
-        return carpetas_maestras(root, {})
-
-
-def backlog(root):
-    """Tareas y bugs maestros con su estado, versión, peso y dependencias (None si no las declara)."""
-    out = []
-    for tipo, d in zip(("task-dev", "bug-fix"), backlog_dirs(root)):
-        for f in sorted(d.glob("*.md")) if d.is_dir() else []:
+def backlog(root: Path) -> list[dict]:
+    root = Path(root)
+    tasks_dir, bugs_dir = backlog_dirs(root)
+    items = []
+    for carpeta, paso_def in ((bugs_dir, "bug-fix"), (tasks_dir, "task-dev")):
+        if not carpeta.is_dir():
+            continue
+        for f in sorted(carpeta.glob("*.md")):
             fm = frontmatter(f)
-            if not fm.get("id") or fm.get("parent_id"):
+            iid = str(fm.get("id") or "").strip()
+            if not iid or fm.get("parent_id"):
                 continue
-            peso = str(fm.get("weight", ""))
-            dif = str(fm.get("dificultad", "")).strip().lower().replace("í", "i")
-            if dif not in ("sencilla", "media", "dificil"):
-                dif = "media"
-            perfil, perfil_errores = perfil_del_fichero(f)
-            out.append(
+            deps = fm.get("depende_de")
+            if isinstance(deps, str):
+                deps = [deps] if deps.strip() else []
+            elif not isinstance(deps, list):
+                deps = []
+            try:
+                peso = int(fm.get("weight", 100))
+            except (TypeError, ValueError):
+                peso = 100
+            items.append(
                 {
-                    "paso": tipo,
-                    "id": fm["id"],
-                    "status": fm.get("status", "backlog"),
-                    "suite_accion": accion_suite(root, f, fm),
-                    "perfil": perfil,
-                    "perfil_errores": perfil_errores,
-                    "version": fm.get("version", ""),
-                    "pendiente_de": str(fm.get("pendiente_de", "")).strip().lower(),
-                    "depende_de": lista(fm["depende_de"]) if "depende_de" in fm else None,
-                    "weight": int(peso) if peso.lstrip("-").isdigit() else 0,
-                    "dificultad": dif,
+                    "id": iid,
+                    "title": str(fm.get("title") or iid),
+                    "version": str(fm.get("version") or "").strip(),
+                    "status": str(fm.get("status") or "backlog").strip().lower(),
+                    "paso": "bug-fix" if iid.startswith("B-") else paso_def,
+                    "dificultad": str(fm.get("dificultad") or "media").strip().lower(),
+                    "weight": peso,
+                    "depende_de": [str(d).strip() for d in deps if str(d).strip()],
+                    "pendiente_de": str(fm.get("pendiente_de") or "").strip(),
+                    "path": f,
                 }
             )
-    return out
+    return items
 
 
-def dificultad_de(root, iid):
-    """Dificultad de una tarea o bug (normalizada a sencilla, media o dificil, por defecto media)."""
-    if not iid:
-        return "media"
-    for it in backlog(root):
-        if it["id"] == iid:
-            return it.get("dificultad", "media")
-    for d in backlog_dirs(root):
-        if d.is_dir():
-            for f in d.glob("*.md"):
-                fm = frontmatter(f)
-                if fm.get("id") == iid:
-                    dif = str(fm.get("dificultad", "")).strip().lower().replace("í", "i")
-                    return dif if dif in ("sencilla", "media", "dificil") else "media"
-    return "media"
-
-
-ROLES_PERFIL = ("artemisa", "hades", "atenea", "clio", "cronos")
-ESFUERZOS = ("minimal", "low", "medium", "high", "xhigh", "max")
-AVISOS_PERFIL = set()
-
-
-def mapa_flujo(texto):
-    """Interpreta un mapa YAML de flujo (`{a: b, c: {d: e}}`) como dict de cadenas."""
-
-    def citar(m):
-        t = m[0]
-        return json.dumps(t[1:-1] if t[0] in "\"'" else t)
-
-    return json.loads(re.sub(r'"[^"]*"|\'[^\']*\'|[^\s{}:,]+', citar, texto))
-
-
-def mapa_bloque(lineas):
-    """Mapa YAML anidado por sangría; los valores de flujo `{...}` se interpretan con `mapa_flujo`."""
-    res, i = {}, 0
-    while i < len(lineas):
-        sangria = len(lineas[i]) - len(lineas[i].lstrip())
-        clave, _, valor = lineas[i].strip().partition(":")
-        i += 1
-        hijos = []
-        while i < len(lineas) and len(lineas[i]) - len(lineas[i].lstrip()) > sangria:
-            hijos.append(lineas[i])
-            i += 1
-        valor = valor.strip()
-        if hijos:
-            res[clave.strip()] = mapa_bloque(hijos)
-        elif valor.startswith("{"):
-            res[clave.strip()] = mapa_flujo(valor)
-        else:
-            res[clave.strip()] = valor.strip("\"'")
-    return res
-
-
-def sin_comentario(linea):
-    """La línea sin su comentario YAML final (el `#` fuera de comillas y precedido de espacio)."""
-    comilla = ""
-    for i, c in enumerate(linea):
-        if comilla:
-            comilla = "" if c == comilla else comilla
-        elif c in "\"'":
-            comilla = c
-        elif c == "#" and (i == 0 or linea[i - 1] in " \t"):
-            return linea[:i].rstrip()
-    return linea.rstrip()
-
-
-def perfil_crudo(path):
-    """Valor del campo `perfil` del frontmatter (None si falta); ValueError si no se puede leer."""
-    m = re.match(r"---\s*\n(.*?)\n---", path.read_text(encoding="utf-8"), re.S)
-    lineas = [sin_comentario(l) for l in (m[1].splitlines() if m else [])]
-    lineas = [l for l in lineas if l.strip()]
-    for i, linea in enumerate(lineas):
-        if not re.match(r"perfil\s*:", linea):
-            continue
-        valor = linea.split(":", 1)[1].strip()
-        if valor.startswith("{"):
-            return mapa_flujo(valor)
-        if valor and valor not in ("null", "~"):
-            raise ValueError("debe ser un mapa con harness, model, effort o roles")
-        hijos = []
-        for resto in lineas[i + 1 :]:
-            if resto[0] not in " \t":
-                break
-            hijos.append(resto)
-        return mapa_bloque(hijos) if hijos else None
-    return None
-
-
-def normalizar_perfil(crudo):
-    """(perfil, errores): `{'unico': {...}|None, 'roles': {rol: {...}}, 'estricto': bool}` validado."""
-    if crudo is None:
-        return None, []
-    if not isinstance(crudo, dict) or not crudo:
-        return None, ["perfil debe ser un mapa con harness, model, effort o roles"]
-    errores = []
-    admitidos = ", ".join(ROLES_PERFIL)
-
-    def campos(datos, donde):
-        out = {}
-        for clave, valor in datos.items():
-            if isinstance(valor, dict):
-                errores.append(f'perfil: rol desconocido "{clave}" (admitidos: {admitidos})')
-            elif clave not in ("harness", "model", "effort"):
-                errores.append(f'{donde}: campo desconocido "{clave}"')
-            elif not str(valor).strip():
-                errores.append(f'{donde}: "{clave}" vacío')
-            else:
-                out[clave] = str(valor).strip()
-        if out.get("harness") and out["harness"] not in HARNESS:
-            errores.append(f'{donde}: arnés no soportado "{out["harness"]}" (admitidos: {", ".join(HARNESS)})')
-        if out.get("effort") and out["effort"] not in ESFUERZOS:
-            errores.append(f'{donde}: esfuerzo no válido "{out["effort"]}" (admitidos: {", ".join(ESFUERZOS)})')
-        return out
-
-    estricto = crudo.get("estricto", False)
-    if isinstance(estricto, str) and estricto.strip().lower() in ("true", "false"):
-        estricto = estricto.strip().lower() == "true"
-    if not isinstance(estricto, bool):
-        errores.append('perfil: "estricto" debe ser true o false')
-        estricto = False
-    resto = {k: v for k, v in crudo.items() if k != "estricto"}
-    roles = {k: v for k, v in resto.items() if k in ROLES_PERFIL}
-    unico, porrol = None, {}
-    if roles:
-        sueltos = [k for k, v in resto.items() if k not in roles and not isinstance(v, dict)]
-        if sueltos:
-            errores.append(f"perfil: mezcla campos sueltos ({', '.join(sueltos)}) con perfiles por rol")
-        for k, v in resto.items():
-            if k not in roles and isinstance(v, dict):
-                errores.append(f'perfil: rol desconocido "{k}" (admitidos: {admitidos})')
-        for rol, datos in roles.items():
-            if isinstance(datos, dict):
-                porrol[rol] = campos(datos, f"perfil.{rol}")
-            else:
-                errores.append(f"perfil.{rol}: debe ser un mapa con harness, model o effort")
-    else:
-        unico = campos(resto, "perfil")
-    if not errores and not unico and not any(porrol.values()):
-        errores.append("perfil: indica al menos harness, model o effort")
-    return (None if errores else {"unico": unico or None, "roles": porrol, "estricto": estricto}), errores
-
-
-def perfil_del_fichero(path):
-    """(perfil normalizado | None, errores) del frontmatter de una tarea o bug."""
-    try:
-        return normalizar_perfil(perfil_crudo(path))
-    except ValueError as error:
-        return None, [f'perfil ilegible ({error}); entrecomilla los valores que llevan ":" o "#"']
-
-
-def errores_perfil(items):
-    """Errores de `perfil` en tareas y bugs pendientes, con su ID."""
-    return [f"{i['id']}: {e}" for i in items if i["status"] not in CERRADO for e in i.get("perfil_errores") or []]
-
-
-def perfil_de(root, iid):
-    """Perfil fijado de una tarea o bug maestro, o None."""
-    for it in backlog(root) if iid else []:
-        if it["id"] == iid:
-            return it.get("perfil")
-    return None
-
-
-def perfil_fijado_de(root, iid, rol):
-    """(campos, estricto) que la tarea fija para un rol; el perfil único es del rol que ejecuta task-dev y bug-fix."""
-    perfil = perfil_de(root, iid)
-    if not perfil:
-        return None, False
-    return perfil["roles"].get(rol) or (perfil["unico"] if rol == "artemisa" else None), perfil["estricto"]
-
-
-def aplicar_perfil(root, iid, rol, cfg):
-    """Perfil por dificultad con lo que fije la tarea para el rol encima; `estricto` quita las reservas."""
-    fijado, estricto = perfil_fijado_de(root, iid, rol)
-    if not fijado:
-        return cfg
-    nuevo = {**cfg, **fijado, "fijado": True}
-    if cfg.get("reserva"):
-        nuevo["reserva"] = lista_reservas(cfg)
-    if estricto:
-        nuevo["estricto"] = True
-        nuevo.pop("reserva", None)
-    return nuevo
-
-
-def marca_fijado(cfg):
-    """Marca de las métricas para lo ejecutado con el perfil fijado por la tarea."""
-    return {"perfil_fijado": True} if cfg.get("fijado") else {}
-
-
-def clave_perfil(cfg):
-    """`arnés/modelo` de un perfil, para los avisos."""
-    return f"{cfg.get('harness') or 'claude'}/{cfg.get('model') or 'predeterminado'}"
-
-
-def avisar_perfil(root, iid, fijado, motivo, destino):
-    """Avisa una sola vez de que el perfil fijado por la tarea cede ante una reserva."""
-    clave = (str(root), iid, motivo)
-    if clave in AVISOS_PERFIL:
-        return
-    AVISOS_PERFIL.add(clave)
-    texto = f"{iid}: perfil fijado {clave_perfil(fijado)} {motivo}; uso la reserva {clave_perfil(destino)}"
-    print(f"[orquestar] {texto}", flush=True)
-    avisar(root, "cuota" if motivo == "sin cuota" else "arnes", texto)
-
-
-def agotado_estricto(root, iid):
-    """Motivo por el que una tarea de perfil estricto ya no se reintenta (lo que subiría o escalaría), o ''."""
-    debe, motivo = comprobar_promocion(root, iid)
-    if debe:
-        return motivo
-    cfg_dev = config(root).get("artemisa") or config(root).get("development") or {}
-    esc = cfg_dev.get("escalada") or {}
-    if esc and rechazos(root, iid) >= esc.get("rechazos", 2):
-        return f"{rechazos(root, iid)} rechazos seguidos de Hades"
-    return ""
-
-
-def siguiente_dificultad(dif):
-    """Siguiente nivel de dificultad: sencilla -> media -> dificil -> None."""
-    dif = (dif or "media").strip().lower().replace("í", "i")
-    if dif == "sencilla":
-        return "media"
-    if dif == "media":
-        return "dificil"
-    return None
-
-
-DIFICULTADES = {"sencilla": 1, "media": 2, "dificil": 3}
-
-
-def nivel_dificultad(dif):
-    """Nivel numérico de dificultad: sencilla=1, media=2, dificil=3."""
-    dif = (dif or "media").strip().lower().replace("í", "i")
-    return DIFICULTADES.get(dif, 2)
-
-
-def sincronizar_dificultad(root, iid):
-    """Detecta si la dificultad en Markdown es menor que la última registrada en métricas.
-    Si es así, persiste un evento de promoción manual para resetear contadores y fijar la nueva base."""
-    if not iid or not (root / METRICAS).exists():
-        return False
-    dif_md = dificultad_de(root, iid)
-    if not dif_md:
-        return False
-    ultima_dif = None
-    for f in leer_metricas(root):
-        if f.get("id") == iid:
-            if f.get("tipo") == "promocion" and f.get("dificultad"):
-                ultima_dif = f.get("dificultad")
-            elif f.get("tipo", "paso") == "paso" and f.get("dificultad"):
-                ultima_dif = f.get("dificultad")
-    if ultima_dif and nivel_dificultad(dif_md) < nivel_dificultad(ultima_dif):
-        print(
-            f"[orquestar] {iid}: detectada bajada manual de dificultad de {ultima_dif} a {dif_md}; reinicio contadores.",
-            flush=True,
-        )
-        registrar(
-            root,
-            {"tipo": "promocion", "fecha": ahora(), "id": iid, "de": ultima_dif, "dificultad": dif_md, "manual": True},
-        )
-        return True
-    return False
-
-
-def fichero_de(root, iid):
-    """Ruta al fichero .md de una tarea o bug."""
-    if not iid:
-        return None
-    for d in backlog_dirs(root):
-        if d.is_dir():
-            for f in d.glob("*.md"):
-                if frontmatter(f).get("id") == iid:
-                    return f
-    return None
-
-
-def actualizar_dificultad(root, iid, nueva_dif):
-    """Actualiza o inserta el campo dificultad en el frontmatter de una tarea o bug."""
-    f = fichero_de(root, iid)
-    if not f or not f.exists():
-        return False
-    texto = f.read_text(encoding="utf-8")
-    m = re.match(r"^(---[^\n]*\n)(.*?)\n(---[^\n]*\n.*)$", texto, re.S)
-    if not m:
-        return False
-    cab, fm, resto = m.group(1), m.group(2), m.group(3)
-    if re.search(r"^dificultad\s*:", fm, re.M):
-        nuevo_fm = re.sub(r"^(dificultad\s*:\s*).*$", rf"\g<1>{nueva_dif}", fm, flags=re.M)
-    else:
-        nuevo_fm = fm + f"\ndificultad: {nueva_dif}"
-    f.write_text(cab + nuevo_fm + "\n" + resto, encoding="utf-8")
-    return True
-
-
-def promover_dificultad(root, iid, motivo="", actual=None):
-    """Sube la dificultad de la tarea/bug un escalón (sencilla -> media -> dificil).
-    Actualiza el frontmatter, registra métrica e informa por consola."""
-    actual = actual or dificultad_de(root, iid)
-    nueva = siguiente_dificultad(actual)
-    if not nueva:
-        return None
-    if actualizar_dificultad(root, iid, nueva):
-        msg_motivo = f" ({motivo})" if motivo else ""
-        print(f"[orquestar] {iid}: subo dificultad de {actual} a {nueva}{msg_motivo}", flush=True)
-        registrar(root, {"tipo": "promocion", "fecha": ahora(), "id": iid, "de": actual, "dificultad": nueva})
-        return nueva
-    return None
-
-
-def errores_dependencias(items):
-    """IDs inexistentes, ciclos y dependencias a versiones posteriores."""
-    ids = {i["id"] for i in items}
-    deps = {i["id"]: i["depende_de"] or [] for i in items}
-    errores = [f"{i} depende de {d}, que no existe" for i, ds in deps.items() for d in ds if d not in ids]
+def errores_dependencias(items: list[dict]) -> list[str]:
     por_id = {i["id"]: i for i in items}
+    errores = []
+    for item in items:
+        if item.get("status") in CERRADO:
+            continue
+        vk_i = vkey(item.get("version"))
+        for dep in item.get("depende_de") or ():
+            if dep not in por_id:
+                errores.append(f"{item['id']} depende de {dep}, que no existe")
+                continue
+            vk_d = vkey(por_id[dep].get("version"))
+            if vk_i and vk_d and vk_d > vk_i:
+                errores.append(
+                    f"{item['id']} ({item['version']}) depende de {dep} en versión posterior ({por_id[dep]['version']})"
+                )
+    # Ciclos simples
+    visitados = {}
+
+    def dfs(nid: str) -> bool:
+        est = visitados.get(nid, 0)
+        if est == 1:
+            return True
+        if est == 2 or nid not in por_id:
+            return False
+        visitados[nid] = 1
+        for d in por_id[nid].get("depende_de") or ():
+            if dfs(d):
+                return True
+        visitados[nid] = 2
+        return False
+
     for i in items:
-        version = vkey(i.get("version", ""))
-        for d in deps[i["id"]]:
-            destino = vkey(por_id[d].get("version", "")) if d in por_id else None
-            if version and destino and destino > version:
-                errores.append(f"{i['id']} depende de {d}, de una versión posterior")
-    visto, pila = set(), []
-
-    def ciclo(n):
-        if n in pila:
-            return pila[pila.index(n) :] + [n]
-        if n in visto:
-            return None
-        visto.add(n)
-        pila.append(n)
-        for d in deps.get(n, []):
-            c = ciclo(d) if d in ids else None
-            if c:
-                return c
-        pila.pop()
-        return None
-
-    for n in deps:
-        c = ciclo(n)
-        if c:
-            errores.append("ciclo: " + " → ".join(c))
+        if dfs(i["id"]):
+            errores.append(f"Ciclo de dependencias detectado en {i['id']}")
             break
     return errores
 
 
-def pendientes_de(i, por_id):
-    """Dependencias de i que aún no están completadas."""
-    return [d for d in i["depende_de"] or [] if d in por_id and por_id[d]["status"] != "completed"]
+def revisada(root: Path, iid: str) -> bool:
+    root = Path(root)
+    return motivo_revision(root, iid, fichero_de(root, iid), backlog_dirs(root)) == ""
 
 
-def raices(iid, por_id, visto=None):
-    """Dependencias no completadas que ya no avanzan solas (bloqueadas, canceladas o fuera de versión)."""
-    visto = visto if visto is not None else set()
-    out = []
-    for d in pendientes_de(por_id[iid], por_id):
-        if d in visto:
-            continue
-        visto.add(d)
-        dep = por_id[d]
-        if dep["status"] in FUERA or pendientes_de(dep, por_id) == []:
-            out.append(d)
-        out += raices(d, por_id, visto)
-    return sorted(set(out))
-
-
-def desbloquea(items):
-    """Cuántas tareas dependen, directa o indirectamente, de cada ID."""
-    hijos = {i["id"]: [] for i in items}
-    for i in items:
-        for d in i["depende_de"] or []:
-            hijos.setdefault(d, []).append(i["id"])
-
-    def alcance(n, visto):
-        for h in hijos.get(n, []):
-            if h not in visto:
-                visto.add(h)
-                alcance(h, visto)
-        return visto
-
-    return {n: len(alcance(n, set())) for n in hijos}
-
-
-def en_espera(items):
-    """Pendientes que esperan a otra tarea, con las dependencias que las retienen."""
-    por_id = {i["id"]: i for i in items}
-    return {i["id"]: pendientes_de(i, por_id) for i in items if i["status"] not in FUERA and pendientes_de(i, por_id)}
-
-
-# ---------------------------------------------------------------- buzón: altas desde fuera del bucle
-
-
-def prefijo(root):
-    """Prefijo del proyecto en los IDs: `prefix` de task_config.yaml, el de los IDs existentes o PRJ."""
-    try:
-        m = re.search(
-            r'^\s*prefix:\s*["\']?([A-Za-z0-9]+)', (root / "task_config.yaml").read_text(encoding="utf-8"), re.M
-        )
-        if m:
-            return m[1]
-    except OSError:
-        pass
-    vistos = [
-        m[1]
-        for d in backlog_dirs(root)
-        if d.is_dir()
-        for f in d.glob("*.md")
-        for m in [re.match(r"[TB]-([A-Za-z0-9]+)-\d+", f.name)]
-        if m
-    ]
-    return max(set(vistos), key=vistos.count) if vistos else "PRJ"
-
-
-def siguiente_id(root, letra):
-    """Siguiente ID maestro libre (T- o B-) según los ficheros del backlog."""
-    pre = f"{letra}-{prefijo(root)}-"
-    d = backlog_dirs(root)[letra == "B"]
-    nums = [
-        int(m[1])
-        for f in (d.glob("*.md") if d.is_dir() else [])
-        for m in [re.match(re.escape(pre) + r"(\d+)", f.name)]
-        if m
-    ]
-    return f"{pre}{max(nums, default=0) + 1:04d}"
-
-
-def slug(texto):
-    import unicodedata
-
-    plano = "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]+", "-", plano.lower()).strip("-")[:60].strip("-")
-
-
-def alta(root, tipo, titulo, autor="", perfil=None):
-    """Crea una tarea o un bug maestro sin versión (`backlog`): el bucle no lo trabaja hasta que alguien le pone versión.
-
-    Las tareas van sin `depende_de`: se calculan cuando entren en una versión.
-    """
-    titulo = " ".join(titulo.split())
-    letra = "B" if tipo == "bug" else "T"
-    d = backlog_dirs(root)[letra == "B"]
-    d.mkdir(parents=True, exist_ok=True)
-    iid = siguiente_id(root, letra)
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    origen = f"Telegram{f' (usuario {autor})' if autor else ''}, {hoy}"
-    cabecera = (
-        f"---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n"
-        f'type: {"bug" if letra == "B" else "funcional"}\nweight: 100\nversion: ""\nstatus: backlog\n'
-        + (f"perfil: {{{', '.join(f'{k}: {v}' for k, v in perfil.items())}}}\n" if perfil else "")
-        + f"created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {titulo}\n\n"
-    )
-    cuerpo = (
-        (
-            f"## 🎯 Descripción del Fallo\n{titulo}\n\n## 📋 Reproducir\n1. Por detallar.\n\n"
-            f"## 📋 Evidencias\n- Registrado desde {origen}.\n"
-        )
-        if letra == "B"
-        else (
-            f"## 🎯 Objetivo de Negocio\n{titulo}\n\n## 📋 Criterios de Aceptación (Nivel Máster)\n"
-            f"- [ ] **CA-M-1:** Por concretar (registrada desde {origen}).\n"
-        )
-    )
-    f = d / (f"{iid}-{slug(titulo)}.md" if slug(titulo) else f"{iid}.md")
-    f.write_text(cabecera + cuerpo, encoding="utf-8")
-    return iid, f
-
-
-def extraer_perfil(argumento):
-    """(título, perfil, error) de `<título> [--perfil arnés/modelo[/esfuerzo]] [--estricto]` (órdenes de Telegram)."""
-    m = re.search(r"--perfil\s+(\S+)", argumento)
-    estricto = re.search(r"--estricto\b", argumento) is not None
-    titulo = " ".join(re.sub(r"--perfil\s+\S+|--estricto\b", " ", argumento).split())
-    if not m:
-        return titulo, None, ("--estricto solo se usa junto a --perfil" if estricto else None)
-    perfil = dict(zip(("harness", "model", "effort"), m[1].split("/")))
-    perfil = {k: v for k, v in perfil.items() if v}
-    if estricto:
-        perfil["estricto"] = "true"
-    valido, errores = normalizar_perfil(perfil)
-    return titulo, (perfil if valido else None), ("; ".join(errores) if errores else None)
-
-
-def apuntar(root, tipo, titulo, autor="", perfil=None):
-    """Deja en el buzón una tarea o un bug pedido desde fuera; el bucle lo registra entre pasos."""
-    excluir(root)
-    with (root / BUZON).open("a", encoding="utf-8") as f:
-        f.write(
-            json.dumps(
-                {
-                    "tipo": tipo,
-                    "titulo": titulo,
-                    "autor": autor,
-                    "fecha": ahora(),
-                    **({"perfil": perfil} if perfil else {}),
-                },
-                ensure_ascii=False,
-            )
-            + "\n"
-        )
-
-
-def ingerir(root):
-    """Registra el buzón en el backlog y commitea solo esos ficheros. Devuelve [(id, título)] registrados."""
-    f, tmp = root / BUZON, root / (BUZON + ".tmp")
-    try:
-        if not tmp.exists():  # si existe, quedó de una ingesta interrumpida
-            f.replace(tmp)
-    except OSError:  # no hay buzón, o el gateway lo está escribiendo: a la siguiente
-        return []
-    hechos = []
-    for linea in tmp.read_text(encoding="utf-8").splitlines():
-        if linea.strip():
-            e = json.loads(linea)
-            iid, fichero = alta(root, e["tipo"], e["titulo"], e.get("autor", ""), e.get("perfil"))
-            hechos.append((iid, e["titulo"], fichero))
-    if hechos:
-        rutas = [str(x[2].relative_to(root)) for x in hechos]
-        subprocess.run(["git", "add", "--", *rutas], cwd=root, capture_output=True)
-        subprocess.run(
-            [
-                "git",
-                "commit",
-                "-q",
-                "-m",
-                "docs(plan): altas desde Telegram (" + ", ".join(x[0] for x in hechos) + ")",
-                "--",
-                *rutas,
-            ],
-            cwd=root,
-            capture_output=True,
-        )
-    tmp.unlink()
-    return [(iid, titulo) for iid, titulo, _ in hechos]
-
-
-# ---------------------------------------------------------------- estado
-
-
-def deuda(items):
-    """Deuda registrada: bugs pendientes sin versión, fuera del bucle hasta que se incluyan."""
-    return [i for i in items if i["paso"] == "bug-fix" and i["status"] not in FUERA and not vkey(i["version"])]
-
-
-def primera_linea(path):
-    lineas = path.read_text(encoding="utf-8").splitlines()
-    return lineas[0] if lineas else ""
-
-
-def revisada(root, iid, objetivo=None):
-    """Exige aprobación formal o N/A justificado en el informe canónico."""
-    return not motivo_revision(root, iid, fichero_de(root, iid), backlog_dirs(root), objetivo)
-
-
-def producto_activa(root, v):
-    """Revisión de producto al cerrar v según orchestration.json: `producto` true o lista de versiones."""
-    cfg = config(root).get("producto")
-    if isinstance(cfg, list):
-        return vkey(v) in {vkey(str(x)) for x in cfg}
-    return cfg is True
-
-
-def decision_producto(informe):
-    """PENDIENTE | APLICAR | APLICADA según la primera línea del informe ('' si no existe)."""
-    m = re.search(r"Decisi[oó]n:\*\*\s*(\w+)", primera_linea(informe)) if informe.exists() else None
-    return m[1].upper() if m else ""
-
-
-def ramas_abiertas():
-    """Devuelve las ramas de versión en el orden operativo del selector."""
-    ramas = [b.lstrip("* ").strip() for b in git("branch", "--list", "release/v*", "hotfix/v*").splitlines()]
-    return sorted(ramas, key=lambda b: vkey(b.split("/")[1]) or (0, 0, 0))
-
-
-def faltan_dependencias(items):
-    """Las tareas abiertas con versión requieren declaración, los bugs pueden omitirla."""
-    return any(
-        i["paso"] == "task-dev" and i["status"] not in CERRADO and i["depende_de"] is None and vkey(i["version"])
-        for i in items
-    ) or bool(errores_dependencias(items))
-
-
-def estado(root, docs):
-    """Devuelve ('PASO', paso, arg, rama) | ('PARAR', motivo) | ('FIN', motivo)."""
-    d = root / docs
-    if not (root / "task_config.yaml").exists():
-        return ("PARAR", "Falta task_config.yaml en la raíz del proyecto.")
-    if (root / CONFIG).exists():
-        try:
-            contexto_ejecucion.cargar_politica(root)
-        except ValueError as err:
-            return ("PARAR", f"Política de ejecución inválida: {err}")
-    if not (d / "requirements.md").exists():
-        return ("PARAR", f"Falta la idea: escríbela en {docs}/requirements.md o usa --idea.")
-    if not (d / "req_analysis.md").exists():
-        return ("PASO", "ciclo-requisitos", "", None)
-    if "REQUIERE_ACLARACION" in primera_linea(d / "req_analysis.md"):
-        return ("PARAR", f"Requisitos con preguntas sin valor por defecto seguro: revisa {docs}/req_analysis.md.")
-    if not (d / "platform_plan.md").exists():
-        return ("PASO", "platform-plan", "", None)
-    if not (d / "platform_review.md").exists():
-        return ("PASO", "revisar-plataforma", "", None)
-    if "RECHAZADO" in primera_linea(d / "platform_review.md"):
-        return ("PARAR", f"Plataforma rechazada por Hades: revisa {docs}/platform_review.md.")
-    items = backlog(root)
-    if not (d / "work_plan.md").exists() or not items:
-        return ("PASO", "work-plan", "", None)
-    errores = errores_perfil(items)
-    if errores:
-        return ("PARAR", "Perfil inválido en el backlog (solo una persona lo corrige): " + "; ".join(errores))
-    diagnosticos = {i["id"] for i in items if i.get("suite_accion") == "pendiente" and i["status"] != "cancelled"}
-    incompletas = [
-        q for q in listar_preguntas(root, True) if not q.get("bloqueo_aplicado") and q["tarea_id"] not in diagnosticos
-    ]
-    if incompletas:
-        return (
-            "PARAR",
-            "Bloqueo global: intervención humana pendiente de persistir con seguridad; "
-            + "; ".join(
-                f"{q['tarea_id']} {q['id']}: {q.get('impedimento_incorporacion', 'recuperación pendiente')}"
-                for q in incompletas
-            ),
-        )
-    if faltan_dependencias(items):
-        return ("PASO", "calcular-dependencias", "", None)
-
-    por_id = {i["id"]: i for i in items}
-    alcance = desbloquea(items)
-    pendientes = [i for i in items if i["status"] not in FUERA and vkey(i["version"])]
-    for rama in ramas_abiertas():
-        v = rama.split("/")[1]
-        suyas = [i for i in items if vkey(i["version"]) == vkey(v)]
-        for i in suyas:
-            if i.get("suite_accion") == "pendiente" and i["status"] != "cancelled":
-                return ("PASO", "diagnosticar-suite", i["id"], rama)
-        recien_abierta = all(i["status"] in ("backlog", "planned") for i in suyas)
-        if recien_abierta and deuda(items) and not (root / f"docs/review/versions/{v}-deuda.md").exists():
-            return ("PASO", "revisar-deuda", v, rama)
-        sin_revisar = [i for i in suyas if i["status"] == "completed" and not revisada(root, i["id"])]
-        if sin_revisar:
-            return ("PASO", "revisar-tarea", sin_revisar[0]["id"], rama)
-        bloqueadas = sorted((i for i in suyas if i["status"] == "blocked"), key=lambda i: -alcance.get(i["id"], 0))
-        motivo_tecnico = ""
-        for i in bloqueadas:  # primero la causa raíz que más tareas retiene
-            if i["pendiente_de"] == "especificador":
-                return ("PASO", "especificar", i["id"], rama)
-            if i["pendiente_de"] == "intervencion_tecnica":
-                encargo, motivo = intervencion_de_cierre(root, i["id"])
-                if encargo and not pendientes_de(i, por_id):
-                    return ("PASO", "bug-fix", i["id"], rama)
-                motivo_tecnico = motivo_tecnico or f"{i['id']}: diagnóstico terminal de la suite. {motivo}"
-        pend = [i for i in suyas if i["status"] not in FUERA]
-        por_decision = {d["iid"]: d for d in decision_item.listar(root, rama)}
-        for i in pend:
-            d = por_decision.get(i["id"])
-            if d and d.get("tipo") == "asignacion" and not pendientes_de(i, por_id):
-                return ("PASO", d["siguiente"], i["id"], rama)
-        proxy_motor = SimpleNamespace(**globals())
-        esperas_bloq = [
-            i
-            for i in pend
-            if not pendientes_de(i, por_id)
-            and decision_item.bloqueada_condicion(root, proxy_motor, por_decision.get(i["id"]))
-        ]
-        ids_espera_bloq = {i["id"] for i in esperas_bloq}
-        elegibles = [i for i in pend if not pendientes_de(i, por_id) and i["id"] not in ids_espera_bloq]
-        if elegibles:
-            i = min(
-                elegibles,
-                key=lambda i: (
-                    (por_decision.get(i["id"]) or {}).get("tipo") == "espera",
-                    i["status"] != "in_progress",
-                    -alcance.get(i["id"], 0),
-                    i["weight"],
-                ),
-            )
-            return ("PASO", i["paso"], i["id"], rama)
-        if esperas_bloq:
-            detalles = "; ".join(decision_item.texto_decision(por_decision[i["id"]]) for i in esperas_bloq)
-            return ("PARAR", f"Espera en {v}: {detalles}")
-        preguntas = [q for q in listar_preguntas(root, True) if q["tarea_id"] in {i["id"] for i in bloqueadas}]
-        if preguntas:
-            return (
-                "PARAR",
-                f"Bloqueos en {v}: Bloqueo de tarea; "
-                + "; ".join(f"{q['tarea_id']} {q['id']}: {q['pregunta']}" for q in preguntas),
-            )
-        if motivo_tecnico:
-            return ("PARAR", motivo_tecnico)
-        if not (root / f"docs/review/versions/{v}-arquitectura.md").exists():
-            return ("PASO", "revisar-version", v, rama)
-        if bloqueadas or pend:
-            partes = ([f"bloqueadas {', '.join(i['id'] for i in bloqueadas)}"] if bloqueadas else []) + (
-                [f"en espera {i['id']} (por {', '.join(raices(i['id'], por_id))})" for i in pend]
-            )
-            return (
-                "PARAR",
-                f"{FIN_VERSION[0]}{v}: " + "; ".join(partes) + f". Revisa docs/review/versions/{v}-revision.md: "
-                "responde a las preguntas de las bloqueadas, mueve de versión o cancela, y relanza.",
-            )
-        informe = root / PRODUCTO.format(v=v)
-        if producto_activa(root, v) and not informe.exists():
-            return ("PASO", "revisar-producto", v, rama)
-        if decision_producto(informe) == "APLICAR":
-            return ("PASO", "aplicar-producto", v, rama)
-        if decision_producto(informe) == "PENDIENTE":
-            return (
-                "PARAR",
-                f"{FIN_VERSION[1]}{v} terminada. Revisa docs/review/versions/{v}-revision.md y decide "
-                f"las propuestas de {PRODUCTO.format(v=v)}: ajusta destinos, marca APLICAR y relanza "
-                "(el bucle crea las tareas); registra defectos con /bug-add o cierra con /release.",
-            )
-        return (
-            "PARAR",
-            f"{FIN_VERSION[1]}{v} terminada. Revisa docs/review/versions/{v}-revision.md"
-            ": registra defectos con /bug-add o cierra con /release, y relanza.",
-        )
-    versiones = root / "docs/review/versions"
-    for informe in sorted(versiones.glob("*-producto.md")) if versiones.is_dir() else []:
-        v = informe.name.split("-")[0]
-        if decision_producto(informe) == "APLICAR":
-            return ("PASO", "aplicar-producto", v, None)
-        if decision_producto(informe) == "PENDIENTE":
-            return (
-                "PARAR",
-                f"Decisiones de producto pendientes en {PRODUCTO.format(v=v)}: ajusta destinos, "
-                "marca APLICAR y relanza. No abro otra versión hasta entonces.",
-            )
-    if not pendientes:
-        mejoras = len(deuda(items))
-        return (
-            "FIN",
-            "Todas las tareas con versión están cerradas"
-            + (f"; quedan {mejoras} mejoras registradas como deuda." if mejoras else "."),
-        )
-    v = min(vkey(i["version"]) for i in pendientes)
-    return ("PASO", "start-version", nombre_version(v), None)
-
-
-def rutas_producto(root):
-    """Selecciona el producto y deja las fichas y el seguimiento a sus señales propias."""
-    carpetas = [d.relative_to(root).as_posix() for d in backlog_dirs(root)]
-    return [".", ":(exclude)docs/review/**", *(f":(exclude,literal){d}" for d in carpetas)]
-
-
-def firma(root, docs, paso=None, arg=""):
-    """Observa el entregable del paso original aunque cambie el selector o se confirme el WIP."""
-    if paso is None:
-        seleccion = estado(root, docs)
-        paso = seleccion[1] if seleccion[0] == "PASO" else ""
-        arg = seleccion[2] if len(seleccion) > 2 else ""
-    rutas = []
-    if paso in DOCUMENTOS_PASO:
-        rutas = [f"{docs}/{DOCUMENTOS_PASO[paso]}"]
-        if paso in ("ciclo-requisitos", "work-plan"):
-            rutas.extend(["*.feature", f"{docs}/funcionalidades"])
-    elif paso in INFORMES_VERSION:
-        rutas = [f"docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md"]
-    elif paso == "especificar":
-        rutas = [
-            "*.feature",
-            f"{docs}/requirements.md",
-            f"{docs}/funcionalidades",
-            f"{docs}/platform_plan.md",
-            ":(glob)**/evals/**",
-        ]
-    elif paso not in ("revisar-tarea", "calcular-dependencias"):
-        rutas = rutas_producto(root)
-    fichas = ()
-    if paso in (
-        "task-dev",
-        "bug-fix",
-        "revisar-tarea",
-        "especificar",
-        "work-plan",
-        "calcular-dependencias",
-        "aplicar-producto",
-        "revisar-deuda",
-        "revisar-version",
-    ):
-        de_id = paso in DESARROLLO or paso == "especificar"
-        fichas = tuple(
-            (i["id"], i["status"], i["version"], i["pendiente_de"], i["depende_de"], i["weight"])
-            for i in backlog(root)
-            if not de_id or i["id"] == arg
-        )
-    dictamenes = []
-    if arg and paso in DESARROLLO:
-        for tipo in ("spec", "test", "code"):
-            if tipo == "code":
-                motivo = motivo_revision(root, arg, fichero_de(root, arg), backlog_dirs(root))
-            else:
-                motivo = motivo_informe(root / f"docs/review/{tipo}_reviews/{arg}-{tipo}-review.md")
-            dictamenes.append(motivo if motivo in ("", "informe rechazado") else None)
-    contenido = b""
-    if rutas:
-        with indice_de_trabajo(root) as env:
-            contenido = subprocess.check_output(["git", "ls-files", "--stage", "-z", "--", *rutas], cwd=root, env=env)
-    rama = git("branch", "--show-current") if paso == "start-version" else None
-    return contenido, fichas, dictamenes, rama
-
-
-# ---------------------------------------------------------------- arneses y roles
-
-
-def config(root):
-    """Roles del proyecto (orchestration.json): harness, model y effort por rol."""
-    f = root / CONFIG
-    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
-
-
-def rol_de(root, paso, dificultad=None, iid=None):
-    """(rol, configuración) que ejecuta un paso del bucle: Artemisa desarrolla, Atenea analiza y decide.
-
-    Sin la clave del rol en orchestration.json se usa `development` (y Atenea, sin ella, la de Artemisa).
-    El `perfil` de la tarea (`iid`) sustituye al que tocaría por dificultad.
-    """
-    cfg = config(root)
-    dev = cfg.get("artemisa") or cfg.get("development", {})
-    rol = "artemisa" if paso in DESARROLLO else "atenea"
-    base = ajustes(dev if rol == "artemisa" else cfg.get("atenea") or dev, paso, dificultad=dificultad)
-    return rol, aplicar_perfil(root, iid, rol, base)
-
-
-def ajustes(cfg, paso="", dificultad=None):
-    """Configuración del rol para un paso: la base más lo que fije `pasos.<paso>` (p. ej. otro `effort`)."""
-    base = {k: v for k, v in cfg.items() if k not in ("pasos", "dificultad")}
-    dif_cfg = (cfg.get("dificultad") or {}).get(dificultad, {}) if dificultad else {}
-    paso_cfg = (cfg.get("pasos") or {}).get(paso, {}) if paso else {}
-    return {**base, **dif_cfg, **paso_cfg}
-
-
-def lista_reservas(cfg_rol):
-    """Devuelve la lista ordenada de configuraciones de reserva, heredando del rol los campos no redefinidos."""
-    raw = cfg_rol.get("reserva")
-    if not raw:
-        return []
-    items = [raw] if isinstance(raw, dict) else list(raw)
-    base = {k: cfg_rol[k] for k in ("harness", "model", "effort") if k in cfg_rol}
-    if "instructions" in cfg_rol:
-        base["instructions"] = cfg_rol["instructions"]
-    if "timeout_s" in cfg_rol:
-        base["timeout_s"] = cfg_rol["timeout_s"]
-    resultado = []
-    for it in items:
-        if isinstance(it, dict):
-            resultado.append({**base, **it})
-    return resultado
-
-
-PASOS_ANALISIS = frozenset(
-    (
-        "especificar",
-        "revisar-tarea",
-        "revisar-version",
-        "calcular-dependencias",
-        "work-plan",
-        "revisar-deuda",
-        "aplicar-producto",
-    )
-)
-
-
-def cadena_analisis(root, paso, dificultad="media", iid=None):
-    """Perfiles de recuperación finitos y efectivos, sin expandir reservas de niveles."""
-    dificultad = dificultad or "media"
-    rol, inicial = rol_de(root, paso, dificultad=dificultad, iid=iid)
-    if inicial.get("estricto"):
-        return [inicial]
-    cfg = config(root)
-    dev = cfg.get("artemisa") or cfg.get("development", {})
-    base = dev if rol == "artemisa" else cfg.get("atenea") or dev
-    candidatos = [inicial]
-    nivel = siguiente_dificultad(dificultad)
-    while nivel:
-        if nivel in (base.get("dificultad") or {}):
-            candidatos.append(ajustes(base, paso, dificultad=nivel))
-        nivel = siguiente_dificultad(nivel)
-    esc = inicial.get("escalada") or {}
-    if esc:
-        candidatos.append({**inicial, **{k: v for k, v in esc.items() if k != "rechazos"}})
-    candidatos.extend(lista_reservas(inicial))
-    resultado, vistos = [], set()
-    for candidato in candidatos:
-        identidad = (
-            candidato.get("harness") or "claude",
-            candidato.get("model") or "predeterminado",
-            candidato.get("effort") or None,
-        )
-        if identidad not in vistos:
-            vistos.add(identidad)
-            resultado.append(candidato)
-    return resultado
-
-
-def diagnostico_analisis(recuperacion, limite):
-    """Identifica el par agotado y los perfiles probados con sus intentos."""
-    perfiles = " → ".join(
-        f"{c.get('harness') or 'claude'}/{c.get('model') or 'predeterminado'}/"
-        f"{c.get('effort') or 'predeterminado'} ({limite} intentos)"
-        for c in recuperacion["perfiles"]
-    )
-    return (
-        f'"{recuperacion["paso"]}" {recuperacion["arg"] or "(sin argumento)"} '
-        f"sin progreso tras agotar perfiles: {perfiles}."
-    )
-
-
-def configuraciones_con_cuota(root, configuraciones):
-    """Respeta reinicios reales y permite sondeos supuestos al relanzar o vencer el intervalo."""
-    instante = fecha_estado(ahora())
-    filas = leer_metricas(root)
-    cuotas = consumo_cuotas(root, instante, filas)[1]
-    marcas = marcas_cuota(root, instante, filas)
-    for clave in list(cuotas):
-        if marcas[clave]["tipo"] == "supuesta":
-            sondeo = SONDEOS_CUOTA.get((str(root.resolve()), clave))
-            if sondeo is None or (instante - sondeo).total_seconds() >= intervalo_cuota(root):
-                cuotas.pop(clave)
-    disponibles = [
-        cfg
-        for cfg in configuraciones
-        if (cfg.get("harness", "claude"), cfg.get("model") or "predeterminado") not in cuotas
-    ]
-    return disponibles
-
-
-def cuota_descartada(root, configuraciones, seleccionadas, incluir_recuperadas=False):
-    """Recupera la menor espera omitida; opcionalmente incluye perfiles ya recuperados."""
-    omitidas = [cfg for cfg in configuraciones if cfg not in seleccionadas]
-    if not omitidas:
-        return None, None
-    instante = fecha_estado(ahora())
-    cuotas = consumo_cuotas(root, instante)[1]
-    pendientes = []
-    for cfg in omitidas:
-        harness = cfg.get("harness", "claude")
-        hasta = cuotas.get((harness, cfg.get("model") or "predeterminado"))
-        plantilla = HARNESS.get(harness)
-        if (hasta or incluir_recuperadas) and plantilla and buscar_ejecutable(plantilla[0]):
-            pendientes.append((max((hasta - instante).total_seconds(), 0) if hasta else 0, cfg))
-    return min(pendientes, key=lambda par: par[0]) if pendientes else (None, None)
-
-
-def rechazos(root, iid):
-    """Veredictos RECHAZADO seguidos de Hades sobre un ID, contados desde su último APROBADO o última subida."""
-    sincronizar_dificultad(root, iid)
-    n = 0
-    if iid and (root / METRICAS).exists():
-        for f in leer_metricas(root):
-            if f.get("id") == iid and f.get("tipo") == "promocion":
-                n = 0
-            elif f.get("tipo") == "agente" and f.get("rol") == "hades" and f.get("id") == iid and f.get("veredicto"):
-                n = n + 1 if f["veredicto"] == "RECHAZADO" else 0
-    return n
-
-
-def reintentos_acumulados(root, iid):
-    """(ejecuciones_paso, rechazos_hades) desde la última subida o inicio."""
-    sincronizar_dificultad(root, iid)
-    pasos = 0
-    rech = 0
-    if not iid or not (root / METRICAS).exists():
-        return 0, 0
-    for f in leer_metricas(root):
-        if f.get("id") != iid:
-            continue
-        if f.get("tipo") == "promocion":
-            pasos = 0
-            rech = 0
-            continue
-        if f.get("tipo", "paso") == "paso" and not f.get("sin_cuota") and not f.get("bloqueo_agente"):
-            if f.get("progreso"):
-                pasos = 0
-            elif not f.get("revision_pendiente"):
-                pasos += 1
-        elif f.get("tipo") == "agente" and f.get("rol") == "hades" and f.get("veredicto"):
-            if f["veredicto"] == "RECHAZADO":
-                rech += 1
-            else:
-                rech = 0
-                pasos = 0
-    return pasos, rech
-
-
-def comprobar_promocion(root, iid):
-    """Comprueba si un ID debe promocionar de dificultad tras reintentos o rechazos seguidos.
-    Retorna (debe_promover, motivo)."""
-    sincronizar_dificultad(root, iid)
-    dif = dificultad_de(root, iid)
-    if dif not in ("sencilla", "media"):
-        return False, ""
-    cfg_dev = config(root).get("artemisa") or config(root).get("development") or {}
-    tiene_dificultades = bool(cfg_dev.get("dificultad"))
-    esc = cfg_dev.get("escalada") or {}
-    tope = esc.get("rechazos", 2) if esc else (2 if tiene_dificultades else 3)
-    pasos, rech = reintentos_acumulados(root, iid)
-    if pasos > 2:
-        return True, f"{pasos} ejecuciones de paso"
-    if rech >= tope:
-        return True, f"{rech} rechazos seguidos de Hades"
-    return False, ""
-
-
-def escalada(root, rol, cfg, iid):
-    """(configuración, escalado): Artemisa sube a `escalada` tras `escalada.rechazos` rechazos seguidos de Hades."""
-    esc = cfg.get("escalada") or {}
-    if rol != "artemisa" or not esc or rechazos(root, iid) < esc.get("rechazos", 2):
-        return cfg, False
-    return {
-        **{k: v for k, v in cfg.items() if k != "escalada"},
-        **{k: v for k, v in esc.items() if k != "rechazos"},
-    }, True
-
-
-def con_modelo(cmd, harness, rol):
-    """Añade el modelo y el esfuerzo del rol, si no vienen ya en el comando."""
-    cmd = list(cmd)
-    if harness == "claude" and "--model" not in cmd:
-        cmd += (["--model", rol["model"]] if rol.get("model") else []) + (
-            ["--effort", rol["effort"]] if rol.get("effort") else []
-        )
-    elif harness in ("gemini", "agy") and "--model" not in cmd and "-m" not in cmd:
-        cmd += (["--model", rol["model"]] if rol.get("model") else []) + (
-            ["--effort", rol["effort"]] if harness == "agy" and rol.get("effort") else []
-        )
-    elif harness == "codex" and "--model" not in cmd and "-m" not in cmd:
-        if "resume" in cmd:
-            i = cmd.index("resume") + 2
-        else:
-            i = cmd.index("exec") + 1
-        cmd[i:i] = (["-m", rol["model"]] if rol.get("model") else []) + (
-            ["-c", f'model_reasoning_effort="{rol["effort"]}"'] if rol.get("effort") else []
-        )
-    return cmd
-
-
-def buscar_ejecutable(nombre):
-    """Encuentra el ejecutable en el PATH o en las rutas de usuario habituales en Windows."""
-    exe = shutil.which(nombre)
-    if exe:
-        return exe
-    if os.name == "nt":
-        rutas = []
-        if winreg is not None:
-            try:
-                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
-                    val, _ = winreg.QueryValueEx(k, "Path")
-                    if val:
-                        if hasattr(winreg, "ExpandEnvironmentStrings"):
-                            val = winreg.ExpandEnvironmentStrings(val)
-                        else:
-                            val = os.path.expandvars(val)
-                        rutas.extend(val.split(os.pathsep))
-            except (OSError, ValueError):
-                pass
-        home = Path.home()
-        rutas.append(str(home / ".local/bin"))
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            rutas.append(str(Path(appdata) / "npm"))
-        else:
-            rutas.append(str(home / "AppData/Roaming/npm"))
-        localappdata = os.environ.get("LOCALAPPDATA")
-        if localappdata:
-            rutas.append(str(Path(localappdata) / "agy/bin"))
-            rutas.append(str(Path(localappdata) / "OpenAI/Codex/bin"))
-        else:
-            rutas.append(str(home / "AppData/Local/agy/bin"))
-            rutas.append(str(home / "AppData/Local/OpenAI/Codex/bin"))
-
-        path_extra = os.pathsep.join(os.path.expandvars(r) for r in rutas if r)
-        exe = shutil.which(nombre, path=f"{os.environ.get('PATH', '')}{os.pathsep}{path_extra}")
-        if exe:
-            return exe
-    return None
-
-
-def arnes(a, rol):
-    """Arnés de un paso: --harness o el de su rol (claude por defecto); None con --cmd."""
-    return None if a.cmd else a.harness or rol.get("harness", "claude")
-
-
-class ArnesAusente(RuntimeError):
-    """Señala un ejecutable ausente que permite probar otra configuración."""
-
-
-def registrar_ausencia(root, tipo, posicion, cfg, **contexto):
-    """Registra y avisa una omisión sin atribuir ejecución ni cuota."""
-    harness = cfg.get("harness", "claude")
-    texto = f'[orquestar] no se encuentra el arnés "{harness}"; conmutando a reserva...'
-    print(texto, flush=True)
-    registrar(
-        root,
-        {
-            "tipo": tipo,
-            "fecha": ahora(),
-            **contexto,
-            "posicion": posicion,
-            "arnes": harness,
-            "modelo": cfg.get("model") or "predeterminado",
-            "arnes_ausente": True,
-            "codigo": 127,
-            "modelos": {},
-            "entrada": 0,
-            "cache_leida": 0,
-            "cache_escrita": 0,
-            "salida": 0,
-            "razonamiento": 0,
-            "coste_usd": 0,
-        },
-    )
-    avisar(root, "arnes", texto)
-
-
-def comando(a, prompt, root=None, rol=None, sesion=None):
-    rol = rol if rol is not None else rol_de(root or Path.cwd(), "task-dev")[1]
-    harness = arnes(a, rol)
-    plantilla = shlex.split(a.cmd, posix=os.name != "nt") if a.cmd else HARNESS[harness]
-    plantilla = [p.strip("\"'") for p in plantilla]
-    exe = buscar_ejecutable(plantilla[0])
-    if not exe:
-        if a.cmd:
-            sys.exit(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
-        raise ArnesAusente(f'No se encuentra el arnés "{plantilla[0]}" en el PATH.')
-    if sesion and not a.cmd:
-        if harness == "claude":
-            cmd = [exe, "--resume", sesion] + [p.replace("{prompt}", prompt) for p in plantilla[1:]]
-        elif harness == "codex":
-            cmd = [exe, "exec", "resume", sesion] + [p.replace("{prompt}", prompt) for p in plantilla[2:]]
-        elif harness == "agy":
-            cmd = [exe, "--conversation", sesion] + [p.replace("{prompt}", prompt) for p in plantilla[1:]]
-        else:
-            cmd = [exe] + [p.replace("{prompt}", prompt) for p in plantilla[1:]]
-    else:
-        cmd = [exe] + [p.replace("{prompt}", prompt) for p in plantilla[1:]]
-    if harness and rol.get("harness", harness) == harness:
-        cmd = con_modelo(cmd, harness, rol)
-    if a.presupuesto and harness == "claude":
-        cmd += ["--max-budget-usd", str(a.presupuesto)]
-    return cmd
-
-
-TIMEOUT_AGENTE_S = 1800
-GRACIA_CIERRE_JSON_S = 10
-_TIMEOUT_OMITIDO = object()
-_SUBPROCESS_RUN = subprocess.run
-_SUBPROCESS_POPEN = subprocess.Popen
-
-
-def _extraer_json_final(harness, texto):
-    """Devuelve el diccionario JSON final de agy o claude si ya está completo en stdout, o None."""
-    lineas = [l.strip() for l in (texto or "").splitlines() if l.strip()]
-    if not lineas:
-        return None
-    try:
-        d = json.loads(lineas[-1])
-    except ValueError:
-        return None
-    if not isinstance(d, dict):
-        return None
-    if harness == "agy" and ("status" in d or "response" in d):
-        return d
-    if harness == "claude" and ("result" in d or "is_error" in d or d.get("type") == "result"):
-        return d
-    return None
-
-
-class _TrabajoWindows:
-    """Conserva un Job Object que alcanza descendientes después de salir el padre."""
-
-    def __init__(self):
-        class Limites(ctypes.Structure):
-            _fields_ = [
-                ("tiempo_proceso", ctypes.c_int64),
-                ("tiempo_job", ctypes.c_int64),
-                ("flags", ctypes.c_ulong),
-                ("minimo", ctypes.c_size_t),
-                ("maximo", ctypes.c_size_t),
-                ("procesos", ctypes.c_ulong),
-                ("afinidad", ctypes.c_size_t),
-                ("prioridad", ctypes.c_ulong),
-                ("planificacion", ctypes.c_ulong),
-            ]
-
-        class LimitesExtendidos(ctypes.Structure):
-            _fields_ = [
-                ("basicos", Limites),
-                ("io", ctypes.c_uint64 * 6),
-                ("memoria_proceso", ctypes.c_size_t),
-                ("memoria_job", ctypes.c_size_t),
-                ("pico_proceso", ctypes.c_size_t),
-                ("pico_job", ctypes.c_size_t),
-            ]
-
-        self.kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-        firmas = {
-            "CreateJobObjectW": ([ctypes.c_void_p, ctypes.c_wchar_p], ctypes.c_void_p),
-            "SetInformationJobObject": ([ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong], ctypes.c_int),
-            "AssignProcessToJobObject": ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
-            "TerminateJobObject": ([ctypes.c_void_p, ctypes.c_uint], ctypes.c_int),
-            "CloseHandle": ([ctypes.c_void_p], ctypes.c_int),
-            "CreateToolhelp32Snapshot": ([ctypes.c_ulong, ctypes.c_ulong], ctypes.c_void_p),
-            "Thread32First": ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
-            "Thread32Next": ([ctypes.c_void_p, ctypes.c_void_p], ctypes.c_int),
-            "OpenThread": ([ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong], ctypes.c_void_p),
-            "ResumeThread": ([ctypes.c_void_p], ctypes.c_ulong),
-        }
-        for nombre, (args, resultado) in firmas.items():
-            fn = getattr(self.kernel, nombre)
-            fn.argtypes, fn.restype = args, resultado
-        self.handle = self.kernel.CreateJobObjectW(None, None)
-        if not self.handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-        limites = LimitesExtendidos()
-        limites.basicos.flags = 0x2000
-        if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limites), ctypes.sizeof(limites)):
-            error = ctypes.WinError(ctypes.get_last_error())
-            self.cerrar()
-            raise error
-
-    def asignar_y_reanudar(self, proceso):
-        """Asigna el proceso suspendido antes de permitir que cree descendientes."""
-        if not self.kernel.AssignProcessToJobObject(self.handle, int(proceso._handle)):
-            raise ctypes.WinError(ctypes.get_last_error())
-
-        class EntradaHilo(ctypes.Structure):
-            _fields_ = [
-                ("tamano", ctypes.c_ulong),
-                ("usos", ctypes.c_ulong),
-                ("tid", ctypes.c_ulong),
-                ("pid", ctypes.c_ulong),
-                ("prioridad", ctypes.c_long),
-                ("delta", ctypes.c_long),
-                ("flags", ctypes.c_ulong),
-            ]
-
-        snapshot = self.kernel.CreateToolhelp32Snapshot(4, 0)
-        if snapshot == ctypes.c_void_p(-1).value:
-            raise ctypes.WinError(ctypes.get_last_error())
-        try:
-            entrada = EntradaHilo()
-            entrada.tamano = ctypes.sizeof(entrada)
-            existe = self.kernel.Thread32First(snapshot, ctypes.byref(entrada))
-            while existe:
-                if entrada.pid == proceso.pid:
-                    hilo = self.kernel.OpenThread(2, False, entrada.tid)
-                    if not hilo:
-                        raise ctypes.WinError(ctypes.get_last_error())
-                    try:
-                        if self.kernel.ResumeThread(hilo) == 0xFFFFFFFF:
-                            raise ctypes.WinError(ctypes.get_last_error())
-                        return
-                    finally:
-                        self.kernel.CloseHandle(hilo)
-                entrada.tamano = ctypes.sizeof(entrada)
-                existe = self.kernel.Thread32Next(snapshot, ctypes.byref(entrada))
-            raise OSError("No se encontró el hilo inicial del arnés suspendido")
-        finally:
-            self.kernel.CloseHandle(snapshot)
-
-    def terminar(self):
-        """Termina todos los miembros, aunque ya no exista el PID raíz."""
-        if not self.kernel.TerminateJobObject(self.handle, 124):
-            raise ctypes.WinError(ctypes.get_last_error())
-
-    def cerrar(self):
-        """Libera el job con KILL_ON_JOB_CLOSE, también en salidas excepcionales."""
-        if self.handle:
-            self.kernel.CloseHandle(self.handle)
-            self.handle = None
-
-
-@contextmanager
-def _proceso_agrupado(cmd, **kwargs):
-    """Crea un árbol aislado y conserva su capacidad de cierre hasta el retorno."""
-    trabajo = None
-    p = None
-    if os.name == "nt" and subprocess.Popen is _SUBPROCESS_POPEN:
-        trabajo = _TrabajoWindows()
-        kwargs["creationflags"] = kwargs.get("creationflags", 0) | 0x00000004
-    try:
-        p = subprocess.Popen(cmd, **kwargs)
-        if trabajo is not None:
-            p._orquestar_trabajo = trabajo
-            try:
-                trabajo.asignar_y_reanudar(p)
-            except BaseException:
-                p.kill()
-                p.wait(timeout=2)
-                raise
-        yield p
-    finally:
-        if trabajo is not None:
-            trabajo.cerrar()
-        if p is not None:
-            p.__exit__(None, None, None)
-
-
-def _terminar_arbol_proceso(p):
-    """Termina el subproceso y su árbol de procesos hijos sin bloquear indefinidamente."""
-    pid = getattr(p, "pid", None)
-    trabajo = getattr(p, "_orquestar_trabajo", None)
-    if isinstance(trabajo, _TrabajoWindows):
-        trabajo.terminar()
-    elif os.name == "nt" and pid:
-        try:
-            _SUBPROCESS_RUN(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                capture_output=True,
-                timeout=10,
-                check=False,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception:
-            pass
-    elif os.name == "posix" and pid:
-        try:
-            os.killpg(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    try:
-        p.kill()
-    except Exception:
-        pass
-    try:
-        p.wait(timeout=2)
-    except Exception:
-        pass
-
-
-def timeout_de_rol(cfg, por_defecto=None, env=None):
-    """Obtiene el timeout en segundos configurado en el rol, el entorno o el valor por defecto."""
-    val = cfg.get("timeout_s") if isinstance(cfg, dict) else None
-    if val is None:
-        origen_env = env if env is not None else os.environ
-        clave = "ORQUESTAR_TIMEOUT_AGENTE_S" if por_defecto is not None else "ORQUESTAR_TIMEOUT_S"
-        val = origen_env.get(clave) or origen_env.get("ORQUESTAR_TIMEOUT_S")
-    if val is None:
-        return por_defecto
-    try:
-        num = float(val)
-        if not math.isfinite(num):
-            return por_defecto
-        return num if num > 0 else None
-    except (TypeError, ValueError):
-        return por_defecto
-
-
-def _acepta_kwarg(fn, nombre):
-    """Comprueba si un callable (o su side_effect en pruebas) acepta el argumento con nombre indicado."""
-    objetivo = getattr(fn, "side_effect", None)
-    if callable(objetivo) and not isinstance(objetivo, type):
-        fn = objetivo
-    try:
-        params = inspect.signature(fn).parameters.values()
-        return any(p.name == nombre or p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
-    except (ValueError, TypeError):
-        return True
-
-
-def _ejecutar_captura_json(
-    cmd, root, harness, entrada=None, env=None, timeout=None, gracia_cierre=GRACIA_CIERRE_JSON_S
-):
-    """Ejecuta un arnés con salida JSON aplicando gracia post-JSON y timeout sin colgar en pipes."""
-    if subprocess.run is not _SUBPROCESS_RUN:
-        kwargs_run = {"stdin": subprocess.DEVNULL} if entrada is None else {}
-        if timeout is not None:
-            kwargs_run["timeout"] = timeout
-        try:
-            r = subprocess.run(
-                cmd,
-                cwd=root,
-                input=entrada,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                **kwargs_run,
-            )
-            return r.returncode, r.stdout or "", r.stderr or "", False, False
-        except subprocess.TimeoutExpired as exc:
-            out = exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            err = exc.stderr.decode("utf-8", errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
-            if _extraer_json_final(harness, out) is not None:
-                return 0, out, err, False, True
-            return 124, out, err, True, False
-
-    with _proceso_agrupado(
-        cmd,
-        cwd=root,
-        stdin=subprocess.PIPE if entrada is not None else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        start_new_session=(os.name == "posix"),
-    ) as p:
-        if entrada is not None and p.stdin is not None:
-            datos_in = entrada.encode("utf-8", errors="replace") if isinstance(entrada, str) else entrada
-
-            def _escribir_stdin():
-                try:
-                    p.stdin.write(datos_in)
-                except Exception:
-                    pass
-                finally:
-                    try:
-                        p.stdin.close()
-                    except Exception:
-                        pass
-
-            threading.Thread(target=_escribir_stdin, daemon=True).start()
-
-        chunks_out, chunks_err = [], []
-        instante_json = [None]
-
-        def _leer_stream(stream, destino, detectar_json=False):
-            if stream is None:
-                return
-            try:
-                fd = stream.fileno() if hasattr(stream, "fileno") else None
-                if not isinstance(fd, int):
-                    fd = None
-            except (OSError, ValueError, io.UnsupportedOperation):
-                fd = None
-            try:
-                while True:
-                    if fd is not None:
-                        bloque = os.read(fd, 4096)
-                    else:
-                        bloque = stream.read(4096)
-                        if isinstance(bloque, str):
-                            bloque = bloque.encode("utf-8", errors="replace")
-                    if not bloque:
-                        break
-                    destino.append(bloque)
-                    if detectar_json and instante_json[0] is None:
-                        texto_parcial = b"".join(destino).decode("utf-8", errors="replace")
-                        if _extraer_json_final(harness, texto_parcial) is not None:
-                            instante_json[0] = time.monotonic()
-            except (OSError, ValueError):
-                pass
-
-        t_out = threading.Thread(target=_leer_stream, args=(p.stdout, chunks_out, True), daemon=True)
-        t_err = threading.Thread(target=_leer_stream, args=(p.stderr, chunks_err, False), daemon=True)
-        t_out.start()
-        t_err.start()
-
-        inicio_espera = time.monotonic()
-        por_timeout = False
-        cierre_forzado = False
-        instante_salida = None
-        while True:
-            terminado = p.poll() is not None
-            if terminado and not t_out.is_alive() and not t_err.is_alive():
-                if os.name == "posix":
-                    _terminar_arbol_proceso(p)
-                break
-            ahora_m = time.monotonic()
-            if terminado and instante_salida is None:
-                instante_salida = ahora_m
-            if (
-                instante_json[0] is not None
-                and gracia_cierre is not None
-                and (ahora_m - instante_json[0]) >= gracia_cierre
-            ):
-                cierre_forzado = True
-                _terminar_arbol_proceso(p)
-                break
-            if timeout is not None and (ahora_m - inicio_espera) >= timeout:
-                por_timeout = True
-                _terminar_arbol_proceso(p)
-                break
-            if instante_salida is not None and ahora_m - instante_salida >= (
-                gracia_cierre if gracia_cierre is not None else GRACIA_CIERRE_JSON_S
-            ):
-                cierre_forzado = instante_json[0] is not None
-                _terminar_arbol_proceso(p)
-                break
-            time.sleep(0.02)
-
-        espera_hilos = 0.5 if (cierre_forzado or por_timeout) else 2.0
-        t_out.join(timeout=espera_hilos)
-        t_err.join(timeout=espera_hilos)
-        for stream in (p.stdout, p.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except Exception:
-                    pass
-
-        stdout_txt = b"".join(chunks_out).decode("utf-8", errors="replace")
-        stderr_txt = b"".join(chunks_err).decode("utf-8", errors="replace")
-        if por_timeout and _extraer_json_final(harness, stdout_txt) is not None:
-            por_timeout = False
-            cierre_forzado = True
-        codigo = 0 if cierre_forzado else (124 if por_timeout else (p.returncode if p.returncode is not None else 1))
-        return codigo, stdout_txt, stderr_txt, por_timeout, cierre_forzado
-
-
-def lanzar(
-    cmd,
-    root,
-    harness,
-    entrada=None,
-    env=None,
-    timeout=_TIMEOUT_OMITIDO,
-    gracia_cierre=GRACIA_CIERRE_JSON_S,
-    solo_respuesta=False,
-):
-    """Ejecuta un arnés y devuelve (código, métricas, salida). Lee el uso de claude, agy y codex."""
-    inicio = time.monotonic()
-    if timeout is _TIMEOUT_OMITIDO:
-        timeout = timeout_de_rol(None, por_defecto=None, env=env)
-    if harness == "agy" and "--output-format" in cmd:
-        rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
-            cmd, root, harness, entrada=entrada, env=env, timeout=timeout, gracia_cierre=gracia_cierre
-        )
-        m = {"duracion_s": round(time.monotonic() - inicio)}
-        if cierre_forzado:
-            m["cierre_forzado"] = True
-            print(
-                f"[orquestar] agy no cerró el proceso tras emitir el JSON final ({gracia_cierre}s); proceso terminado.",
-                flush=True,
-            )
-        if por_timeout:
-            m.update(timeout=True, error=True)
-            print(f"[orquestar] agy agotó el tiempo de espera ({timeout}s); proceso terminado.", flush=True)
-        salida = r_stdout + "\n" + r_stderr
-        try:
-            d = json.loads(r_stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            print(salida, flush=True)
-            return rc, m, "" if solo_respuesta and not rc else salida
-        print(d.get("response", ""), flush=True)
-        u = d.get("usage") or {}
-        modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x == "--model"), "agy")
-        if d.get("status") != "SUCCESS":
-            print(f"[orquestar] agy status: {d.get('status')} (returncode: {rc})", flush=True)
-        sesion_id = d.get("conversation_id") or d.get("session_id")
-        m.update(
-            turnos=d.get("num_turns"),
-            error=d.get("status") != "SUCCESS",
-            modelos={
-                modelo: {
-                    "entrada": u.get("input_tokens"),
-                    "salida": u.get("output_tokens"),
-                    "cache_leida": u.get("cache_read_tokens"),
-                    "razonamiento": u.get("thinking_tokens"),
-                }
-            },
-        )
-        if sesion_id:
-            m["sesion"] = sesion_id
-        if solo_respuesta and not (rc or m["error"]):
-            salida = d.get("response") or ""
-        return (1 if m["error"] and not rc else rc), m, salida
-    if harness == "claude" and "--output-format" in cmd:
-        rc, r_stdout, r_stderr, por_timeout, cierre_forzado = _ejecutar_captura_json(
-            cmd, root, harness, entrada=entrada, env=env, timeout=timeout, gracia_cierre=gracia_cierre
-        )
-        m = {"duracion_s": round(time.monotonic() - inicio)}
-        if cierre_forzado:
-            m["cierre_forzado"] = True
-            print(
-                f"[orquestar] claude no cerró el proceso tras emitir el JSON final ({gracia_cierre}s); "
-                "proceso terminado.",
-                flush=True,
-            )
-        if por_timeout:
-            m.update(timeout=True, error=True)
-            print(f"[orquestar] claude agotó el tiempo de espera ({timeout}s); proceso terminado.", flush=True)
-        salida = r_stdout + "\n" + r_stderr
-        try:
-            d = json.loads(r_stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            print(salida, flush=True)
-            return rc, m, "" if solo_respuesta and not rc else salida
-        print(d.get("result", ""), flush=True)
-        sesion_id = d.get("session_id") or d.get("sessionId")
-        m.update(
-            turnos=d.get("num_turns"),
-            coste_usd=d.get("total_cost_usd"),
-            subagentes=(d.get("subagent_stats") or {}).get("spawned"),
-            error=d.get("is_error"),
-            modelos={
-                k: {
-                    "entrada": u.get("inputTokens"),
-                    "salida": u.get("outputTokens"),
-                    "cache_leida": u.get("cacheReadInputTokens"),
-                    "cache_escrita": u.get("cacheCreationInputTokens"),
-                    "coste_usd": u.get("costUSD"),
-                }
-                for k, u in (d.get("modelUsage") or {}).items()
-            },
-        )
-        if sesion_id:
-            m["sesion"] = sesion_id
-        if solo_respuesta and not (rc or m["error"]):
-            salida = d.get("result") or ""
-        return (1 if d.get("is_error") and not rc else rc), m, salida
-    lineas, uso, turnos = [], {}, 0
-    sesion_id = None
-    respuesta_codex = ""
-    por_timeout = [False]
-    temporizador = None
-    with _proceso_agrupado(
-        cmd,
-        cwd=root,
-        stdin=subprocess.PIPE if entrada else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        start_new_session=(os.name == "posix"),
-    ) as p:
-        if timeout is not None:
-
-            def _vencio_timeout():
-                por_timeout[0] = True
-                _terminar_arbol_proceso(p)
-
-            temporizador = threading.Timer(timeout, _vencio_timeout)
-            temporizador.daemon = True
-            temporizador.start()
-        try:
-            if entrada:
-                p.stdin.write(entrada)
-                p.stdin.close()
-            for linea in p.stdout:
-                lineas.append(linea)
-                evento = None
-                if harness == "codex" and linea.lstrip().startswith("{"):
-                    try:
-                        evento = json.loads(linea)
-                    except ValueError:
-                        pass
-                if evento is None:
-                    print(linea, end="", flush=True)
-                elif evento.get("type") == "thread.started":
-                    sesion_id = evento.get("thread_id") or (
-                        evento.get("thread", {}).get("id") if isinstance(evento.get("thread"), dict) else None
-                    )
-                elif evento.get("type") == "item.completed" and evento.get("item", {}).get("type") == "agent_message":
-                    respuesta_codex = evento["item"].get("text", "")
-                    print(respuesta_codex, flush=True)
-                elif evento.get("type") == "turn.completed":
-                    turnos += 1
-                    for k, v in (evento.get("usage") or {}).items():
-                        uso[k] = uso.get(k, 0) + (v or 0)
-                elif evento.get("type") in ("error", "turn.failed"):
-                    print(json.dumps(evento, ensure_ascii=False), flush=True)
-        finally:
-            try:
-                p.wait()
-            finally:
-                if temporizador is not None:
-                    temporizador.cancel()
-    m = {"duracion_s": round(time.monotonic() - inicio)}
-    if por_timeout[0]:
-        m.update(timeout=True, error=True)
-        print(
-            f"[orquestar] {harness or 'arnés'} agotó el tiempo de espera ({timeout}s); proceso terminado.", flush=True
-        )
-    if sesion_id:
-        m["sesion"] = sesion_id
-    if uso:
-        modelo = next((cmd[i + 1] for i, x in enumerate(cmd[:-1]) if x in ("-m", "--model")), "codex")
-        entrada = max(0, (uso.get("input_tokens") or 0) - (uso.get("cached_input_tokens") or 0))
-        m.update(
-            turnos=turnos,
-            modelos={
-                modelo: {
-                    "entrada": entrada,
-                    "salida": uso.get("output_tokens"),
-                    "cache_leida": uso.get("cached_input_tokens"),
-                    "cache_escrita": uso.get("cache_write_input_tokens"),
-                    "razonamiento": uso.get("reasoning_output_tokens"),
-                }
-            },
-        )
-    codigo = 124 if por_timeout[0] else p.returncode
-    if solo_respuesta and not codigo and harness == "codex":
-        return codigo, m, respuesta_codex
-    return codigo, m, "".join(lineas[-200:])
-
-
-def buscar_sesion_agente(root, rol, iid, arnes):
-    """Busca la sesión previa de un rol dentro del intento en curso de la tarea."""
-    if not iid:
-        return None
-    es_escalada = bool(os.environ.get("ORQUESTAR_ESCALADA"))
-    for e in reversed(leer_metricas(root)):
-        if e.get("id") and e.get("id") != iid:
-            break
-        if e.get("tipo") == "paso" and e.get("paso") == "especificar":
-            break
-        if e.get("tipo") == "paso" and e.get("escalado") and not es_escalada:
-            break
-        if bool(e.get("escalado")) != es_escalada and e.get("tipo") in ("paso", "agente"):
-            break
-        if e.get("tipo") == "paso" and not e.get("sin_cuota"):
-            break
-        if (
-            e.get("tipo") == "agente"
-            and e.get("rol") == rol
-            and e.get("id") == iid
-            and e.get("arnes") == arnes
-            and e.get("sesion")
-        ):
-            return e["sesion"]
-    return None
-
-
-def buscar_sesion_paso(root, paso, iid, arnes):
-    """Busca la sesión para reanudar un paso interrumpido inmediatamente antes por cuota."""
-    for e in reversed(leer_metricas(root)):
-        if e.get("tipo") in ("espera", "verificacion"):
-            continue
-        if e.get("tipo") == "paso":
-            if (
-                e.get("paso") == paso
-                and e.get("id") == iid
-                and e.get("arnes") == arnes
-                and e.get("sin_cuota")
-                and e.get("sesion")
-            ):
-                return e["sesion"]
-            break
-        if e.get("id") and e.get("id") != iid:
-            break
-    return None
-
-
-def ejecutar(a, root, prompt, env=None, rol=None, sesion=None):
-    """Lanza el paso con el arnés y el modelo de su rol y devuelve (código, métricas, salida)."""
-    if rol is None:
-        iid = (env or {}).get("ORQUESTAR_ID") or os.environ.get("ORQUESTAR_ID", "")
-        paso = (env or {}).get("ORQUESTAR_PASO") or os.environ.get("ORQUESTAR_PASO", "task-dev")
-        dif = dificultad_de(root, iid) if iid else None
-        rol = rol_de(root, paso, dificultad=dif, iid=iid)[1]
-    harness = arnes(a, rol)
-    timeout_paso = timeout_de_rol(rol, por_defecto=None, env=env)
-    kwargs_extra = {"timeout": timeout_paso} if _acepta_kwarg(lanzar, "timeout") else {}
-    if sesion:
-        cmd = comando(a, prompt, root, rol, sesion=sesion)
-        codigo, m, salida = lanzar(cmd, root, harness, env=env, **kwargs_extra)
-        if codigo != 0 and espera_cuota(salida) is None and not m.get("timeout"):
-            cmd_fresh = comando(a, prompt, root, rol, sesion=None)
-            return lanzar(cmd_fresh, root, harness, env=env, **kwargs_extra)
-        return codigo, m, salida
-    return lanzar(comando(a, prompt, root, rol), root, harness, env=env, **kwargs_extra)
-
-
-def base_comando_agente(harness, prompt, sesion=None):
-    if harness == "claude":
-        if sesion:
-            return ["claude", "--resume", sesion, "-p", "--dangerously-skip-permissions", "--output-format", "json"]
-        return ["claude", "-p", "--dangerously-skip-permissions", "--output-format", "json"]
-    elif harness == "codex":
-        if sesion:
-            return [
-                "codex",
-                "exec",
-                "resume",
-                sesion,
-                "--json",
-                "-c",
-                'approval_policy="never"',
-                "-c",
-                'sandbox_mode="workspace-write"',
-                "-",
-            ]
-        return ["codex", "exec", "--json", "-c", 'approval_policy="never"', "--sandbox", "workspace-write", "-"]
-    elif harness == "agy":
-        if sesion:
-            return [
-                "agy",
-                "--conversation",
-                sesion,
-                "--dangerously-skip-permissions",
-                "--output-format",
-                "json",
-                "-p",
-                prompt,
-            ]
-        return ["agy", "--dangerously-skip-permissions", "--output-format", "json", "-p", prompt]
-    return None
-
-
-def acceso_suscripcion_denegado(harness, salida):
-    """Reconoce el diagnóstico específico de Claude sin reclasificar autenticación genérica."""
-    return harness == "claude" and "Your organization has disabled Claude subscription access for Claude Code" in salida
-
-
-def agente(root, rol, prompt, mandato_temporal=None):
-    """Lanza un rol (hades, clio, cronos…) con el arnés y el modelo de orchestration.json."""
-    invocacion = uuid.uuid4().hex
-    iniciada = time.time_ns()
-
-    def registrar_intento(fila):
-        """Relaciona reservas de una llamada sin mezclar revisiones independientes."""
-        if os.environ.get("ORQUESTAR_DICTAMEN") == "diagnostico-suite":
-            fila["tipo_dictamen"] = "diagnostico-suite"
-        registrar(
-            root,
-            {
-                **fila,
-                "invocacion": invocacion,
-                "objetivo_llamada": objetivo,
-                "entradas_llamada": entradas,
-                "llamada_padre": os.environ.get("ORQUESTAR_LLAMADA", ""),
-            },
-        )
-
-    paso, iid = os.environ.get("ORQUESTAR_PASO", ""), os.environ.get("ORQUESTAR_ID", "")
-    objetivo = os.environ.get("ORQUESTAR_REVISION", "")
-    if not objetivo:
-        objetivo = os.environ.get("ORQUESTAR_DICTAMEN", "")
-    entradas = os.environ.get("ORQUESTAR_ENTRADAS", "")
-    if objetivo and not entradas:
-        head = git("rev-parse", "HEAD")
-        if head:
-            entradas = huella_producto(root, arbol(root), backlog_dirs(root), mandato_temporal)
-
-    fuentes = {}
-    contradiccion = False
-    entrega_valida = True
-
-    def terminar(codigo, salida="", veredicto="", cuota=None):
-        """Entrega el resultado al llamador por su canal, conservando la salida pública de la CLI."""
-        resultado = llamadas.Resultado(
-            invocacion,
-            iid,
-            paso,
-            rol,
-            llamadas.estado(
-                codigo,
-                cuota=cuota,
-                entrega=bool(veredicto) if revision_formal else entrega_valida,
-                contradiccion=contradiccion,
-            ),
-            codigo,
-            padre=os.environ.get("ORQUESTAR_LLAMADA", ""),
-            objetivo=objetivo,
-            entradas=entradas,
-            perfil={k: cfg_actual.get(k) for k in ("harness", "model", "effort")},
-            veredicto=veredicto,
-            salida=salida,
-            espera_s=cuota,
-            fuentes=fuentes,
-            iniciada=iniciada,
-        )
-        llamadas.publicar(os.environ.get("ORQUESTAR_CANAL"), resultado)
-        return codigo
-
-    revision_formal = rol == "hades" and os.environ.get("ORQUESTAR_DICTAMEN") != "diagnostico-suite"
-    dif = dificultad_de(root, iid) if iid else None
-    cfg = aplicar_perfil(root, iid, rol, ajustes(config(root).get(rol, {}), paso, dificultad=dif))
-    cfg_actual = cfg
-    if "instructions" in cfg:
-        p_inst = Path(cfg["instructions"])
-        if not p_inst.is_absolute():
-            p_inst = root / p_inst
-        if not p_inst.exists():
-            sys.exit(f"orchestration.json: {rol}.instructions apunta a {cfg['instructions']}, que no existe.")
-
-    reservas = lista_reservas(cfg)
-    configs_originales = [cfg] + reservas
-    configs_a_probar = configuraciones_con_cuota(root, configs_originales)
-    intentos_cuota = []
-    salida = ""
-    acceso_denegado = False
-    escalado = bool(os.environ.get("ORQUESTAR_ESCALADA"))
-    cede = "sin cuota" if cfg.get("fijado") and configs_a_probar and configs_a_probar[0] is not cfg else ""
-
-    for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-        harness = cfg_actual.get("harness", "claude")
-        hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
-        sesion = buscar_sesion_agente(root, rol, iid, harness)
-        es_reanudacion = bool(sesion)
-        prompt_texto = construir_prompt_agente(
-            root, rol, prompt, reanudacion=es_reanudacion, mandato_temporal=mandato_temporal
-        )
-        base = base_comando_agente(harness, prompt_texto, sesion=sesion)
-        if not base:
-            sys.exit(f"Arnés no soportado para roles: {harness}")
-        exe = buscar_ejecutable(base[0])
-        if not exe:
-            posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
-            registrar_ausencia(root, "agente", posicion, cfg_actual, rol=rol, paso=paso, id=iid, invocacion=invocacion)
-            if cfg_actual is cfg and cfg.get("fijado"):
-                cede = "sin arnés"
-            continue
-        cmd = con_modelo([exe] + base[1:], harness, cfg_actual)
-        timeout_rol = timeout_de_rol(cfg_actual, por_defecto=TIMEOUT_AGENTE_S)
-        kwargs_lanzar = {"timeout": timeout_rol} if _acepta_kwarg(lanzar, "timeout") else {}
-        if harness == "codex" and os.name == "nt" and "CODEX_WINDOWS_REGISTERED_CORE" in os.environ:
-            entorno_rol = os.environ.copy()
-            entorno_rol.pop("CODEX_WINDOWS_REGISTERED_CORE", None)
-            kwargs_lanzar["env"] = entorno_rol
-        if (revision_formal or os.environ.get("ORQUESTAR_DICTAMEN") == "diagnostico-suite") and _acepta_kwarg(
-            lanzar, "solo_respuesta"
-        ):
-            kwargs_lanzar["solo_respuesta"] = True
-        informe = root / f"docs/review/{objetivo}_reviews/{iid}-{objetivo}-review.md"
-        anterior = informe.read_bytes() if objetivo in ("spec", "test", "code") and informe.exists() else None
-        entrada_arnes = None if harness == "agy" else prompt_texto
-        codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada_arnes, **kwargs_lanzar)
-        if cede and cfg_actual is not cfg:
-            avisar_perfil(root, iid, cfg, cede, cfg_actual)
-            cede = ""
-        if (
-            es_reanudacion
-            and codigo != 0
-            and espera_cuota(salida) is None
-            and not acceso_suscripcion_denegado(harness, salida)
-            and not m.get("timeout")
-        ):
-            prompt_fresh = construir_prompt_agente(root, rol, prompt, mandato_temporal=mandato_temporal)
-            base_fresh = base_comando_agente(harness, prompt_fresh, sesion=None)
-            cmd_fresh = con_modelo([exe] + base_fresh[1:], harness, cfg_actual)
-            entrada_fresh = None if harness == "agy" else prompt_fresh
-            codigo, m, salida = lanzar(cmd_fresh, root, harness, entrada=entrada_fresh, **kwargs_lanzar)
-
-        if codigo and acceso_suscripcion_denegado(harness, salida):
-            acceso_denegado = True
-            registrar_intento(
-                {
-                    "tipo": "agente",
-                    "fecha": ahora(),
-                    "rol": rol,
-                    "paso": paso,
-                    "id": iid,
-                    "arnes": harness,
-                    "codigo": codigo,
-                    **m,
-                    **marca_fijado(cfg_actual),
-                    "modelo": cfg_actual.get("model") or "predeterminado",
-                    "acceso_denegado": True,
-                    "diagnostico": salida[-1200:],
-                    **({"escalado": True} if escalado else {}),
-                }
-            )
-            print(
-                f"[orquestar] {rol}: acceso de Claude por suscripción deshabilitado; "
-                + ("conmutando a reserva autorizada." if hay_mas_reservas else "sin más reservas elegibles."),
-                flush=True,
-            )
-            if cfg_actual is cfg and cfg.get("fijado"):
-                cede = "sin acceso por suscripción"
-            continue
-
-        cuota = espera_cuota(salida) if codigo else None
-        if cuota is not None:
-            datos = fallo_cuota(root, harness, cfg_actual.get("model") or "predeterminado", salida)
-            m.update(datos)
-            intento = {
-                "tipo": "agente",
-                "fecha": ahora(),
-                "rol": rol,
-                "paso": paso,
-                "id": iid,
-                "arnes": harness,
-                "codigo": codigo,
-                **datos,
-                **marca_fijado(cfg_actual),
-                **({"escalado": True} if escalado else {}),
-            }
-            intentos_cuota.append(intento)
-            registrar_intento({**intento, **m})
-            resultado_cuota = llamadas.Resultado(invocacion, iid, paso, rol, "espera_cuota", codigo, espera_s=cuota)
-            if llamadas.recuperacion(resultado_cuota, hay_reserva=hay_mas_reservas) == "reserva":
-                print(
-                    f"[orquestar] {rol} agotó cuota ({cfg_actual.get('model') or harness}); conmutando a reserva...",
-                    flush=True,
-                )
-                if cfg_actual is cfg and cfg.get("fijado"):
-                    cede = "sin cuota"
-                continue
-            break
-
-        if not codigo:
-            recuperar_cuota(root, harness, cfg_actual.get("model") or "predeterminado")
-        veredicto = declaracion(salida)[0] if revision_formal and not codigo else ""
-        contradiccion = False
-        if revision_formal and not codigo and objetivo in ("spec", "test", "code") and informe.exists():
-            actual = informe.read_bytes()
-            if actual != anterior:
-                texto_informe = actual.decode("utf-8")
-                canonico = declaracion(texto_informe)[0]
-                anteriores = fuentes
-                fuentes = {"respuesta": salida, "informe": texto_informe}
-                if anteriores:
-                    fuentes["anteriores"] = anteriores
-                contradiccion = bool(veredicto and canonico and veredicto != canonico)
-                if not contradiccion:
-                    veredicto = veredicto or canonico
-        if contradiccion:
-            veredicto = ""
-        sin_dictamen = revision_formal and not codigo and not veredicto
-        entrega_valida = not codigo
-        if os.environ.get("ORQUESTAR_DICTAMEN") == "diagnostico-suite" and not codigo:
-            try:
-                diagnostico_suite.leer_dictamen(salida)
-            except diagnostico_suite.DiagnosticoPendiente:
-                entrega_valida = False
-                sin_dictamen = True
-        registrar_intento(
-            {
-                "tipo": "agente",
-                "fecha": ahora(),
-                "rol": rol,
-                "paso": paso,
-                "id": iid,
-                "arnes": harness,
-                "codigo": codigo,
-                **marca_fijado(cfg_actual),
-                **({"veredicto": veredicto} if veredicto else {}),
-                **({"diagnostico": salida[-1200:]} if codigo or sin_dictamen else {}),
-                **({"escalado": True} if escalado else {}),
-                **m,
-            }
-        )
-        if veredicto == "RECHAZADO":
-            print(tope_de_rechazos(root, iid), flush=True)
-        if (
-            codigo
-            and objetivo
-            and llamadas.recuperacion(
-                llamadas.Resultado(invocacion, iid, paso, rol, "fallo_tecnico", codigo), hay_reserva=hay_mas_reservas
-            )
-            == "reserva"
-        ):
-            continue
-        if sin_dictamen:
-            print(
-                "[orquestar] revisión pendiente de Hades: falta el dictamen formal."
-                + (" Probando reserva autorizada." if hay_mas_reservas else ""),
-                flush=True,
-            )
-            pendiente = llamadas.Resultado(invocacion, iid, paso, rol, "entrega_pendiente", codigo)
-            if llamadas.recuperacion(pendiente, hay_reserva=hay_mas_reservas) == "reserva":
-                continue
-            if intentos_cuota or cuota_descartada(root, configs_originales, configs_a_probar)[0] is not None:
-                break
-        return terminar(codigo, salida, veredicto)
-
-    if intentos_cuota:
-        menor = menor_espera_agente(intentos_cuota)
-        registrar_intento({**menor, "modelos": {}, "sin_cuota": True})
-        print(
-            f"[orquestar] {rol} sin cuota: termina el paso sin tocar estados; "
-            "el bucle esperará la cuota y reintentará.",
-            flush=True,
-        )
-        cfg_actual = {"harness": menor.get("arnes"), "model": menor.get("modelo_cuota")}
-        return terminar(intentos_cuota[-1]["codigo"], salida, cuota=menor["espera_s"])
-    espera, cfg_omitida = cuota_descartada(root, [cfg] + reservas, configs_a_probar)
-    if espera is not None:
-        registrar_intento(
-            {
-                "tipo": "agente",
-                "fecha": ahora(),
-                "rol": rol,
-                "paso": paso,
-                "id": iid,
-                "arnes": cfg_omitida.get("harness", "claude"),
-                "codigo": 1,
-                "modelo_cuota": cfg_omitida.get("model") or "predeterminado",
-                "modelos": {},
-                "sin_cuota": True,
-                "espera_s": espera,
-                **({"escalado": True} if escalado else {}),
-            }
-        )
-        print(f"[orquestar] {rol} sin cuota; se conserva la recuperación vigente.", flush=True)
-        cfg_actual = cfg_omitida
-        return terminar(1, salida if configs_a_probar else "", cuota=espera)
-    if acceso_denegado:
-        restriccion = " (perfil estricto)" if cfg.get("estricto") else ""
-        print(
-            f"[orquestar] {rol}: revisión pendiente por acceso deshabilitado{restriccion}; "
-            "conserva el trabajo y termina el paso sin completar ni abrir preguntas. "
-            "Reintenta cuando un perfil autorizado recupere acceso.",
-            flush=True,
-        )
-        return terminar(1, "Acceso por suscripción deshabilitado")
-    mensaje = f"{rol}: ningún arnés disponible en el principal ni en las reservas."
-    print(f"[orquestar] {mensaje}", flush=True)
-    avisar(root, "error", mensaje)
-    return terminar(1, mensaje)
-
-
-def menor_espera_agente(filas):
-    """Selecciona el primer vencimiento y descuenta el tiempo transcurrido desde su intento."""
-    instante = fecha_estado(ahora())
-
-    def vencimiento(fila):
-        """Los resúmenes modernos conservan la fecha y duración originales del intento."""
-        duracion = (
-            fila["espera_s"]
-            if "espera_s" in fila and not fila.get("invocacion")
-            else fila.get("cuota_espera_s", fila.get("espera_s", 1800))
-        )
-        return (fecha_estado(fila.get("fecha")) or instante) + timedelta(seconds=duracion)
-
-    menor = min(filas, key=vencimiento)
-    restante = max(0, math.ceil((vencimiento(menor) - instante).total_seconds()))
-    return {**menor, "espera_s": restante}
-
-
-def cuota_agente_pendiente(filas):
-    """Devuelve una espera no resuelta; conserva registros antiguos sin correlación."""
-    pendientes = [
-        r.fuentes["registro"] for r in llamadas.pendientes(llamadas.desde_metricas(filas)) if r.espera_s is not None
-    ]
-    return menor_espera_agente(pendientes) if pendientes else None
-
-
-def revision_sin_dictamen(filas, paso, iid):
-    """La última reserva de cada revisión determina si quedó sin dictamen."""
-    filas = [
-        f
-        for f in filas
-        if f.get("rol") == "hades"
-        and not f.get("tipo_dictamen")
-        and f.get("paso", paso) == paso
-        and f.get("id", iid) == iid
-    ]
-    return any(r.espera_s is None for r in llamadas.pendientes(llamadas.desde_metricas(filas)))
-
-
-def validar_puerta_delta(root, iid, base_sha):
-    """Ejecuta en el motor la puerta determinista de formato/lint sobre el delta antes de aceptar completed."""
-    if not iid or not base_sha or len(base_sha) != 40 or not (Path(root) / ".git").exists():
-        return True
-    fichero = fichero_de(root, iid)
-    if not fichero or frontmatter(fichero).get("status") != "completed":
-        return True
-    spec = importlib.util.spec_from_file_location("adevv_calidad", SKILL.with_name("calidad.py"))
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    from contextlib import redirect_stderr, redirect_stdout
-    from io import StringIO
-
-    buf = StringIO()
-    with redirect_stdout(buf), redirect_stderr(buf):
-        rc = modulo.ejecutar(root, base_sha, False, verificar)
-    detalle = buf.getvalue().strip()
-    if rc == 0:
-        return True
-    print(f"[orquestar] puerta determinista en rojo para {iid}; reabriendo para corrección.", flush=True)
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    cabecera, cuerpo = reescribir_frontmatter(
-        fichero.read_text(encoding="utf-8"), {"status": "in_progress", "updated_at": hoy}
-    )
-    fichero.write_text(cabecera + "\n---\n" + cuerpo, encoding="utf-8")
-    rel = fichero.relative_to(root).as_posix()
-    porcelain = subprocess.run(
-        ["git", "status", "--porcelain", "--", rel], cwd=root, capture_output=True, text=True, encoding="utf-8"
-    ).stdout.strip()
-    if porcelain:
-        subprocess.run(["git", "add", "--", rel], cwd=root, check=False)
-        subprocess.run(
-            ["git", "commit", "-qm", f"chore(orquestar): [{iid}] - reabrir por puerta determinista en rojo"],
-            cwd=root,
-            check=False,
-        )
-    try:
-        contexto_ejecucion.guardar_checkpoint(
-            root,
-            iid,
-            impedimento=(detalle or "Fallo en puerta determinista de formato/lint")[-2000:],
-            siguiente="Corregir el fallo determinista del delta y volver a cerrar limpio.",
-        )
-    except ValueError:
-        pass
-    return False
-
-
-def cierre_revisado(root, paso, iid, base):
-    """Acredita que el trabajo revisado quedó completo y confirmado durante el paso."""
-    head = git("rev-parse", "HEAD")
-    if paso not in DESARROLLO or head == base or git("status", "--porcelain"):
-        return False
-    fichero = fichero_de(root, iid)
-    return bool(fichero and frontmatter(fichero).get("status") == "completed" and revisada(root, iid, head))
-
-
-def cierre_tras_error(root, docs, paso, arg, base, antes):
-    """Un error solo se da por recuperado cuando el entregable del paso está confirmado."""
-    if paso in DESARROLLO:
-        return cierre_revisado(root, paso, arg, base)
-    if git("rev-parse", "HEAD") == base or git("status", "--porcelain") or firma(root, docs, paso, arg) == antes:
-        return False
-    if paso == "especificar":
-        f = fichero_de(root, arg)
-        fm = frontmatter(f) if f else {}
-        return fm.get("status") == "planned" or (fm.get("status"), fm.get("pendiente_de")) == ("blocked", "humano")
-    if paso == "calcular-dependencias":
-        return not faltan_dependencias(backlog(root))
-    if paso == "start-version":
-        return git("branch", "--show-current") == f"release/{arg}"
-    if paso == "work-plan":
-        return (root / docs / "work_plan.md").is_file() and bool(backlog(root))
-    if paso == "aplicar-producto":
-        return decision_producto(root / PRODUCTO.format(v=arg)) == "APLICADA"
-    if paso == "revisar-producto":
-        return decision_producto(root / PRODUCTO.format(v=arg)) == "PENDIENTE"
-    if paso in ("revisar-deuda", "revisar-version"):
-        return (root / f"docs/review/versions/{arg}-{INFORMES_VERSION[paso]}.md").is_file()
-    if paso == "revisar-plataforma":
-        informe = root / docs / DOCUMENTOS_PASO[paso]
-        return informe.is_file() and motivo_informe(informe) in ("", "informe rechazado")
-    artefacto = DOCUMENTOS_PASO.get(paso)
-    return bool(artefacto and (root / docs / artefacto).is_file())
-
-
-def tope_de_rechazos(root, iid):
-    """Instrucción para Artemisa al llegar al tope de rechazos seguidos; '' si aún no ha llegado."""
-    cfg_dev = config(root).get("artemisa") or config(root).get("development") or {}
-    esc = cfg_dev.get("escalada") or {}
-    tiene_dificultades = bool(cfg_dev.get("dificultad"))
-    dif = dificultad_de(root, iid) if iid else "media"
-    puede_subir = tiene_dificultades and dif in ("sencilla", "media")
-
-    tope = esc.get("rechazos", 2) if esc else (2 if tiene_dificultades else 3)
-    n = rechazos(root, iid)
-    if n < tope or n % tope:
+def decision_producto(path: Path) -> str:
+    if not Path(path).is_file():
         return ""
-    if puede_subir:
-        return (
-            f"[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que "
-            "tengas en la rama, explica en tu salida qué falla y termina el paso sin cambiar estados: el bucle "
-            "subirá la dificultad de la tarea y la relanzará con el perfil del nuevo nivel."
-        )
-    if not esc or os.environ.get("ORQUESTAR_ESCALADA"):
-        tras = ", también tras la escalada" if esc else ""
-        return (
-            f"[orquestar] Hades ha rechazado {iid} {n} veces seguidas{tras}: "
-            "no sigas corrigiendo; aplica la regla 5 del modo orquestado (bloquea la tarea con "
-            "`pendiente_de: especificador`, o `humano` si falta un recurso externo) y termina el paso."
-        )
-    return (
-        f"[orquestar] Hades ha rechazado {iid} {n} veces seguidas: no sigas corrigiendo. Commitea lo que "
-        "tengas en la rama, explica en tu salida qué falla y termina el paso sin cambiar estados: el bucle "
-        "relanzará la tarea con un modelo superior."
-    )
+    for linea in Path(path).read_text(encoding="utf-8", errors="replace").splitlines()[:10]:
+        m = re.search(r"Decisi[oó]n\s*:\**\s*(PENDIENTE|APLICAR|APLICADA)\b", linea, re.I)
+        if m:
+            return m.group(1).upper()
+    return ""
 
 
-# ---------------------------------------------------------------- cuota
-
-CUOTA = re.compile(
-    r"usage limit|rate.?limit|quota|limit reached|hit your .{0,20}limit|too many requests"
-    r"|\b429\b|resource_exhausted|overloaded|out of credits|credit balance|insufficient_quota|billing_hard_limit",
-    re.I,
-)
-
-CREDITOS = re.compile(r"out of credits|credit balance|billing_hard_limit", re.I)
-SONDEOS_CUOTA = {}
-
-
-def intervalo_cuota(root):
-    """Intervalo positivo finito de las comprobaciones de cuota supuesta."""
-    valor = config(root).get("cuota_reintento_s")
-    return valor if numero_cuota(valor) and valor > 0 else 300
-
-
-def marcas_cuota(root, instante, filas=None):
-    """Pliega agotamientos y recuperaciones sin reescribir el histórico ni los tokens."""
-    marcas = {}
-    for fila in leer_metricas(root) if filas is None else filas:
-        fecha = fecha_estado(fila.get("fecha"))
-        if fecha is None or fecha > instante:
-            continue
-        arnes = fila.get("arnes") or "desconocido"
-        modelo = fila.get("modelo_cuota")
-        if fila.get("tipo") == "cuota_recuperada":
-            marcas.pop((arnes, modelo), None)
-            continue
-        segundos = fila.get("cuota_espera_s")
-        if segundos is None and fila.get("sin_cuota"):
-            segundos = fila.get("espera_s")
-            modelos = fila.get("modelos") or {}
-            modelo = modelo or (next(iter(modelos)) if len(modelos) == 1 else None)
-        if not modelo or not numero_cuota(segundos) or segundos < 0:
-            continue
-        try:
-            hasta = fecha + timedelta(seconds=segundos)
-        except OverflowError:
-            continue
-        tipo = fila.get("cuota_tipo") or ("supuesta" if segundos == 1800 else "real")
-        origen = fila.get("cuota_origen") or (
-            "sin hora en la respuesta" if tipo == "supuesta" else "recuperación histórica registrada"
-        )
-        clave = (arnes, modelo)
-        anterior = marcas.get(clave)
-        if anterior and anterior["tipo"] == tipo == "real" and anterior["hasta"] > hasta:
-            continue
-        marcas[clave] = dict(hasta=hasta, tipo=tipo, origen=origen)
-    return marcas
-
-
-def recuperar_cuota(root, harness, modelo):
-    """Añade una recuperación para un par conocido, conservando el consumo histórico."""
-    if (harness, modelo) in marcas_cuota(root, fecha_estado(ahora())):
-        registrar(root, dict(tipo="cuota_recuperada", fecha=ahora(), arnes=harness, modelo_cuota=modelo))
-    SONDEOS_CUOTA.pop((str(root.resolve()), (harness, modelo)), None)
-
-
-def reset_cuotas(root, selector=""):
-    """Recupera únicamente los pares del selector arnés/modelo, arnés o global."""
-    pares = marcas_cuota(root, fecha_estado(ahora()))
-    seleccionados = [par for par in pares if not selector or selector == par[0] or selector == "/".join(par)]
-    for harness, modelo in seleccionados:
-        recuperar_cuota(root, harness, modelo)
-    return len(seleccionados)
-
-
-def fallo_cuota(root, harness, modelo, salida):
-    """Clasifica el fallo, limita los sondeos y avisa de créditos una vez por episodio."""
-    creditos = bool(CREDITOS.search(salida))
-    segundos = espera_cuota(salida, sin_hora=None)
-    tipo = "supuesta" if creditos or segundos is None else "real"
-    origen = "sin créditos" if creditos else ("hora en la respuesta" if tipo == "real" else "sin hora en la respuesta")
-    if creditos:
-        anterior = marcas_cuota(root, fecha_estado(ahora())).get((harness, modelo))
-        if not anterior or anterior["origen"] != "sin créditos":
-            avisar(root, "cuota", f"Sin créditos en {harness}: recarga y el bucle lo reintentará")
-    if tipo == "supuesta":
-        segundos = intervalo_cuota(root)
-        SONDEOS_CUOTA[(str(root.resolve()), (harness, modelo))] = fecha_estado(ahora())
-    return dict(modelo_cuota=modelo, cuota_espera_s=segundos, cuota_tipo=tipo, cuota_origen=origen)
-
-
-def espera_cuota(salida, ahora=None, sin_hora=1800):
-    """Segundos hasta poder reintentar si la salida indica falta de cuota; None si es otro error.
-
-    Reconoce la hora de recuperación en los formatos habituales (marca de tiempo tras «|»,
-    «try again in 2h 13m», «resets in 56h48m9s», «resets at 5pm»); si no la hay, propone 30 minutos.
-    """
-    if not CUOTA.search(salida):
-        return None
-    ahora = ahora or datetime.now()
-    margen = 120
-    m = re.search(r"\|(\d{10})\b", salida)
-    if m:
-        return max(int(m[1]) - int(ahora.timestamp()), 0) + margen
-    m = re.search(
-        r"(?:try again|retry|resets?) in\s+(?:(\d+)\s*(?:days?|d)(?![a-z]))?\s*"
-        r"(?:(\d+)\s*(?:hours?|hrs?|h)(?![a-z]))?\s*(?:(\d+)\s*(?:minutes?|mins?|m)(?![a-z]))?\s*"
-        r"(?:(\d+)\s*(?:seconds?|secs?|s)(?![a-z]))?",
-        salida,
-        re.I,
-    )
-    if m and any(m.groups()):
-        d, h, mi, sg = (int(g or 0) for g in m.groups())
-        return d * 86400 + h * 3600 + mi * 60 + sg + margen
-    m = re.search(r"(?:try again|resets?)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", salida, re.I)
-    if m:
-        h = int(m[1]) % 12 + (12 if m[3].lower() == "pm" else 0)
-        objetivo = ahora.replace(hour=h, minute=int(m[2] or 0), second=0, microsecond=0)
-        if objetivo <= ahora:
-            objetivo += timedelta(days=1)
-        return int((objetivo - ahora).total_seconds()) + margen
-    return sin_hora
-
-
-def leer_espera(root):
-    """Devuelve (hora de fin, motivo) de la espera en curso; (None, '') si no hay marca legible."""
-    try:
-        primera, _, motivo = (root / ESPERA).read_text(encoding="utf-8").partition("\n")
-        return fecha_estado(primera.strip()), motivo.strip() or "sin cuota"
-    except (OSError, ValueError):
-        return None, ""
-
-
-def esperar(root, segundos, motivo="sin cuota", cuotas_esperadas=None):
-    """Duerme hasta la hora indicada, atento a --parar. Devuelve False si se pidió parar."""
-    hasta = datetime.now() + timedelta(seconds=segundos)
-    pendientes = set(marcas_cuota(root, fecha_estado(ahora()))) if motivo == "sin cuota" else set()
-    (root / ESPERA).write_text(f"{hasta.isoformat(timespec='minutes')}\n{motivo}", encoding="utf-8")
-    print(f"[orquestar] {motivo}: espero hasta las {hasta:%H:%M} y reintento el paso.", flush=True)
-    try:
-        while datetime.now() < hasta:
-            if (root / PARADA).exists():
-                return False
-            if motivo == "sin cuota":
-                filas = leer_metricas(root)
-                if cuotas_esperadas is not None:
-                    nuevas = filas[cuotas_esperadas["desde"] :]
-                    pares = set(cuotas_esperadas["pares"]) | {
-                        (f.get("arnes"), f["modelo_cuota"])
-                        for f in nuevas
-                        if f.get("modelo_cuota") and f.get("cuota_espera_s") is not None
-                    }
-                    if any(
-                        f.get("tipo") == "cuota_recuperada" and (f.get("arnes"), f.get("modelo_cuota")) in pares
-                        for f in nuevas
-                    ):
-                        return True
-                if pendientes and pendientes - set(marcas_cuota(root, fecha_estado(ahora()), filas)):
-                    return True
-            time.sleep(min(30, max((hasta - datetime.now()).total_seconds(), 0)))
+def _producto_activa(root: Path, version: str) -> bool:
+    prod = config(root).get("producto")
+    if prod is True:
         return True
-    finally:
-        (root / ESPERA).unlink(missing_ok=True)
-
-
-# ---------------------------------------------------------------- avisos por Telegram
-
-EVENTOS = ("version", "cuota", "respuesta", "error", "arnes")
-
-
-def leer_env(ruta):
-    """Lee un fichero clave=valor (.env) sin dependencias externas."""
-    valores = {}
-    p = Path(ruta)
-    if p.is_file():
-        try:
-            for linea in p.read_text(encoding="utf-8", errors="replace").splitlines():
-                linea = linea.strip()
-                if not linea or linea.startswith("#"):
-                    continue
-                if "=" in linea:
-                    k, _, v = linea.partition("=")
-                    k, v = k.strip(), v.strip()
-                    if len(v) >= 2 and ((v[0] == '"' and v[-1] == '"') or (v[0] == "'" and v[-1] == "'")):
-                        v = v[1:-1]
-                    valores[k] = v
-        except OSError:
-            pass
-    return valores
-
-
-class CredencialesTelegram:
-    """Credenciales efectivas y procedencia del token de Telegram."""
-
-    def __init__(self, token, usuarios, origen):
-        self.token = token
-        self.usuarios = usuarios
-        self.origen = origen
-
-    def __iter__(self):
-        """Conserva el desempaquetado histórico de token y usuarios."""
-        yield self.token
-        yield self.usuarios
-
-
-def credenciales(root=None):
-    """Devuelve las credenciales efectivas y el origen del token."""
-    base = Path(root) if root else Path.cwd()
-    env = leer_env(base / ".env")
-    token_local = env.get("TELEGRAM_BOT_TOKEN", "").strip()
-    token_entorno = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    token = token_local or token_entorno
-    origen = "proyecto" if token_local else "entorno" if token_entorno else "ninguno"
-    ids_locales = env.get("TELEGRAM_ALLOWED_USER_IDS", "").strip()
-    raw_usr = ids_locales or os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").strip()
-    usuarios = [u.strip() for u in str(raw_usr).split(",") if u.strip()]
-    return CredencialesTelegram(token, usuarios, origen)
-
-
-def telegram(root):
-    """(token, usuarios, eventos) para los avisos; None sin credenciales o con `"telegram": false`.
-
-    Los avisos van a los mismos usuarios que atiende el gateway. La clave `telegram` de orchestration.json
-    solo elige los eventos (`{"eventos": [...]}`); sin ella se avisan todos.
-    """
-    cfg = config(root).get("telegram", {})
-    token, usuarios = credenciales(root)
-    if cfg is False or not token or not usuarios:
-        return None
-    return token, usuarios, set((cfg if isinstance(cfg, dict) else {}).get("eventos") or EVENTOS)
-
-
-def enviar(token, chat, texto, markdown=False):
-    """Envía un mensaje; si Telegram rechaza el Markdown, lo reintenta en texto plano. Nunca lanza."""
-    import urllib.parse
-    import urllib.request
-
-    texto = firmar(texto)
-    error = None
-    for modo in ("Markdown", None) if markdown else (None,):
-        campos = {
-            "chat_id": chat,
-            "text": texto,
-            "disable_web_page_preview": "true",
-            **({"parse_mode": modo} if modo else {}),
-        }
-        try:
-            with urllib.request.urlopen(
-                f"https://api.telegram.org/bot{token}/sendMessage", urllib.parse.urlencode(campos).encode(), timeout=15
-            ) as r:
-                return r.status == 200
-        except Exception as ex:  # sin red, token malo…: se informa y se sigue
-            error = ex
-            if not (modo and getattr(ex, "code", None) == 400):
-                break
-    print(f"[orquestar] mensaje de Telegram no enviado ({type(error).__name__})", flush=True)
+    if isinstance(prod, list):
+        return any(vkey(x) == vkey(version) for x in prod)
     return False
 
 
-def cargar_cierre_version():
-    """Carga el soporte de cierre solo al atender el comando o su aviso final."""
-    spec = importlib.util.spec_from_file_location(
-        "cierre_version", Path(__file__).resolve().parents[1] / "telegram_gateway/cierre_version.py"
-    )
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    return modulo
-
-
-def avisar(root, evento, texto):
-    """Envía el aviso a los usuarios autorizados si el evento está activo (None: siempre). Un fallo nunca para el bucle."""
-    cfg = telegram(root)
-    if not cfg or (evento and evento not in cfg[2]):
-        return False
-    token, usuarios, _ = cfg
-    version_final = re.search(r"Versión (v\d+\.\d+(?:\.\d+)?) terminada\.", texto)
-    if evento == "version" and version_final:
-        texto += "\n" + cargar_cierre_version().resumen(root, version_final[1])
-    texto_firmado = firmar(f"[{root.name}] {texto}")
-    return all([enviar(token, u, texto_firmado) for u in usuarios])
-
-
-def parar(root, evento, texto):
-    """Para el bucle para el humano: lo escribe en la salida y lo avisa."""
-    print(f"[orquestar] PARAR: {texto}", flush=True)
-    avisar(root, evento, f"⏸ {texto}")
-    return 2
-
-
-def resolver_arbol_sucio(root, contexto):
-    """Resuelve cambios con Clio o stash y confirma que el árbol queda limpio."""
-    actual = git("branch", "--show-current")
-    if git("status", "--porcelain"):
-        prompt = (
-            f"El árbol de la rama {actual} tiene cambios sin commitear y el bucle debe {contexto}. "
-            "Revisa `git status`: commitea (commit semántico) lo que pertenezca al trabajo hecho y "
-            "descarta solo los restos (temporales o ignorables). No cambies de rama ni toques nada más."
-        )
-        try:
-            agente(root, "clio", prompt)
-        except (Exception, SystemExit) as exc:
-            print(f"[orquestar] Clio no pudo resolver los cambios: {exc}", flush=True)
-    if git("status", "--porcelain"):
-        nombre = f"orquestar: {actual} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        subprocess.run(["git", "stash", "push", "-u", "-m", nombre], cwd=root, capture_output=True)
-        if git("status", "--porcelain"):
-            return False
-        print(f"[orquestar] cambios guardados en el stash «{nombre}»", flush=True)
-        avisar(
-            root,
-            "error",
-            f"🗃 Cambios sin commitear de {actual} guardados en el stash «{nombre}»; el bucle debe {contexto}.",
-        )
-    return True
-
-
-def cambiar_de_rama(root, rama):
-    """Cambia de rama únicamente tras resolver los cambios pendientes."""
-    if not resolver_arbol_sucio(root, f"cambiar a {rama}"):
-        return False
-    git("checkout", "-q", rama)
-    return git("branch", "--show-current") == rama
-
-
-def evento_de(e):
-    """Evento de aviso de un estado final: cierre de versión o producto terminado, o respuesta del humano."""
-    return "version" if e[0] == "FIN" or cierre_de_version(e) else "respuesta"
-
-
-# ---------------------------------------------------------------- evidencia de verificación
-
-
-@contextmanager
-def indice_de_trabajo(root):
-    """Captura el contenido rastreable del árbol sin modificar el índice del usuario."""
-    with chequeos.indice_de_trabajo(root) as env:
-        yield env
-
-
-def arbol(root):
-    """Hash del contenido exacto del árbol de trabajo (incluye cambios sin commitear y no ignorados)."""
-    return chequeos.arbol_trabajo(root)
-
-
-def suite(root, a=None):
-    """Comando de la suite: --test o validation.command de task_config.yaml."""
-    if a is not None and getattr(a, "test", None):
-        return a.test
+def estado(root: Path, docs: str = "docs/requirements") -> tuple:
+    """Deduce del disco la siguiente acción sin efectos secundarios."""
+    root = Path(root)
     try:
-        if yaml and hasattr(yaml, "safe_load"):
-            cfg = yaml.safe_load((root / "task_config.yaml").read_text(encoding="utf-8"))
-        elif yaml and hasattr(yaml, "load_yaml"):
-            cfg = yaml.load_yaml((root / "task_config.yaml"))
-        else:
-            cfg = {}
-        return (cfg.get("validation") or {}).get("command")
-    except Exception:
-        return None
+        contexto_ejecucion.cargar_politica(root)
+    except ValueError as exc:
+        return ("PARAR", f"Política de ejecución inválida: {exc}")
+
+    if not (root / "task_config.yaml").is_file():
+        return ("PARAR", "Falta task_config.yaml en la raíz del proyecto.")
+
+    docs_dir = root / docs
+    if (docs_dir / "requirements.md").is_file():
+        if not (docs_dir / "req_analysis.md").is_file():
+            return ("PASO", "ciclo-requisitos", None)
+        if not (docs_dir / "platform_plan.md").is_file():
+            return ("PASO", "platform-plan", None)
+        rev_plat = docs_dir / "platform_review.md"
+        if not rev_plat.is_file() or motivo_informe(rev_plat) not in ("",):
+            if rev_plat.is_file() and motivo_informe(rev_plat) == "informe rechazado":
+                return ("PARAR", f"Revisión de plataforma rechazada en {rev_plat.relative_to(root).as_posix()}.")
+            return ("PASO", "revisar-plataforma", None)
+        if not (docs_dir / "work_plan.md").is_file():
+            return ("PASO", "work-plan", None)
+
+    items = backlog(root)
+    if (docs_dir / "requirements.md").is_file() and not items:
+        return ("PASO", "work-plan", None)
+    errs = errores_dependencias(items)
+    if errs:
+        return ("PARAR", f"Dependencias inválidas en el backlog: {'; '.join(errs)}")
+
+    abiertas = sorted({vkey(i["version"]) for i in items if vkey(i["version"]) and i["status"] not in CERRADO})
+    rama_actual = git("branch", "--show-current", cwd=root)
+    if rama_actual.startswith(("release/", "hotfix/")):
+        vk_rama = vkey(rama_actual.split("/", 1)[1])
+        if vk_rama and any(vkey(i["version"]) == vk_rama for i in items) and (not abiertas or vk_rama <= abiertas[0]):
+            abiertas = [vk_rama, *[x for x in abiertas if x != vk_rama]]
+
+    if not abiertas:
+        return ("FIN", "No quedan tareas con versión pendientes.")
+
+    vk = abiertas[0]
+    v = nombre_version(vk)
+    prefijos_validos = (f"release/{v}", f"hotfix/{v}", f"release/v{vk[0]}.{vk[1]}")
+    if not rama_actual or not any(rama_actual == p for p in prefijos_validos):
+        return ("PASO", "start-version", v)
+
+    suyas = [i for i in items if vkey(i["version"]) == vk]
+    por_id = {i["id"]: i for i in items}
+
+    # 1. Revisiones pendientes sobre ítems ya completados (solo superficies críticas o con informe rechazado)
+    for item in suyas:
+        if item["status"] == "completed" and not revisada(root, item["id"]):
+            return ("PASO", "revisar-tarea", item["id"], rama_actual)
+
+    # 2. Siguiente tarea o bug elegible (bugs primero, luego por weight)
+    elegibles = [
+        i
+        for i in suyas
+        if i["status"] in ("in_progress", "planned")
+        and all(por_id.get(d, {}).get("status") == "completed" for d in i["depende_de"])
+    ]
+    if elegibles:
+        elegibles.sort(
+            key=lambda i: (
+                0 if i["paso"] == "bug-fix" else 1,
+                0 if i["status"] == "in_progress" else 1,
+                i["weight"],
+                i["id"],
+            )
+        )
+        sig = elegibles[0]
+        return ("PASO", sig["paso"], sig["id"], rama_actual)
+
+    # 3. Sin tareas elegibles: comprobar bloqueos antes del cierre
+    bloqueadas = [i["id"] for i in suyas if i["status"] == "blocked"]
+    en_espera = [i["id"] for i in suyas if i["status"] not in FUERA]
+    if bloqueadas or en_espera:
+        partes = []
+        if bloqueadas:
+            partes.append(f"bloqueadas {', '.join(bloqueadas)}")
+        if en_espera:
+            partes.append(f"en espera {', '.join(en_espera)}")
+        return ("PARAR", f"Bloqueos en {v}: {'; '.join(partes)}.")
+
+    # 4. Cierre de versión: revisión transversal y producto opcional
+    arq = root / f"docs/review/versions/{v}-arquitectura.md"
+    if not arq.is_file():
+        return ("PASO", "revisar-version", v, rama_actual)
+    mot_arq = motivo_informe(arq)
+    if mot_arq == "informe rechazado":
+        return ("PARAR", f"Revisión de versión {v} rechazada en docs/review/versions/{v}-arquitectura.md.")
+    if mot_arq:
+        return ("PASO", "revisar-version", v, rama_actual)
+
+    informe_prod = root / PRODUCTO.format(v=v)
+    if _producto_activa(root, v) and not informe_prod.is_file():
+        return ("PASO", "revisar-producto", v, rama_actual)
+    dec_prod = decision_producto(informe_prod)
+    if dec_prod == "APLICAR":
+        return ("PASO", "aplicar-producto", v, rama_actual)
+    if dec_prod == "PENDIENTE":
+        return (
+            "PARAR",
+            f"Versión {v} terminada. Revisa docs/review/versions/{v}-revision.md y decide {PRODUCTO.format(v=v)}.",
+        )
+
+    return (
+        "PARAR",
+        f"Versión {v} terminada. Revisa docs/review/versions/{v}-revision.md: registra defectos con /bug-add o cierra con /release, y relanza.",
+    )
 
 
-def verificar(root, cmd):
-    """Ejecuta cmd sobre el árbol actual, o reutiliza su último resultado real en verde para ese mismo árbol."""
+# ------------------------------------------------------------------ prompts y verificación
+
+
+def es_repositorio_fuente_adevv(root: Path) -> bool:
+    root = Path(root)
+    return (root / "adevv" / "_build.py").is_file() and (root / "skills" / "orquestar" / "SKILL.md").is_file()
+
+
+def es_carpeta_personal(root: Path) -> bool:
+    sim = os.environ.get("ADEVV_SIMULATED_HOME")
+    if sim and Path(sim).resolve() == Path(root).resolve():
+        return True
+    return Path(root).resolve() == Path.home().resolve()
+
+
+def es_raiz_de_unidad(root: Path) -> bool:
+    sim = os.environ.get("ADEVV_SIMULATED_DRIVE_ROOT")
+    if sim and Path(sim).resolve() == Path(root).resolve():
+        return True
+    p = Path(root).resolve()
+    return p.parent == p
+
+
+def construir_prompt_paso(root: Path, paso: str, arg: str | None) -> str:
+    """Construye el mandato directo para un paso citando rutas absolutas instaladas."""
+    root = Path(root)
+    version_dir = get_active_version_dir()
+    dif = perfiles.dificultad_de(root, arg, fichero_de)
+    rol, _ = perfiles.rol_de(root, paso, dificultad=dif, iid=arg, fichero_fn=fichero_de)
+    persona = (version_dir / "agents" / f"{rol}.md").resolve()
+    skill_orquestar = (version_dir / "skills" / "orquestar" / "SKILL.md").resolve()
+    skills_dir = (version_dir / "skills").resolve()
+    politica = contexto_ejecucion.cargar_politica(root)
+
+    cabecera = (
+        f'Lee "{persona}" y actúa como ese agente; ignora el modelo de su frontmatter. ' if persona.is_file() else ""
+    )
+    args_str = f' con "{arg}"' if arg else ""
+    cuerpo = (
+        f'Lee "{skill_orquestar}" y ejecuta en modo orquestado el paso "{paso}"{args_str}. '
+        f'Las skills que cite (/nombre) están en "{skills_dir}/<nombre>/SKILL.md". '
+        'No hagas preguntas salvo bloqueo real externo (`adevv orquestar --preguntar <ID> "<pregunta>"`). '
+        'Verifica con `adevv orquestar --verificar "<comando de pruebas>"` y, si necesitas invocar a Hades manualmente, usa `adevv orquestar --agente hades`.'
+    )
+    aviso_fuente = (
+        "\nEdita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta "
+        "(skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes."
+        if es_repositorio_fuente_adevv(root)
+        else ""
+    )
+    contexto_extra = ""
+    if arg and paso in ("task-dev", "bug-fix"):
+        rev = root / "docs" / "review" / "code_reviews" / f"{arg}-code-review.md"
+        if rev.is_file() and motivo_informe(rev) == "informe rechazado":
+            contexto_extra = (
+                f"\n\nCorrige los hallazgos pendientes en `{rev.relative_to(root).as_posix()}` antes de cerrar."
+            )
+    return f"{cabecera}{cuerpo}{aviso_fuente}\n\nPolítica activa ({politica['path']}):\n{politica['text'].strip()}{contexto_extra}"
+
+
+def construir_prompt_agente(root: Path, rol: str, prompt: str) -> str:
+    """Construye el prompt para un rol específico (--agente o revisión directa)."""
+    root = Path(root)
+    version_dir = get_active_version_dir()
+    paso = os.environ.get("ORQUESTAR_PASO", "")
+    iid = os.environ.get("ORQUESTAR_ID", "")
+    dif = perfiles.dificultad_de(root, iid, fichero_de) if iid else "media"
+    cfg = ajustes(config(root).get(rol, {}), paso, dificultad=dif)
+    inst = cfg.get("instructions")
+    if inst:
+        p_inst = Path(inst) if Path(inst).is_absolute() else (root / inst).resolve()
+        instrucciones_str = str(p_inst)
+    else:
+        instrucciones_str = str((version_dir / "agents" / f"{rol}.md").resolve())
+    skills_dir = (version_dir / "skills").resolve()
+    cabecera = (
+        f'Lee "{instrucciones_str}" y actúa como ese agente; ignora el modelo de su frontmatter. '
+        f'Las skills están en "{skills_dir}/<nombre>/SKILL.md".\n\n'
+    )
+    if es_repositorio_fuente_adevv(root):
+        cabecera += (
+            "Edita el árbol de trabajo de este repositorio, en cualquier ruta que haga falta "
+            "(skills/, agents/, workflows/, adevv/, tests/, docs/…), nunca la copia instalada desde la que lees skills y agentes.\n\n"
+        )
+    return cabecera + prompt.strip()
+
+
+def verificar(root: Path, comando: str, iid: str = "") -> int:
+    """Ejecuta un comando de verificación reutilizando evidencias de la misma huella de producto."""
+    root = Path(root)
     excluir(root)
-    clave = arbol(root)
-    res = chequeos.verificar_comando(root, cmd, clave_arbol=clave, arbol_fn=arbol)
-    if res.get("reutilizada") and not res.get("compartida_en_vuelo"):
+    huella = huella_producto(root)
+    if evidencia_vigente(root, huella, comando):
         registrar(
             root,
             {
                 "tipo": "verificacion",
-                "fecha": res.get("fecha") or ahora(),
-                "comando": cmd,
-                "arbol": res.get("arbol") or clave,
+                "fecha": ahora(),
+                "id": iid or os.environ.get("ORQUESTAR_ID", ""),
+                "comando": comando,
+                "arbol": huella,
                 "reutilizada": True,
                 "codigo": 0,
-                "id": os.environ.get("ORQUESTAR_ID", ""),
             },
         )
+        print(f"[orquestar] verificación reutilizada en verde ({comando})", flush=True)
         return 0
-    codigo = int(res.get("codigo", 1))
+
+    t0 = time.monotonic()
+    res = subprocess.run(comando, cwd=str(root), shell=True)
+    dur = round(time.monotonic() - t0)
+    registrar_evidencia(root, huella, comando, res.returncode, dur)
     registrar(
         root,
         {
             "tipo": "verificacion",
-            "reutilizada": bool(res.get("reutilizada", False)),
-            "id": os.environ.get("ORQUESTAR_ID", ""),
-            "fecha": res.get("fecha") or ahora(),
-            "comando": cmd,
-            "arbol": res.get("arbol") or clave,
-            "codigo": codigo,
-            "duracion_s": res.get("duracion_s", 0),
+            "fecha": ahora(),
+            "id": iid or os.environ.get("ORQUESTAR_ID", ""),
+            "comando": comando,
+            "arbol": huella,
+            "reutilizada": False,
+            "codigo": res.returncode,
+            "duracion_s": dur,
         },
     )
+    return res.returncode
+
+
+# ------------------------------------------------------------------ invocación de roles y pasos directos
+
+
+def _invocar_con_reservas(
+    root: Path, rol: str, paso: str, iid: str, prompt_final: str, cmd_override: str | None = None
+) -> tuple[int, dict, str]:
+    """Ejecuta un rol probando reservas ante cuota agotada, acceso denegado o arnés ausente."""
+    dif = perfiles.dificultad_de(root, iid, fichero_de)
+    _, cfg_base = perfiles.rol_de(root, paso, dificultad=dif, iid=iid, fichero_fn=fichero_de, rol_explicito=rol)
+    if cmd_override:
+        codigo, m, salida = lanzar(cmd_override, root, "custom")
+        return codigo, {**m, "arnes": "custom", "modelo": "custom"}, salida
+
+    candidatos = [cfg_base] + lista_reservas(cfg_base)
+    disponibles = configuraciones_con_cuota(root, candidatos)
+    if not disponibles:
+        return 75, {"sin_cuota": True, "modelos": {}}, "Todos los candidatos del rol están en espera de cuota."
+
+    ultimo_error = (1, {"modelos": {}}, "Sin candidatos ejecutables.")
+    for idx, cand in enumerate(disponibles):
+        harness = cand.get("harness", "agy")
+        modelo = cand.get("model") or "predeterminado"
+        plantilla = (
+            base_comando_agente(harness, "{prompt}")
+            if rol in ("hades", "clio", "cronos")
+            else None
+        ) or ARNESES.get(harness)
+        if not plantilla:
+            continue
+        exe = buscar_ejecutable(plantilla[0])
+        if not exe:
+            registrar_ausencia(root, paso, idx, cand)
+            ultimo_error = (127, {"modelos": {}}, f"Arnés ausente: {plantilla[0]}")
+            continue
+
+        base_cmd = [exe] + [(prompt_final if tok == "{prompt}" else tok) for tok in plantilla[1:]]
+        cmd = con_modelo(base_cmd, harness, cand)
+        entrada = None if "{prompt}" in plantilla[1:] else prompt_final
+        env = os.environ.copy()
+        env["ORQUESTAR_PASO"] = paso
+        env["ORQUESTAR_ID"] = iid or ""
+        if harness == "codex" and os.name == "nt":
+            env.pop("CODEX_WINDOWS_REGISTERED_CORE", None)
+        timeout = float(cand["timeout_s"]) if cand.get("timeout_s") else None
+
+        codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada, timeout=timeout, env=env)
+        m["arnes"] = harness
+        m["modelo"] = modelo
+
+        if codigo == 124:
+            return codigo, m, salida
+        if codigo and acceso_suscripcion_denegado(harness, salida):
+            ultimo_error = (codigo, {**m, "acceso_denegado": True}, salida)
+            continue
+        if codigo and espera_cuota(salida) is not None:
+            datos_cuota = fallo_cuota(root, harness, modelo, salida)
+            m.update(datos_cuota)
+            registrar(
+                root,
+                {
+                    **m,
+                    "tipo": "agente" if rol == "hades" else "paso",
+                    "fecha": ahora(),
+                    "rol": rol,
+                    "paso": paso,
+                    "id": iid,
+                    "codigo": codigo,
+                },
+            )
+            ultimo_error = (75, m, salida)
+            continue
+
+        if codigo == 0:
+            recuperar_cuota(root, harness, modelo)
+        return codigo, m, salida
+
+    return ultimo_error
+
+
+def agente(root: Path, rol: str, prompt: str) -> int:
+    """Invoca un rol (p. ej. hades) directamente desde CLI y registra sus métricas."""
+    root = Path(root)
+    excluir(root)
+    paso = os.environ.get("ORQUESTAR_PASO", "manual")
+    iid = os.environ.get("ORQUESTAR_ID", "")
+    mandato = construir_prompt_agente(root, rol, prompt)
+    codigo, m, salida = _invocar_con_reservas(root, rol, paso, iid, mandato)
+    veredicto, _ = declaracion(salida)
+    if not veredicto and iid and rol == "hades":
+        inf = root / "docs" / "review" / "code_reviews" / f"{iid}-code-review.md"
+        if inf.is_file():
+            veredicto, _ = declaracion(inf.read_text(encoding="utf-8", errors="replace"))
+    if not m.get("sin_cuota"):
+        registrar(
+            root,
+            {
+                **m,
+                "tipo": "agente",
+                "fecha": ahora(),
+                "rol": rol,
+                "paso": paso,
+                "id": iid,
+                "codigo": codigo,
+                **({"veredicto": veredicto} if veredicto else {}),
+            },
+        )
+    if salida:
+        print(salida, flush=True)
     return codigo
 
 
-def reescribir_frontmatter(texto, cambios):
-    """Aplica `cambios` (clave: valor) a la cabecera de un fichero con frontmatter y devuelve (cabecera, cuerpo)."""
-    cabecera, cuerpo = re.split(r"\n---[ \t]*(?:\n|$)", texto, maxsplit=1)
-    for clave, valor in cambios.items():
-        if re.search(rf"^{clave}:", cabecera, re.M):
-            cabecera = re.sub(rf"^{clave}:.*$", f"{clave}: {valor}", cabecera, flags=re.M)
-        else:
-            cabecera += f"\n{clave}: {valor}"
-    return cabecera, cuerpo
-
-
-def bloquear_sin_progreso(root, iid, intentos, salida, contexto="", causa=""):
-    """Persiste el bloqueo para el humano y devuelve si el árbol queda limpio.
-
-    `causa` sustituye la frase de los intentos sin progreso cuando el bloqueo es por otro motivo.
-    """
-    fichero = fichero_de(root, iid)
-    version = vkey(frontmatter(fichero).get("version"))
-    dificultad = dificultad_de(root, iid)
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    cola = (salida or "(el arnés no produjo salida)")[-2000:]
-    detalle = "\n".join("    " + linea for linea in cola.splitlines())
-    frase = causa or f"{iid} bloqueada para el humano: {intentos} intentos sin progreso en {dificultad}"
-    motivo = (
-        f"- {contexto}\n" if contexto else ""
-    ) + f"- {frase}; fecha: {ahora()}\n- Cola de la última salida:\n\n{detalle}\n"
-    cabecera, cuerpo = reescribir_frontmatter(
-        fichero.read_text(encoding="utf-8"), {"status": "blocked", "pendiente_de": "humano", "updated_at": hoy}
-    )
-    cuerpo = re.sub(r"\n## Bloqueo sin progreso\n.*?(?=\n## |\Z)", "", cuerpo, flags=re.S)
-    fichero.write_text(
-        cabecera + "\n---\n" + cuerpo.rstrip("\n") + "\n\n## Bloqueo sin progreso\n" + motivo, encoding="utf-8"
-    )
-    rutas = [str(fichero.relative_to(root))]
-    if version:
-        revision = root / f"docs/review/versions/{nombre_version(version)}-revision.md"
-        revision.parent.mkdir(parents=True, exist_ok=True)
-        previo = revision.read_text(encoding="utf-8") if revision.exists() else ""
-        revision.write_text(previo.rstrip("\n") + f"\n\n## {iid} · Bloqueo sin progreso\n" + motivo, encoding="utf-8")
-        rutas.append(str(revision.relative_to(root)))
-    subprocess.run(["git", "add", "--", *rutas], cwd=root, capture_output=True, check=True)
-    subprocess.run(
-        ["git", "commit", "-q", "-m", f"fix({iid}): bloquear tarea sin progreso", "--", *rutas],
-        cwd=root,
-        capture_output=True,
-        check=True,
-    )
-    avisar(
-        root,
-        "respuesta",
-        (f"{contexto}\n" if contexto else "")
-        + (f"⏸ {causa}; " if causa else f"⏸ {iid} bloqueada tras {intentos} intentos sin progreso en {dificultad}; ")
-        + f"\nCola de la última salida:\n{cola}",
-    )
-    return resolver_arbol_sucio(root, f"continuar tras el bloqueo de {iid}")
-
-
-def confirmar_suite(root, iid, mensaje, *ficheros):
-    """Confirma únicamente los artefactos modificados en la transición del cierre."""
-    rutas = [str(f.relative_to(root)) for f in ficheros]
-    try:
-        intervencion.git(root, "add", "--", *rutas)
-        if intervencion.git(root, "diff", "--cached", "--name-only", "--", *rutas):
-            intervencion.git(root, "commit", "-qm", f"fix({iid}): {mensaje}", "--", *rutas)
-    except subprocess.CalledProcessError as exc:
-        raise diagnostico_suite.DiagnosticoPendiente(f"{mensaje}: {exc.stderr or exc}") from exc
-
-
-def accion_suite(root, fichero, fm):
-    """El planificador acepta el destino escrito solo después del commit de la transición."""
-    accion = fm.get("suite_accion", "")
-    if accion == "resuelta":
-        confirmado = intervencion.git(root, "show", f"HEAD:{fichero.relative_to(root).as_posix()}")
-        cabecera = confirmado.partition("\n---")[0]
-        if "suite_accion: pendiente" in cabecera.splitlines():
-            return "pendiente"
-    return accion
-
-
-def intervencion_de_cierre(root, iid):
-    """Localiza una intervención pendiente sin modificar la ficha ni consumir la entrega al consultar."""
-    fichero = fichero_de(root, iid)
-    fm = frontmatter(fichero) if fichero else {}
-    if (
-        fm.get("suite_cierre", "").lower() != "true"
-        or fm.get("suite_accion") != "resuelta"
-        or fm.get("status") != "blocked"
-        or fm.get("pendiente_de") != "intervencion_tecnica"
-    ):
-        return None, "Consulta la intervención en el bug."
-    informe = root / f"docs/review/test_reviews/{iid}-test-review.md"
-    encargo = diagnostico_suite.encargo_tecnico(fichero, informe)
-    if not encargo:
-        return None, "Falta una asignación técnica vigente a Artemisa. Consulta la intervención en el bug."
-    if any(f.get("id") == iid and f.get("intervencion_atendida") == encargo[0] for f in leer_metricas(root)):
-        return None, "Artemisa ya atendió esta intervención. Consulta el resultado en el bug."
-    return encargo, "La intervención espera las dependencias del bug."
-
-
-def aplicar_diagnostico_suite(root, fichero):
-    """Retoma la solicitud o aplica el dictamen guardado, incluso después de reiniciar el bucle."""
-    ruta = fichero.with_suffix(".json")
-    historial = json.loads(ruta.read_text(encoding="utf-8"))
-    grupo = historial["grupos"][historial["actual"]]
-    fm = frontmatter(fichero)
-    iid = fm["id"]
-    if "dictamen" not in grupo:
-        grupo["dictamen"] = diagnostico_suite.solicitar(root, iid, historial["comando"], grupo, ruta)
-        write_json_atomic(ruta, historial)
-    dictamen = grupo["dictamen"]
-    accion = dictamen["terminal"] if grupo.get("recaida_tras_estrategia") else dictamen
-    contexto = (
-        f"{dictamen['causa']}. {dictamen['decision']}\n"
-        f"Solicitud {grupo['solicitud']}. Arreglos y evidencias: {ruta.name}."
-    )
-    cambios = {"suite_accion": "resuelta"}
-    revision = root / f"docs/review/versions/{nombre_version(vkey(fm['version']))}-revision.md"
-    ficheros = [fichero, ruta]
-    motivo = ""
-    destino = accion["destino"]
-    if destino == "humano":
-        motivo = f"{iid}: {accion['pregunta']} {accion['motivo']}"
-    elif destino == "tecnico":
-        cambios.update(status="blocked", pendiente_de="intervencion_tecnica")
-        motivo = f"{iid}: {accion['responsable']}: {accion['intervencion']}"
-    else:
-        ficheros.append(revision)
-    if fm.get("suite_accion") != "resuelta":
-        confirmar_suite(root, iid, "conservar dictamen de Hades", ruta)
-        if destino == "humano":
-            pregunta = solicitar_intervencion(
-                root,
-                iid,
-                accion["pregunta"],
-                contexto=contexto + "\n" + accion["motivo"],
-                paso="diagnosticar-suite",
-                aislar=False,
-            )
-            if not pregunta["bloqueo_aplicado"]:
-                raise diagnostico_suite.DiagnosticoPendiente(
-                    pregunta.get("impedimento_incorporacion", "Bloqueo pendiente")
-                )
-        elif destino in ("desarrollador", "especificador"):
-            enrutar_hallazgo(root, iid, "artemisa" if destino == "desarrollador" else destino, contexto=contexto)
-            grupo["estrategia_aplicada"] = True
-        cabecera, cuerpo = reescribir_frontmatter(fichero.read_text(encoding="utf-8"), cambios)
-        if motivo:
-            cuerpo = cuerpo.rstrip() + f"\n\n## Conclusión del diagnóstico\n{contexto}\n{motivo}\n"
-        write_json_atomic(ruta, historial)
-        fichero.write_text(cabecera + "\n---\n" + cuerpo, encoding="utf-8")
-    confirmar_suite(root, iid, "aplicar diagnóstico de la suite", *ficheros)
-    if destino == "tecnico" and intervencion_de_cierre(root, iid)[0]:
-        return iid, ""
-    if motivo:
-        motivo += "\nCola de la última salida:\n" + grupo["evidencias"][-1]["salida"][-1200:]
-    return iid, motivo
-
-
-def registrar_fallo_suite(root, version, cmd):
-    """Registra o reabre el bug de cierre y devuelve (ID, motivo de parada o vacío)."""
-    filas = chequeos.leer_evidencias(root)
-    if not filas:
-        evidencia = root / EVIDENCIAS
-        filas = [json.loads(l) for l in evidencia.read_text(encoding="utf-8").splitlines() if l.strip()]
-    ultima = next(f for f in reversed(filas) if f["comando"] == cmd and f["codigo"])
-    salida = ultima.get("salida") or "(el comando no produjo salida)"
-    cola_aviso = salida[-1200:]
-    clave_comando = hashlib.sha256(cmd.encode("utf-8")).hexdigest()
-    directorio = backlog_dirs(root)[1]
-    fichero = next(
-        (
-            f
-            for f in sorted(directorio.glob("*.md"))
-            if frontmatter(f).get("suite_cierre", "").lower() == "true"
-            and vkey(frontmatter(f).get("version")) == vkey(version)
-            and frontmatter(f).get("suite_clave") == clave_comando
-        ),
-        None,
-    )
-    hoy = datetime.now().strftime("%Y-%m-%d")
-    if fichero:
-        fm = frontmatter(fichero)
-        iid = fm["id"]
-        if fm["status"] != "cancelled" and accion_suite(root, fichero, fm) == "pendiente":
-            return aplicar_diagnostico_suite(root, fichero)
-        if fm.get("status") in ("blocked", "cancelled"):
-            return (
-                iid,
-                f"{iid}: el bug de cierre está {fm['status']}; no se reabre. Cola de la última salida:\n{cola_aviso}",
-            )
-        texto = fichero.read_text(encoding="utf-8")
-    else:
-        directorio.mkdir(parents=True, exist_ok=True)
-        iid = siguiente_id(root, "B")
-        fichero = directorio / f"{iid}-suite-roja-al-cerrar-version.md"
-        titulo = "La suite falla al cerrar la versión"
-        texto = (
-            f"---\nid: {iid}\ntitle: {json.dumps(titulo, ensure_ascii=False)}\n"
-            f"type: bug\nweight: 10\ndificultad: media\nversion: {json.dumps(version)}\n"
-            f"status: planned\ndepende_de: []\ncreated_at: {hoy}\n"
-            f"suite_cierre: true\nsuite_clave: {clave_comando}\n"
-            f"---\n\n# {iid}: {titulo}\n\n## Descripción del fallo\n"
-            "La suite completa de cierre devuelve un código distinto de cero. "
-            "Debe pasar antes de revisar o cerrar la versión.\n\n"
-            "## Reproducir\nEjecutar el comando indicado en la evidencia desde la raíz del proyecto.\n"
-        )
-        fichero.write_text(texto, encoding="utf-8")
-        fm = frontmatter(fichero)
-    dificultad = dificultad_de(root, iid)
-    ruta = fichero.with_suffix(".json")
-    historial = diagnostico_suite.cargar(ruta, texto, fm, dificultad)
-    historial["comando"] = cmd
-    completado = fm.get("status") == "completed"
-    arreglos = []
-    if completado:
-        base = (
-            git("log", "-1", "--format=%H", "--", str(ruta.relative_to(root)))
-            if ruta.exists()
-            else git(
-                "log",
-                "-1",
-                "--format=%H",
-                "--fixed-strings",
-                "--grep",
-                f"fix({iid}): registrar fallo de suite al cierre",
-            )
-        )
-        arreglos = git("log", "--reverse", "--format=%H %s", f"{base}..HEAD" if base else "-1").splitlines()
-    anterior = historial.get("actual")
-    grupo, nueva = diagnostico_suite.registrar_observacion(historial, ultima, dificultad, completado, arreglos)
-    dificultad = grupo["dificultad"]
-    if not nueva and anterior == historial["actual"] and ruta.exists() and not completado:
-        return iid, ""
-    pendiente = False
-    if completado and nueva and (grupo.get("estrategia_aplicada") or grupo["intentos"] >= 3):
-        if dificultad == "dificil" or grupo.get("dictamen"):
-            pendiente = True
-            if grupo.get("estrategia_aplicada"):
-                grupo["recaida_tras_estrategia"] = True
-            grupo.setdefault(
-                "solicitud", diagnostico_suite.clave([iid, clave_comando, historial["actual"], ultima["arbol"]])
-            )
-        else:
-            dificultad = promover_dificultad(root, iid, motivo="3 recaídas de la misma causa", actual=dificultad)
-            grupo.update(dificultad=dificultad, intentos=0)
-            texto = fichero.read_text(encoding="utf-8")
-    cambios = {
-        "status": "planned",
-        "updated_at": hoy,
-        "dificultad": dificultad,
-        "suite_dificultad": dificultad,
-        "suite_intentos": str(grupo["intentos"]),
-        "suite_accion": "pendiente" if pendiente else "ninguna",
-    }
-    cabecera, cuerpo = reescribir_frontmatter(texto, cambios)
-    cuerpo = re.sub(r"\n## Último fallo de suite\n.*?(?=\n## |\Z)", "", cuerpo, flags=re.S)
-    detalle = "\n".join("    " + linea for linea in salida.splitlines())
-    cuerpo += (
-        f"\n## Último fallo de suite\n- Comando: {json.dumps(cmd, ensure_ascii=False)}\n"
-        f"- Código: {ultima['codigo']}; árbol: {ultima['arbol']}; fecha: {ahora()}\n\n{detalle}\n"
-    )
-    fichero.write_text(cabecera + "\n---\n" + cuerpo, encoding="utf-8")
-    write_json_atomic(ruta, historial)
-    confirmar_suite(root, iid, "registrar fallo de suite al cierre", fichero, ruta)
-    print(
-        f"[orquestar] {iid}: suite roja registrada para {version} ({grupo['intentos']} intentos en {dificultad}).",
-        flush=True,
-    )
-    return aplicar_diagnostico_suite(root, fichero) if pendiente else (iid, "")
-
-
-# ---------------------------------------------------------------- ficheros del bucle y métricas
-
-
-def ahora():
-    return datetime.now().isoformat(timespec="seconds")
-
-
-def excluir(root):
-    """Excluye de git los ficheros del bucle, para no ensuciar el árbol."""
-    if (Path(root) / ".git").is_file():
-        chequeos._excluir_propios(root)
-        return
-    res = git("rev-parse", "--git-path", "info/exclude")
-    if not res:
-        return
-    exclude = Path(res)
-    exclude = exclude if exclude.is_absolute() else root / exclude
-    if exclude.is_dir():
-        return
-    actual = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-    faltan = [f for f in PROPIOS if f not in actual.splitlines()]
-    if faltan:
-        exclude.parent.mkdir(parents=True, exist_ok=True)
-        with exclude.open("a", encoding="utf-8") as f:
-            f.write("\n" + "\n".join(faltan) + "\n")
-
-
-def es_fichero_rastreado_git(root, ruta):
-    """Comprueba si un fichero está bajo seguimiento en git."""
-    try:
-        p = Path(ruta)
-        try:
-            rel = p.relative_to(Path(root).resolve())
-            arg_ruta = str(rel).replace("\\", "/")
-        except ValueError:
-            arg_ruta = p.name
-        res = subprocess.run(
-            ["git", "ls-files", "--error-unmatch", "--", arg_ruta],
+def _sellar_y_commitear_informe(
+    root: Path, ruta_informe: Path, mensaje_commit: str, extras: list[Path] | None = None
+) -> str:
+    """Asegura huella de producto en el informe de Hades y realiza commit directo desde Python."""
+    if not ruta_informe.is_file():
+        return ""
+    texto = ruta_informe.read_text(encoding="utf-8", errors="replace")
+    veredicto, huella_existente = declaracion(texto)
+    if not veredicto:
+        return ""
+    huella = huella_producto(root)
+    if not huella_existente:
+        lineas = texto.splitlines()
+        lineas.insert(1, f"Producto revisado: {huella}")
+        ruta_informe.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+    if (root / ".git").exists():
+        rutas_git = [str(ruta_informe.relative_to(root))]
+        for ex in extras or ():
+            if ex.is_file():
+                rutas_git.append(str(ex.relative_to(root)))
+        subprocess.run(["git", "add", *rutas_git], cwd=root, env=_git_env(), check=False)
+        subprocess.run(
+            ["git", "commit", "-qm", mensaje_commit],
             cwd=root,
-            capture_output=True,
-            text=True,
+            env=_git_env(),
             check=False,
         )
-        if res.returncode == 0:
-            return True
-        if res.returncode == 1 and "did not match any file" in (res.stderr or ""):
-            return False
-        return True
-    except Exception:
-        return True
+    return veredicto
 
 
-def registrar(root, fila):
-    """Añade una línea al registro común de métricas (pasos, agentes, esperas y verificaciones)."""
-    excluir(root)
-    fila.setdefault("tipo", "paso")
-    registro_metricas.registrar(root, fila)
-
-
-def leer_metricas(root):
-    """Lee registros completos; tolera una última línea aún en escritura."""
-    return metricas.leer_registros(root, tolerar_ultima=True)
-
-
-def nuevas_metricas(root, desde):
-    """Devuelve los eventos nuevos y el cursor lógico, estable al retirar fragmentos."""
-    filas = leer_metricas(root)
-    return filas[desde:], len(filas)
-
-
-def fecha_estado(valor):
-    """Convierte ISO local o con offset en un instante comparable con zona."""
-    try:
-        return datetime.fromisoformat(str(valor)).astimezone()
-    except (ValueError, TypeError, OverflowError):
-        return None
-
-
-def perfil_estado(cfg):
-    """Describe un perfil efectivo sin resolver de nuevo sus ajustes."""
-    return f"{cfg.get('harness') or 'claude'}/{cfg.get('model') or 'predeterminado'}" + (
-        f" ({cfg['effort']})" if cfg.get("effort") else ""
-    )
-
-
-def perfiles_agentes(root):
-    """Enumera perfiles declarados y reservas con su configuración heredada."""
-    resultado = []
-    cfg = config(root)
-    for rol in ("artemisa", "hades", "atenea", "clio", "cronos", "development"):
-        base = cfg.get(rol)
-        if not isinstance(base, dict):
-            continue
-        variantes = [("base", ajustes(base))]
-        for dificultad in base.get("dificultad", {}):
-            variantes.append((f"dificultad {dificultad}", ajustes(base, dificultad=dificultad)))
-        for paso in base.get("pasos", {}):
-            variantes.append((f"paso {paso}", ajustes(base, paso)))
-            for dificultad in base.get("dificultad", {}):
-                variantes.append((f"dificultad {dificultad}, paso {paso}", ajustes(base, paso, dificultad)))
-        if isinstance(base.get("escalada"), dict):
-            variantes.append(("escalada", {**ajustes(base), **base["escalada"]}))
-        for etiqueta, perfil in variantes:
-            resultado.append((rol, etiqueta, perfil))
-            for numero, reserva in enumerate(lista_reservas(perfil), 1):
-                resultado.append((rol, f"{etiqueta}, reserva {numero}", {**perfil, **reserva}))
-    return resultado
-
-
-def numero_cuota(valor):
-    """Admite únicamente números reales finitos, excluyendo booleanos."""
-    return isinstance(valor, (int, float)) and not isinstance(valor, bool) and math.isfinite(valor)
-
-
-def limite_cuota(perfil):
-    """Límite configurable o referencia ilustrativa de tokens por familia."""
-    limite = perfil.get("cuota_tokens_5h")
-    if numero_cuota(limite) and limite > 0:
-        return limite
-    modelo = str(perfil.get("model") or "").lower()
-    if "flash" in modelo:
-        return 20_000_000
-    if any(familia in modelo for familia in ("carbon", "argon", "pro", "opus", "sonnet")):
-        return 5_000_000
-    return 10_000_000
-
-
-def cuota_codex(instante):
-    """Última cuota primaria vigente de la cuenta, leída sin modificar sesiones."""
-    sesiones = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
-    ultima = None
-    try:
-        for ruta in sesiones.rglob("*.jsonl"):
-            try:
-                with ruta.open(encoding="utf-8") as archivo:
-                    for linea in archivo:
-                        try:
-                            evento = json.loads(linea)
-                            if not isinstance(evento, dict):
-                                continue
-                            payload = evento.get("payload")
-                            if not isinstance(payload, dict) or payload.get("type") != "token_count":
-                                continue
-                            primary = (payload.get("rate_limits") or {}).get("primary") or {}
-                            porcentaje, reset = primary.get("used_percent"), primary.get("resets_at")
-                            fecha = fecha_estado(evento.get("timestamp"))
-                            if not (numero_cuota(porcentaje) and 0 <= porcentaje <= 100 and numero_cuota(reset)):
-                                continue
-                            hasta = datetime.fromtimestamp(reset).astimezone()
-                            if (
-                                fecha
-                                and instante - timedelta(hours=5) <= fecha <= instante < hasta
-                                and (ultima is None or fecha > ultima[0])
-                            ):
-                                ultima = (fecha, porcentaje, hasta)
-                        except (ValueError, TypeError, AttributeError, OverflowError, OSError):
-                            continue
-            except (OSError, UnicodeError):
-                continue
-    except OSError:
-        pass
-    return ultima
-
-
-def consumo_cuotas(root, instante, filas=None):
-    """Suma la ventana de tokens y conserva todo agotamiento todavía vigente."""
-    uso = {}
-    filas = leer_metricas(root) if filas is None else filas
-    marcas = marcas_cuota(root, instante, filas)
-    cuotas = {clave: marca["hasta"] for clave, marca in marcas.items() if marca["hasta"] > instante}
-    for clave in cuotas:
-        uso[clave] = 0
-    for fila in filas:
-        fecha = fecha_estado(fila.get("fecha"))
-        if fecha is None or fecha > instante:
-            continue
-        arnes = fila.get("arnes") or "desconocido"
-        modelos = fila.get("modelos") or {}
-        if instante - timedelta(hours=5) <= fecha:
-            for modelo, tokens in modelos.items():
-                clave = (arnes, modelo)
-                uso[clave] = uso.get(clave, 0) + sum(
-                    tokens.get(c) or 0 for c in ("entrada", "cache_leida", "cache_escrita", "salida")
-                )
-    return uso, cuotas
-
-
-def detalle_marca(marca, instante):
-    """Texto compartido de agotamiento, certeza y origen para estado y agentes."""
-    hasta = marca["hasta"]
-    minutos = math.ceil((hasta - instante).total_seconds() / 60)
-    etiqueta = "supuesto" if marca["tipo"] == "supuesta" else "real"
-    return f"100.0% consumido (agotado hasta {hasta:%H:%M %z}, faltan {minutos} min) · {etiqueta}: {marca['origen']}"
-
-
-def informe_agentes(root, docs="docs/requirements"):
-    """Informe de roles y porcentaje consumido para CLI y Telegram."""
-    e = estado(root, docs)
-    instante = fecha_estado(ahora())
-    perfiles = perfiles_agentes(root)
-    lineas = ["Agentes configurados:"]
-    for rol, etiqueta, perfil in perfiles:
-        lineas.append(f"{rol}: {perfil_estado(perfil)} [{etiqueta}]")
-    if not perfiles:
-        lineas.append("Sin roles definidos en orchestration.json")
-    if e[0] == "PASO":
-        paso, iid = e[1:3]
-        dificultad = dificultad_de(root, iid) if iid else None
-        rol, perfil = rol_de(root, paso, dificultad=dificultad, iid=iid)
-        perfil, escalado = escalada(root, rol, perfil, iid)
-        hades = aplicar_perfil(root, iid, "hades", ajustes(config(root).get("hades", {}), paso, dificultad=dificultad))
-        lineas.append(f"Agentes para {paso} {iid or ''} (dificultad: {dificultad or 'no aplica'}):")
-        for nombre, efectivo in ((rol, perfil), ("hades", hades)):
-            lineas.append(
-                f"{nombre}: {perfil_estado(efectivo)}"
-                + (" [escalada]" if nombre == rol and escalado else "")
-                + (" [fijado por la tarea]" if efectivo.get("fijado") else "")
-            )
-    limites = {}
-    for _, _, perfil in perfiles:
-        clave = (perfil.get("harness") or "claude", perfil.get("model") or "predeterminado")
-        limite = limite_cuota(perfil)
-        limites[clave] = min(limites.get(clave, limite), limite)
-    filas = leer_metricas(root)
-    uso, cuotas = consumo_cuotas(root, instante, filas)
-    marcas = marcas_cuota(root, instante, filas)
-    nativo = cuota_codex(instante) if any(h == "codex" for h, _ in limites) else None
-    lineas.append("Cuota por modelo (referencia local cuando no hay dato nativo):")
-    for clave, limite in sorted(limites.items()):
-        tokens = uso.get(clave, 0)
-        hasta = cuotas.get(clave)
-        if hasta:
-            detalle = detalle_marca(marcas[clave], instante)
-        elif clave[0] == "codex" and nativo:
-            detalle = f"{nativo[1]:.1f}% consumido · resetea {nativo[2]:%H:%M %z}"
-        else:
-            porcentaje = min(100.0, round(tokens * 100.0 / limite, 1))
-            detalle = f"{porcentaje:.1f}% consumido ({tokens} / {limite} tokens en 5 h)"
-        lineas.append(f"{clave[0]}/{clave[1]}: {detalle}")
-    hasta, _ = leer_espera(root)
-    if hasta and hasta > instante:
-        lineas.append(
-            f"Espera global: hasta {hasta:%H:%M %z} "
-            f"({math.ceil((hasta - instante).total_seconds() / 60)} min restantes)"
+def _asegurar_revision_version(root: Path, version: str) -> Path:
+    rev_path = root / f"docs/review/versions/{version}-revision.md"
+    if not rev_path.is_file():
+        rev_path.parent.mkdir(parents=True, exist_ok=True)
+        cerrados = [
+            f"- **{i['id']}**: {i['title']}"
+            for i in backlog(root)
+            if vkey(i["version"]) == vkey(version) and i["status"] == "completed"
+        ]
+        cuerpo = "\n".join(cerrados) or "- Sin tareas adicionales registradas."
+        rev_path.write_text(
+            f"# Revisión final {version}\n\n## Tareas completadas\n{cuerpo}\n\n"
+            f"## Validación funcional\n- Revisión transversal aprobada en `docs/review/versions/{version}-arquitectura.md`.\n",
+            encoding="utf-8",
         )
-    return "\n".join(lineas)
+    return rev_path
 
 
-def resumen(root):
-    """Si hay un bucle en marcha y qué lleva consumido, según los ficheros del bucle."""
-    vivo = pid_vivo(root)
-    if vivo:
-        print(f"[orquestar] en marcha (pid {vivo}); salida en {LOG}")
-    else:
-        print("[orquestar] no hay ningún bucle en marcha")
-    if listar_preguntas(root, True):
-        print(intervencion.consulta(root, solo_pendientes=True))
-    for linea_dec in decision_item.resumen(root).splitlines():
-        print(f"[orquestar] {linea_dec}")
-    if not (root / METRICAS).exists():
-        return
-    instante = fecha_estado(ahora())
-    for (harness, modelo), marca in sorted(marcas_cuota(root, instante).items()):
-        if marca["hasta"] > instante:
-            print(f"[orquestar] {harness}/{modelo}: {detalle_marca(marca, instante)}")
-    filas = leer_metricas(root)
-    tipo = lambda t: [f for f in filas if f.get("tipo", "paso") == t]
-    coste = sum(f.get("coste_usd") or 0 for f in filas)
-    horas = sum(f.get("duracion_s") or 0 for f in tipo("paso") + tipo("espera")) / 3600
-    verif = tipo("verificacion")
-    print(
-        f"[orquestar] {len(tipo('paso'))} pasos, {len(tipo('agente'))} ejecuciones de roles, "
-        f"{len(tipo('espera'))} esperas de cuota, {len(verif)} verificaciones "
-        f"({sum(1 for f in verif if f.get('reutilizada'))} reutilizadas); "
-        f"{horas:.1f} h y {coste:.2f} USD a precio de lista (solo arneses que lo informan)"
+def _ejecutar_revision_directa(
+    root: Path, paso: str, arg: str | None, rama: str, cmd_override: str | None = None
+) -> tuple[str, dict]:
+    """Invoca directamente a Hades desde Python sin agente secretario intermedio."""
+    version_dir = get_active_version_dir()
+    skills_dir = (version_dir / "skills").resolve()
+    if paso == "revisar-plataforma":
+        destino = root / "docs/requirements/platform_review.md"
+        prompt = (
+            f'Lee "{skills_dir}/review-design/SKILL.md" y revisa `docs/requirements/platform_plan.md` '
+            f"frente a `docs/requirements/requirements.md`. Escribe el informe en `{destino.relative_to(root).as_posix()}`."
+        )
+        msg = "docs(review): registrar revision de plataforma de Hades"
+    elif paso == "revisar-tarea":
+        destino = root / f"docs/review/code_reviews/{arg}-code-review.md"
+        ficha = fichero_de(root, arg)
+        rel_ficha = ficha.relative_to(root).as_posix() if ficha else arg
+        prompt = (
+            f'Lee "{skills_dir}/review-code/SKILL.md" y revisa los cambios de `{arg}` (`{rel_ficha}`). '
+            f"Escribe el informe conciso en `{destino.relative_to(root).as_posix()}` empezando con `**Veredicto:** APROBADO` o `**Veredicto:** RECHAZADO`."
+        )
+        msg = f"docs(review): [{arg}] - registrar revision de codigo de Hades"
+    else:  # revisar-version
+        destino = root / f"docs/review/versions/{arg}-arquitectura.md"
+        prompt = (
+            f'Lee "{skills_dir}/review-code/SKILL.md" y revisa transversalmente `git diff main...{rama}` '
+            f"(solo duplicados entre tareas, incoherencias de capas o defectos reales). "
+            f"Escribe el informe en `{destino.relative_to(root).as_posix()}` empezando con `**Veredicto:** APROBADO` o `**Veredicto:** RECHAZADO`."
+        )
+        msg = f"docs(review): revisar-version {arg}"
+
+    bytes_antes = destino.read_bytes() if destino.is_file() else None
+    mandato = construir_prompt_agente(root, "hades", prompt)
+    codigo, m, salida = _invocar_con_reservas(root, "hades", paso, arg or "", mandato, cmd_override=cmd_override)
+    if m.get("sin_cuota"):
+        return "CUOTA", m
+
+    v_out, _ = declaracion(salida) if salida else ("", None)
+    archivo_cambio = destino.is_file() and destino.read_bytes() != bytes_antes
+    if not archivo_cambio:
+        if v_out:
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            destino.write_text(salida.strip() + "\n", encoding="utf-8")
+            archivo_cambio = True
+        elif bytes_antes is not None and codigo != 0:
+            registrar(
+                root,
+                {
+                    **m,
+                    "tipo": "agente",
+                    "fecha": ahora(),
+                    "rol": "hades",
+                    "paso": paso,
+                    "id": arg or "",
+                    "rama": rama,
+                    "codigo": codigo,
+                },
+            )
+            return "SIN_PROGRESO", m
+
+    extras = [_asegurar_revision_version(root, str(arg))] if paso == "revisar-version" and arg else []
+    veredicto = _sellar_y_commitear_informe(root, destino, msg, extras=extras)
+    registrar(
+        root,
+        {
+            **m,
+            "tipo": "agente",
+            "fecha": ahora(),
+            "rol": "hades",
+            "paso": paso,
+            "id": arg or "",
+            "rama": rama,
+            "codigo": codigo,
+            **({"veredicto": veredicto} if veredicto else {}),
+        },
     )
-    por_tarea = {}
-    for f in filas:
-        if f.get("id"):
-            t = por_tarea.setdefault(f["id"], [0, 0])
-            t[0] += f.get("duracion_s") or 0
-            t[1] += f.get("coste_usd") or 0
-    for iid, (seg, usd) in sorted(por_tarea.items(), key=lambda x: -x[1][0])[:5]:
-        print(f"[orquestar]   {iid}: {seg / 60:.0f} min, {usd:.2f} USD")
-    ultima = tipo("paso")[-1] if tipo("paso") else {}
-    print(f"[orquestar] último paso: {ultima.get('paso', '')} {ultima.get('id', '')} ({ultima.get('fecha', '')})")
+    if veredicto == "APROBADO":
+        return "OK", m
+    if veredicto == "RECHAZADO":
+        return "RECHAZADO", m
+    return "SIN_PROGRESO", m
 
 
-def parte(root, docs="docs/requirements"):
-    """Resumen breve para Telegram: bucle, fase, versión abierta y backlog, deducidos del disco."""
+def _validar_puerta_python(root: Path) -> str:
+    """Comprobación determinista rápida tras desarrollo: árbol limpio y ruff en .py tocados."""
+    if not (root / ".git").exists():
+        return ""
+    sucio = git("status", "--porcelain", cwd=root)
+    lineas_sucias = [l for l in sucio.splitlines() if l.strip() and not any(p in l for p in PROPIOS)]
+    if lineas_sucias:
+        return f"árbol Git sucio tras el paso ({lineas_sucias[0].strip()})"
+    cambiados = [
+        f
+        for f in git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD", cwd=root).splitlines()
+        if f.endswith(".py") and (root / f).is_file()
+    ]
+    if cambiados and shutil.which("ruff"):
+        r = subprocess.run(
+            [sys.executable, "-m", "ruff", "check", *cambiados], cwd=root, capture_output=True, text=True
+        )
+        if r.returncode != 0:
+            return f"ruff check en rojo sobre {', '.join(cambiados[:3])}"
+    return ""
+
+
+# ------------------------------------------------------------------ Telegram y buzón
+
+
+class Credenciales(tuple):
+    origen = "proyecto"
+
+
+def credenciales(root: Path) -> Credenciales:
+    env_file = Path(root) / ".env"
+    local = {}
+    if env_file.is_file():
+        for l in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            l = l.strip()
+            if l and not l.startswith("#") and "=" in l:
+                k, v = l.split("=", 1)
+                local[k.strip()] = v.strip().strip('"').strip("'")
+    tok = local.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    ids_raw = local.get("TELEGRAM_ALLOWED_USER_IDS") or os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "")
+    ids = [x.strip() for x in ids_raw.split(",") if x.strip()]
+    res = Credenciales((tok, ids))
+    res.origen = "proyecto" if "TELEGRAM_BOT_TOKEN" in local else "entorno"
+    return res
+
+
+def firmar(texto: str, extra: str = "") -> str:
+    sufijo = f" · {extra}" if extra else ""
+    return f"{texto.strip()}\n— adevv{sufijo}"
+
+
+def enviar(token: str, chat_id, texto: str, markdown: bool = False) -> bool:
+    if not token or not chat_id:
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": str(chat_id), "text": texto[:4000]}
+    if markdown:
+        payload["parse_mode"] = "Markdown"
+    try:
+        datos = urllib.parse.urlencode(payload).encode("utf-8")
+        with urllib.request.urlopen(url, data=datos, timeout=10):
+            return True
+    except Exception:
+        if markdown:
+            return enviar(token, chat_id, texto, markdown=False)
+        return False
+
+
+def avisar(root: Path, evento: str, mensaje: str) -> None:
+    cfg_tg = config(root).get("telegram")
+    if cfg_tg is False:
+        return
+    if isinstance(cfg_tg, dict) and isinstance(cfg_tg.get("eventos"), list) and evento not in cfg_tg["eventos"]:
+        return
+    tok, ids = credenciales(root)
+    if tok and ids:
+        for uid in ids:
+            enviar(tok, uid, firmar(f"[{Path(root).name}] {mensaje}"))
+
+
+def _slug(texto: str) -> str:
+    norm = unicodedata.normalize("NFD", texto.lower())
+    limpio = "".join(c for c in norm if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", "-", limpio).strip("-")[:50] or "item"
+
+
+def apuntar(root: Path, tipo: str, titulo: str, usuario: str, perfil: dict | None = None) -> None:
+    root = Path(root)
+    excluir(root)
+    fila = {"fecha": ahora(), "tipo": tipo, "titulo": titulo.strip(), "usuario": str(usuario)}
+    if perfil:
+        fila["perfil"] = perfil
+    with (root / BUZON).open("a", encoding="utf-8") as f:
+        f.write(json.dumps(fila, ensure_ascii=False) + "\n")
+
+
+def ingerir(root: Path) -> list[tuple[str, str]]:
+    root = Path(root)
+    buzon = root / BUZON
+    if not buzon.is_file():
+        return []
+    lineas = [l for l in buzon.read_text(encoding="utf-8").splitlines() if l.strip()]
+    if not lineas:
+        buzon.unlink(missing_ok=True)
+        return []
+    cfg_path = root / "task_config.yaml"
+    cfg = (yaml_lite.load_yaml(cfg_path) or {}) if cfg_path.is_file() else {}
+    prefijo = ((cfg.get("project") or {}).get("prefix") or cfg.get("prefix") or "PRJ").strip()
+    tasks_dir, bugs_dir = backlog_dirs(root)
+    creados = []
+    rutas_creadas = []
+    hoy = datetime.now().strftime("%Y-%m-%d")
+
+    for l in lineas:
+        d = json.loads(l)
+        es_bug = d.get("tipo") == "bug"
+        letra = "B" if es_bug else "T"
+        destino_dir = bugs_dir if es_bug else tasks_dir
+        destino_dir.mkdir(parents=True, exist_ok=True)
+        existentes = [
+            int(m.group(1))
+            for p in (
+                *(tasks_dir.glob("*.md") if tasks_dir.is_dir() else ()),
+                *(bugs_dir.glob("*.md") if bugs_dir.is_dir() else ()),
+            )
+            if (m := re.match(rf"^{letra}-{re.escape(prefijo)}-(\d+)\b", p.stem))
+        ]
+        num = max(existentes, default=0) + 1
+        iid = f"{letra}-{prefijo}-{num:04d}"
+        ruta = destino_dir / f"{iid}-{_slug(d['titulo'])}.md"
+        linea_perfil = f"perfil: {json.dumps(d['perfil'])}\n" if d.get("perfil") else ""
+        ruta.write_text(
+            f'---\nid: {iid}\ntitle: "{d["titulo"].replace(chr(34), chr(39))}"\n'
+            f"type: {'bug' if es_bug else 'funcional'}\nweight: 100\ndificultad: media\n"
+            f'{linea_perfil}version: ""\nstatus: backlog\ndepende_de: []\n'
+            f"created_at: {hoy}\nupdated_at: {hoy}\n---\n\n# {iid}: {d['titulo']}\n",
+            encoding="utf-8",
+        )
+        creados.append((iid, d["titulo"]))
+        rutas_creadas.append(ruta)
+
+    buzon.unlink(missing_ok=True)
+    if rutas_creadas and (root / ".git").exists():
+        rels = [str(r.relative_to(root)) for r in rutas_creadas]
+        subprocess.run(["git", "add", *rels], cwd=root, env=_git_env(), check=False)
+        ids_txt = ", ".join(i for i, _ in creados)
+        subprocess.run(
+            ["git", "commit", "-qm", f"docs(plan): registrar desde buzon ({ids_txt})"],
+            cwd=root,
+            env=_git_env(),
+            check=False,
+        )
+    return creados
+
+
+def _proxy_motor():
+    return SimpleNamespace(fichero_de=fichero_de, frontmatter=frontmatter, consumo_cuotas=consumo_cuotas, vkey=vkey)
+
+
+def responder_pregunta(root: Path, usuario: str, argumento: str, autorizados=None) -> str:
+    qid, _, texto = (argumento or "").strip().partition(" ")
+    ok, msg = intervencion.responder(Path(root), _proxy_motor(), qid, texto, usuario=str(usuario))
+    if ok and (Path(root) / ".git").exists():
+        ficha = fichero_de(Path(root), qid)
+        if not ficha:
+            for it in backlog(Path(root)):
+                if it["id"] in msg:
+                    ficha = it["path"]
+                    break
+        if ficha:
+            subprocess.run(["git", "add", str(ficha.relative_to(root))], cwd=root, env=_git_env(), check=False)
+            subprocess.run(
+                ["git", "commit", "-qm", f"docs(plan): responder {qid}"], cwd=root, env=_git_env(), check=False
+            )
+    return msg
+
+
+def cargar_cierre_version():
+    ruta = Path(__file__).resolve().parents[1] / "telegram_gateway" / "cierre_version.py"
+    spec = importlib.util.spec_from_file_location("cierre_version", ruta)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def leer_espera(root: Path) -> tuple[datetime | None, str]:
+    p = Path(root) / ESPERA
+    if not p.is_file():
+        return None, ""
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return fecha_estado(d["hasta"]), d.get("motivo", "cuota")
+    except Exception:
+        return None, ""
+
+
+def parte(root: Path, docs: str = "docs/requirements") -> str:
+    """Resumen breve para CLI y Telegram (/estado)."""
+    root = Path(root)
     hasta, motivo = leer_espera(root)
     if hasta and hasta > fecha_estado(ahora()):
         marcha = f"esperando ({motivo}) hasta {hasta:%H:%M}"
@@ -4080,7 +1106,9 @@ def parte(root, docs="docs/requirements"):
     e = estado(root, docs)
     lineas = [f"*{root.name}* · bucle {marcha}", f"*Fase:* {e[0]} " + " ".join(str(x) for x in e[1:3] if x)]
     if e[0] == "PASO" and e[1] == "revisar-tarea":
-        lineas.append(diagnostico_revision(root, e[2], fichero_de(root, e[2]), backlog_dirs(root)))
+        diag = diagnostico_revision(root, e[2], fichero_de(root, e[2]), backlog_dirs(root))
+        if diag:
+            lineas.append(diag)
     items = backlog(root)
     abiertas = sorted({vkey(i["version"]) for i in items if vkey(i["version"]) and i["status"] not in CERRADO})
     for vk in abiertas[:1]:
@@ -4090,1142 +1118,480 @@ def parte(root, docs="docs/requirements"):
         v = max((i["version"] for i in suyas if i.get("version")), key=len, default=f"v{vk[0]}.{vk[1]}")
         tareas = [i for i in suyas if i["paso"] == "task-dev"]
         bugs = [i for i in suyas if i["paso"] == "bug-fix"]
-        cuenta = lambda *s: [i["id"] for i in suyas if i["status"] in s]
-        cuenta_t = lambda *s: [i["id"] for i in tareas if i["status"] in s]
-        cuenta_b = lambda *s: [i["id"] for i in bugs if i["status"] in s]
+        ct = lambda *s: [i["id"] for i in tareas if i["status"] in s]
+        cb = lambda *s: [i["id"] for i in bugs if i["status"] in s]
+        ca = lambda *s: [i["id"] for i in suyas if i["status"] in s]
         lineas.append(
-            f"*{v}:* {len(cuenta_t('completed'))}/{len(tareas)} tareas cerradas, "
-            f"{len(cuenta_b('completed'))}/{len(bugs)} bugs cerrados"
-            + (f" · en curso {', '.join(cuenta('in_progress'))}" if cuenta("in_progress") else "")
-            + (f" · bloqueadas {', '.join(cuenta('blocked'))}" if cuenta("blocked") else "")
+            f"*{v}:* {len(ct('completed'))}/{len(tareas)} tareas cerradas, "
+            f"{len(cb('completed'))}/{len(bugs)} bugs cerrados"
+            + (f" · en curso {', '.join(ca('in_progress'))}" if ca("in_progress") else "")
+            + (f" · bloqueadas {', '.join(ca('blocked'))}" if ca("blocked") else "")
         )
     sin_version = [i for i in items if not vkey(i["version"]) and i["status"] not in FUERA]
     lineas.append(f"*Backlog sin versión:* {len(sin_version)}")
-    if (root / BUZON).exists():
-        pendientes = sum(1 for l in (root / BUZON).read_text(encoding="utf-8").splitlines() if l.strip())
-        lineas.append(f"*Por registrar:* {pendientes} (entre pasos del bucle)")
-    if (root / METRICAS).exists():
-        pasos = [f for f in leer_metricas(root) if f.get("tipo", "paso") == "paso"]
-        if pasos:
-            lineas.append(
-                f"*Último paso:* {pasos[-1].get('paso', '')} {pasos[-1].get('id') or ''} ({pasos[-1].get('fecha', '')[:16]})"
-            )
-    if listar_preguntas(root, True):
-        lineas.append(intervencion.consulta(root, solo_pendientes=True))
-    detalles_dec = decision_item.resumen(root)
-    if detalles_dec:
-        lineas.append(detalles_dec)
+    if (root / BUZON).is_file():
+        pend = sum(1 for l in (root / BUZON).read_text(encoding="utf-8").splitlines() if l.strip())
+        if pend:
+            lineas.append(f"*Por registrar:* {pend}")
     return "\n".join(lineas)
 
 
-_gateway_aviso_entorno = set()
-_GATEWAY_SOLO_AVISOS = "token de Telegram del entorno: solo avisos; añade un .env para conversar con este proyecto"
+# ------------------------------------------------------------------ validación de arranque y bucle
 
 
-def iniciar_gateway(root, informar=True):
-    """Solicita el gateway opcional sin abortar el bucle si falla su lanzador."""
+def validar_lanzamiento_bucle(root: Path, docs: str = "docs/requirements") -> None:
+    root = Path(root).resolve()
     try:
-        cfg = telegram(root)
-        if not cfg:
-            return
-        if credenciales(root).origen == "entorno":
-            clave = str(Path(root).resolve())
-            if informar and clave not in _gateway_aviso_entorno:
-                _gateway_aviso_entorno.add(clave)
-                print(f"[orquestar] {_GATEWAY_SOLO_AVISOS}", flush=True)
-            return
-        resultado = subprocess.run(
-            [
-                sys.executable,
-                str(SKILL.parent.parent / "telegram_gateway" / "gateway.py"),
-                "--root",
-                str(root),
-                "--fondo",
-            ],
+        r = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
             cwd=root,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=10,
-            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            env=_git_env(),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
-        if resultado.returncode:
-            print("[orquestar] gateway no iniciado (ya activo o fallo; consulta telegram.log)", flush=True)
-    except Exception as error:
-        print(f"[orquestar] gateway no iniciado ({type(error).__name__}); el bucle continúa", flush=True)
+        if r.returncode == 0 and r.stdout.strip():
+            top = Path(r.stdout.strip()).resolve()
+            if not os.path.samefile(top, root):
+                sys.exit(f"Estás en una subcarpeta de {top}: lanza /orquestar desde la raíz.")
+    except OSError:
+        pass
+
+    if not (root / "task_config.yaml").is_file():
+        reqs = root / docs / "requirements.md"
+        if not es_carpeta_personal(root) and not es_raiz_de_unidad(root) and reqs.is_file():
+            norm = unicodedata.normalize("NFD", root.name)
+            letras = "".join(c for c in norm if unicodedata.category(c) != "Mn" and c.isalpha()).upper()
+            prefijo = letras[:3] if len(letras) >= 3 else "PRJ"
+            if not (root / ".git").is_dir():
+                subprocess.run(["git", "init", "-q"], cwd=root, env=_git_env(), check=True)
+            (root / "task_config.yaml").write_text(
+                f'project:\n  name: {root.name}\n  prefix: "{prefijo}"\n  version: "v0.0.0"\n\n'
+                f"levels:\n  master:\n    path: docs/plan/\n    folders:\n      tasks: tasks/\n      bugs: bugs/\n"
+                f'    tasks: tasks/\n    bugs: bugs/\n    id_prefix: "{prefijo}"\n',
+                encoding="utf-8",
+            )
+            gi = root / ".gitignore"
+            if not gi.exists():
+                gi.write_text(
+                    "orquestar.log\norquestar.pid\norquestar.parar\norquestar.espera\n"
+                    "orquestar_metricas.jsonl\norquestar_evidencias.jsonl\norquestar_buzon.jsonl*\n"
+                    ".env\n__pycache__/\n",
+                    encoding="utf-8",
+                )
+            subprocess.run(["git", "add", "task_config.yaml", ".gitignore"], cwd=root, env=_git_env(), check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "user.name=Adevv",
+                    "-c",
+                    "user.email=adevv@local",
+                    "commit",
+                    "-qm",
+                    "chore: inicializar proyecto",
+                ],
+                cwd=root,
+                env=_git_env(),
+                check=True,
+            )
+            print(f"[orquestar] inicializado repositorio Git y task_config.yaml (prefijo: {prefijo})", flush=True)
+
+    cfg = config(root)
+    for rol_k, rol_v in cfg.items():
+        if isinstance(rol_v, dict) and "instructions" in rol_v:
+            inst = rol_v["instructions"]
+            p_inst = Path(inst) if Path(inst).is_absolute() else root / inst
+            if not p_inst.exists():
+                sys.exit(f"orchestration.json: {rol_k}.instructions apunta a {inst}, que no existe.")
+
+    if not es_repositorio_fuente_adevv(root):
+        gm = root / ".gitmodules"
+        usa_agents = (root / ".agents").exists() or (
+            gm.is_file() and ".agents" in gm.read_text(encoding="utf-8", errors="replace")
+        )
+        if usa_agents:
+            sys.exit("Este proyecto aún usa el submódulo .agents: sigue los pasos de migración del README.")
+
+    version_dir = get_active_version_dir()
+    nombres_dist = set()
+    if (version_dir / "skills").is_dir():
+        nombres_dist.update(
+            d.name for d in (version_dir / "skills").iterdir() if d.is_dir() and not d.name.startswith(".")
+        )
+    if (version_dir / "agents").is_dir():
+        nombres_dist.update(
+            f.stem for f in (version_dir / "agents").rglob("*") if f.is_file() and f.suffix in (".md", ".toml")
+        )
+    if (version_dir / "workflows").is_dir():
+        nombres_dist.update(f.stem for f in (version_dir / "workflows").iterdir() if f.is_file() and f.suffix == ".md")
+    if "telegram_gateway" in nombres_dist:
+        nombres_dist.add("telegram-gateway")
+
+    ocultan = []
+    for c_dir, es_dir in (
+        (root / ".claude" / "skills", True),
+        (root / ".claude" / "agents", False),
+        (root / ".codex" / "skills", True),
+        (root / ".codex" / "agents", False),
+        (root / ".agent" / "skills", True),
+        (root / ".agent" / "workflows", False),
+    ):
+        if c_dir.exists():
+            for item in c_dir.iterdir():
+                if (item.name if es_dir else item.stem) in nombres_dist:
+                    ocultan.append(os.path.relpath(item, root).replace("\\", "/"))
+    if ocultan:
+        sys.exit(
+            f"Este proyecto tiene skills, agentes o workflows propios que ocultan los de Adevv: {', '.join(sorted(ocultan))}. Bórralos o renómbralos."
+        )
 
 
-def publicar_pid(root, pid):
-    """Sustituye la titularidad sin exponer un PID vacío durante la publicación."""
-    descriptor, temporal = tempfile.mkstemp(prefix="adevv-intervencion-", dir=root)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as fichero:
-            fichero.write(str(pid))
-            fichero.flush()
-            os.fsync(fichero.fileno())
-        os.replace(temporal, root / PID)
-    finally:
-        Path(temporal).unlink(missing_ok=True)
-
-
-def en_fondo(root, argumentos=None):
-    """Relanza con argumentos explícitos o los de la CLI y salida en LOG."""
+def en_fondo(root: Path, argumentos: list[str] | None = None) -> int:
+    root = Path(root).resolve()
+    validar_lanzamiento_bucle(root)
     vivo = pid_vivo(root)
     if vivo:
-        sys.exit(f"Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.")
-    (root / PID).unlink(missing_ok=True)
+        sys.exit(f"Ya hay un bucle en marcha (pid {vivo}).")
     excluir(root)
-    iniciar_gateway(root, informar=False)
-    args = [x for x in (sys.argv[1:] if argumentos is None else argumentos) if x != "--fondo"]
-    opciones = {"start_new_session": True}
-    if os.name == "nt":
-        opciones = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+    (root / PARADA).unlink(missing_ok=True)
+    args_extra = [a for a in (argumentos or []) if a != "--fondo"]
+    opciones = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
     with (root / LOG).open("a", encoding="utf-8") as log:
-        p = subprocess.Popen(
-            [sys.executable, "-u", str(Path(__file__).resolve()), *args],
-            cwd=root,
+        proc = subprocess.Popen(
+            [sys.executable, "-u", str(Path(__file__).resolve()), *args_extra],
+            cwd=str(root),
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
             **opciones,
         )
-        try:
-            publicar_pid(root, p.pid)
-        except OSError:
-            p.terminate()
-            try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                p.kill()
-                p.wait(timeout=5)
-            raise
-    print(f"[orquestar] lanzado en segundo plano (pid {p.pid}); salida en {LOG}")
+    (root / PID).write_text(str(proc.pid), encoding="utf-8")
+    print(f"[orquestar] lanzado en segundo plano (pid {proc.pid}); salida en {LOG}", flush=True)
     return 0
 
 
-# ---------------------------------------------------------------- entrada
+def _esperar_cuota_si_procede(root: Path, espera_max: int) -> bool:
+    _, bloqueos = consumo_cuotas(root)
+    if not bloqueos or espera_max <= 0:
+        return False
+    proximo = min(bloqueos.values())
+    segundos = max(1, int((proximo - fecha_estado(ahora())).total_seconds()))
+    if segundos > espera_max:
+        return False
+    (root / ESPERA).write_text(json.dumps({"hasta": proximo.isoformat(), "motivo": "cuota"}), encoding="utf-8")
+    print(f"[orquestar] esperando cuota {segundos}s (hasta {proximo:%H:%M})...", flush=True)
+    fin = time.monotonic() + segundos
+    while time.monotonic() < fin:
+        if (root / PARADA).exists():
+            break
+        time.sleep(min(5.0, fin - time.monotonic()))
+    (root / ESPERA).unlink(missing_ok=True)
+    return not (root / PARADA).exists()
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Orquestador: de la idea al producto, paso a paso.")
-    ap.add_argument(
-        "--harness",
-        choices=HARNESS,
-        default=None,
-        help=f"arnés principal de cada paso; las reservas conservan el suyo (por defecto, {CONFIG}, o claude)",
-    )
-    ap.add_argument("--cmd", help="plantilla propia del arnés, con {prompt} (sustituye a --harness)")
-    ap.add_argument("--docs", default="docs/requirements", help="carpeta de requisitos y planes")
-    ap.add_argument("--test", help="comando de la suite (por defecto, validation.command de task_config.yaml)")
-    ap.add_argument("--idea", help="texto de la idea; crea <docs>/requirements.md si no existe")
-    ap.add_argument("--max-pasos", type=int, default=100)
-    ap.add_argument("--presupuesto", type=float, help="gasto máximo por paso en USD (solo claude)")
-    ap.add_argument("--reintentos", type=int, default=2, help="pasos seguidos sin progreso antes de parar")
-    ap.add_argument(
-        "--reintentos-arnes",
-        type=int,
-        default=3,
-        help="reintentos por perfil ante errores sin cuota (>= 0; esperas 60, 300, 900 segundos)",
-    )
-    ap.add_argument(
-        "--espera-max",
-        type=float,
-        default=12,
-        help="horas máximas esperando cuota seguidas antes de parar (0 = no esperar)",
-    )
-    ap.add_argument("--estado", action="store_true", help="muestra el estado y el consumo, y sale")
-    ap.add_argument("--preguntar", nargs=2, metavar=("ID", "PREGUNTA"), help="bloquea una tarea con pregunta humana")
-    ap.add_argument(
-        "--enrutar-hallazgo",
-        nargs=2,
-        metavar=("ID", "DESTINO"),
-        help="aplica el destino de Hades: artemisa, especificador o humano",
-    )
-    ap.add_argument("--contexto", default="", help="contexto de la intervención humana")
-    ap.add_argument("--preguntas", action="store_true", help="consulta preguntas humanas pendientes")
-    ap.add_argument(
-        "--responder",
-        nargs=2,
-        metavar=("REFERENCIA", "RESPUESTA"),
-        help="responde localmente a un Q-ID o ID de tarea inequívoco",
-    )
-    ap.add_argument("--agentes", "--agents", action="store_true", help="consulta roles, modelos y porcentaje de cuota")
-    ap.add_argument(
-        "--cuota-reset",
-        nargs="?",
-        const="",
-        metavar="ARNES[/MODELO]",
-        help="recupera marcas de cuota del selector, o todas si se omite",
-    )
-    ap.add_argument(
-        "--recuperar-metricas", action="store_true", help="conserva el JSONL original y retira sus líneas inválidas"
-    )
-    ap.add_argument(
-        "--metricas",
-        "--metrics",
-        nargs="?",
-        const="todas",
-        metavar="FILTRO",
-        help="consulta métricas por versión (todas, ultima, ultimas:N o vX.Y,vX.Y)",
-    )
-    ap.add_argument("--version-filtro", metavar="FILTRO", help="filtro alternativo para --metricas")
-    ap.add_argument(
-        "--csv", nargs="?", const="-", metavar="RUTA", help="exporta métricas CSV a stdout (-) o a un fichero UTF-8"
-    )
-    ap.add_argument("--fondo", action="store_true", help=f"lanza el bucle desacoplado, con la salida en {LOG}")
-    ap.add_argument("--parar", action="store_true", help="pide al bucle en marcha que pare tras el paso en curso")
-    ap.add_argument("--agente", metavar="ROL", help=f"lanza un rol (hades, clio, cronos) según {CONFIG}")
-    ap.add_argument(
-        "--revision",
-        choices=("spec", "test", "code"),
-        help="identifica el alcance de la revisión de Hades, incluida su ratificación",
-    )
-    ap.add_argument("--prompt", help="mandato directo para --agente")
-    ap.add_argument("--prompt-file", type=Path, help="mandato para --agente (si no, por la entrada estándar)")
-    ap.add_argument(
-        "--verificar",
-        nargs="?",
-        const="suite",
-        metavar="CMD",
-        help="ejecuta la suite (o CMD) o reutiliza su resultado en verde para el mismo árbol",
-    )
-    ap.add_argument("--calidad", action="store_true", help="comprueba formato y lint del delta de una tarea")
-    ap.add_argument("--base", help="base Git estable de la tarea para --calidad")
-    ap.add_argument("--aplicar", action="store_true", help="aplica formato en escritura antes de --calidad")
-    ap.add_argument("--checkpoint", metavar="ID", help="guarda resumen y siguiente acción en el contexto portable")
-    ap.add_argument("--resumen", default="", help="resumen breve para --checkpoint")
-    ap.add_argument("--siguiente", default="", help="siguiente acción prevista para --checkpoint")
-    ap.add_argument("--decision", action="append", default=[], help="decisión tomada (repetible) para --checkpoint")
-    ap.add_argument("--aviso-prueba", action="store_true", help=f"envía un aviso de prueba a Telegram ({CONFIG})")
-    a = ap.parse_args()
-    if a.reintentos_arnes < 0:
-        ap.error("--reintentos-arnes debe ser un entero no negativo")
-    root = Path.cwd()
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+def _comando_suite_version(root: Path, test_cli: str | None) -> str:
+    if test_cli:
+        return test_cli
+    cfg_path = root / "task_config.yaml"
+    cfg = (yaml_lite.load_yaml(cfg_path) or {}) if cfg_path.is_file() else {}
+    return str(((cfg.get("validation") or {}).get("command") or "")).strip()
 
-    if a.checkpoint:
-        campos = {}
-        if a.resumen:
-            campos["resumen"] = a.resumen
-        if a.siguiente:
-            campos["siguiente"] = a.siguiente
-        if a.decision:
-            campos["decisiones"] = a.decision
-        try:
-            estado_ctx = contexto_ejecucion.guardar_checkpoint(root, a.checkpoint, **campos)
-        except ValueError as err:
-            ap.error(str(err))
-        print(
-            f"[orquestar] checkpoint guardado para {a.checkpoint} (rev {estado_ctx['revision']}, {estado_ctx['action']})"
-        )
+
+def bucle(
+    root: Path,
+    docs: str = "docs/requirements",
+    test_cmd: str | None = None,
+    max_pasos: int | None = None,
+    reintentos: int = 2,
+    espera_max: int = 18000,
+    cmd_override: str | None = None,
+) -> int:
+    root = Path(root).resolve()
+    validar_lanzamiento_bucle(root, docs=docs)
+    if max_pasos == 0:
         return 0
+    estado_recibido = recibir_recarga(root, PID, Path(__file__))
+    if estado_recibido is None:
+        vivo = pid_vivo(root)
+        if vivo and vivo != os.getpid():
+            sys.exit(f"Ya hay un bucle en marcha (pid {vivo}).")
+        excluir(root)
+        (root / PID).write_text(str(os.getpid()), encoding="utf-8")
+    else:
+        excluir(root)
+    (root / PARADA).unlink(missing_ok=True)
 
+    fallos_par: dict[tuple, int] = {}
+    pasos_hechos = int((estado_recibido or {}).get("pasos", 0))
+    suite_cmd = _comando_suite_version(root, test_cmd)
+
+    try:
+        while True:
+            if (root / PARADA).exists():
+                (root / PARADA).unlink(missing_ok=True)
+                print("[orquestar] PARAR: detenido a petición (--parar).", flush=True)
+                return 0
+            if recargar_version(Path(__file__), root, PID, {"pasos": pasos_hechos}, "orquestar"):
+                return 0
+
+            ingerir(root)
+            est = estado(root, docs)
+
+            # Pasar suite completa de versión una sola vez por huella de producto antes de revisar-version / cerrar
+            if est[0] in ("PASO", "PARAR") and suite_cmd:
+                es_cierre_version = (est[0] == "PASO" and est[1] == "revisar-version") or (
+                    est[0] == "PARAR" and str(est[1]).startswith("Versión ")
+                )
+                if es_cierre_version and verificar(root, suite_cmd) != 0:
+                    msg = "Suite de versión en rojo al cerrar; corrige los fallos o regístralos con /bug-add."
+                    print(f"[orquestar] PARAR: {msg}", flush=True)
+                    avisar(root, "error", msg)
+                    return 1
+
+            if est[0] == "FIN":
+                print(f"[orquestar] FIN: {est[1]}", flush=True)
+                avisar(root, "fin", est[1])
+                return 0
+            if est[0] == "PARAR":
+                print(f"[orquestar] PARAR: {est[1]}", flush=True)
+                avisar(root, "version" if str(est[1]).startswith("Versión ") else "bloqueo", est[1])
+                return 1 if not str(est[1]).startswith("Versión ") else 0
+
+            if max_pasos is not None and pasos_hechos >= max_pasos:
+                print(f"[orquestar] PARAR: alcanzado --max-pasos={max_pasos}.", flush=True)
+                return 0
+
+            paso = est[1]
+            arg = est[2] if len(est) > 2 else None
+            rama = est[3] if len(est) > 3 else git("branch", "--show-current", cwd=root)
+            pasos_hechos += 1
+            etiqueta = " ".join(str(x) for x in (paso, arg, rama) if x)
+            print(f"\n[orquestar] {pasos_hechos}. PASO: {etiqueta}", flush=True)
+
+            # Pasos de revisión: Hades directo sin agente secretario
+            if paso in perfiles.REVISION:
+                res_rev, _ = _ejecutar_revision_directa(root, paso, arg, rama, cmd_override=cmd_override)
+                if res_rev == "CUOTA":
+                    if _esperar_cuota_si_procede(root, espera_max):
+                        continue
+                    print(f"[orquestar] PARAR: Hades sin cuota en {etiqueta}.", flush=True)
+                    return 1
+                if res_rev == "OK":
+                    fallos_par.pop((paso, arg), None)
+                    continue
+                if res_rev == "RECHAZADO" and paso == "revisar-tarea" and arg:
+                    n = fallos_par.get(("rechazo", arg), 0) + 1
+                    fallos_par[("rechazo", arg)] = n
+                    ficha = fichero_de(root, arg)
+                    if n > reintentos:
+                        intervencion._actualizar_estado_ficha(
+                            ficha, "blocked", "humano", f"Bloqueado tras {n} rechazos de Hades."
+                        )
+                        avisar(root, "bloqueo", f"{arg} bloqueada tras {n} rechazos de Hades.")
+                    else:
+                        intervencion._actualizar_estado_ficha(ficha, "in_progress")
+                    if (root / ".git").exists() and ficha:
+                        subprocess.run(
+                            ["git", "add", str(ficha.relative_to(root))], cwd=root, env=_git_env(), check=False
+                        )
+                        subprocess.run(
+                            ["git", "commit", "-qm", f"docs(plan): reabrir {arg} tras revision"],
+                            cwd=root,
+                            env=_git_env(),
+                            check=False,
+                        )
+                    continue
+                if res_rev == "RECHAZADO" and paso == "revisar-version":
+                    msg = f"Hades rechazó revisar-version {arg}; revisa docs/review/versions/{arg}-arquitectura.md."
+                    print(f"[orquestar] PARAR: {msg}", flush=True)
+                    avisar(root, "bloqueo", msg)
+                    return 1
+
+            else:
+                huella_antes = (
+                    huella_producto(root),
+                    tuple((i["id"], i["status"]) for i in backlog(root)),
+                    git("branch", "--show-current", cwd=root),
+                )
+                prompt = construir_prompt_paso(root, paso, arg)
+                rol_paso = "artemisa" if paso in perfiles.DESARROLLO else "atenea"
+                dif = perfiles.dificultad_de(root, arg, fichero_de)
+                codigo, m, salida = _invocar_con_reservas(
+                    root, rol_paso, paso, arg or "", prompt, cmd_override=cmd_override
+                )
+                if salida:
+                    print(salida, flush=True)
+                if m.get("sin_cuota"):
+                    if _esperar_cuota_si_procede(root, espera_max):
+                        continue
+                    print(f"[orquestar] PARAR: {rol_paso} sin cuota en {etiqueta}.", flush=True)
+                    return 1
+
+                error_puerta = _validar_puerta_python(root) if paso in perfiles.DESARROLLO else ""
+                huella_despues = (
+                    huella_producto(root),
+                    tuple((i["id"], i["status"]) for i in backlog(root)),
+                    git("branch", "--show-current", cwd=root),
+                )
+                progreso = huella_despues != huella_antes and not error_puerta
+                registrar(
+                    root,
+                    {
+                        **m,
+                        "tipo": "paso",
+                        "fecha": ahora(),
+                        "paso": paso,
+                        "id": arg or "",
+                        "rama": rama,
+                        "rol": rol_paso,
+                        "dificultad": dif,
+                        "codigo": codigo,
+                        "progreso": progreso,
+                    },
+                )
+                if error_puerta and arg:
+                    print(f"[orquestar] puerta determinista en rojo para {arg}: {error_puerta}", flush=True)
+                    ficha = fichero_de(root, arg)
+                    if ficha and frontmatter(ficha).get("status") == "completed":
+                        intervencion._actualizar_estado_ficha(
+                            ficha, "in_progress", nota=f"Puerta determinista: {error_puerta}"
+                        )
+                if progreso:
+                    fallos_par.pop((paso, arg), None)
+                    continue
+
+            # Gestión uniforme de falta de progreso con tope corto
+            n_sin = fallos_par.get((paso, arg), 0) + 1
+            fallos_par[(paso, arg)] = n_sin
+            print(f"[orquestar] {etiqueta}: sin progreso ({n_sin}/{reintentos})", flush=True)
+            if n_sin >= reintentos:
+                if arg and paso in perfiles.DESARROLLO:
+                    ficha = fichero_de(root, arg)
+                    intervencion._actualizar_estado_ficha(
+                        ficha, "blocked", "humano", f"Bloqueado tras {n_sin} intentos sin progreso."
+                    )
+                    if (root / ".git").exists() and ficha:
+                        subprocess.run(
+                            ["git", "add", str(ficha.relative_to(root))], cwd=root, env=_git_env(), check=False
+                        )
+                        subprocess.run(
+                            ["git", "commit", "-qm", f"docs(plan): bloquear {arg} por falta de progreso"],
+                            cwd=root,
+                            env=_git_env(),
+                            check=False,
+                        )
+                    avisar(root, "bloqueo", f"{arg} bloqueada tras {n_sin} intentos sin progreso.")
+                    continue
+                msg = f"{etiqueta} detenido tras {n_sin} intentos sin progreso."
+                print(f"[orquestar] PARAR: {msg}", flush=True)
+                avisar(root, "error", msg)
+                return 1
+    finally:
+        if es_propietario_pid(root):
+            (root / PID).unlink(missing_ok=True)
+            (root / ESPERA).unlink(missing_ok=True)
+
+
+# ------------------------------------------------------------------ CLI
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Orquestador ligero de Adevv.")
+    ap.add_argument("--root", type=Path, default=Path.cwd(), help="raíz del proyecto")
+    ap.add_argument("--docs", default="docs/requirements", help="directorio de documentos de requisitos")
+    ap.add_argument("--estado", action="store_true", help="muestra el estado actual y sale")
+    ap.add_argument("--parar", action="store_true", help="pide parar al terminar el paso en curso")
+    ap.add_argument("--fondo", action="store_true", help="ejecuta el bucle en segundo plano")
+    ap.add_argument("--agentes", "--agents", action="store_true", help="muestra agentes configurados y estado de cuotas")
+    ap.add_argument("--metricas", "--metrics", nargs="?", const="ultima", help="consulta métricas (ultima, todas, vX.Y)")
+    ap.add_argument("--version-filtro", help=argparse.SUPPRESS)
+    ap.add_argument("--csv", nargs="?", const="-", help="exporta métricas en CSV")
+    ap.add_argument("--verificar", metavar="CMD", help="ejecuta comando con caché por huella de producto")
+    ap.add_argument(
+        "--agente", choices=("atenea", "artemisa", "hades", "clio", "cronos"), help="invoca directamente a un rol"
+    )
+    ap.add_argument("--revision", help=argparse.SUPPRESS)
+    ap.add_argument("--prompt", help="texto del prompt para --agente")
+    ap.add_argument("--prompt-file", type=Path, help="fichero con el prompt para --agente")
+    ap.add_argument("--preguntas", action="store_true", help="lista preguntas humanas pendientes")
+    ap.add_argument("--preguntar", nargs=2, metavar=("ID", "PREGUNTA"), help="registra bloqueo con pregunta humana")
+    ap.add_argument("--responder", nargs=2, metavar=("Q_ID", "RESPUESTA"), help="responde una pregunta humana")
+    ap.add_argument("--test", help="comando de suite completa al cerrar versión")
+    ap.add_argument("--max-pasos", type=int, help="máximo de pasos a ejecutar")
+    ap.add_argument("--reintentos", type=int, default=2, help="intentos máximos sin progreso por ítem")
+    ap.add_argument("--espera-max", type=int, default=18000, help="segundos máximos de espera de cuota")
+    ap.add_argument("--cmd", help=argparse.SUPPRESS)
+
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    a = ap.parse_args(raw_args)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    root = a.root.resolve()
+
+    if a.estado:
+        est = estado(root, a.docs)
+        print(f"[orquestar] {est[0]}: " + " ".join(str(x) for x in est[1:] if x))
+        return 0
+    if a.parar:
+        if pid_vivo(root):
+            excluir(root)
+            (root / PARADA).touch()
+            print("[orquestar] parará al terminar el paso en curso.")
+        else:
+            (root / PID).unlink(missing_ok=True)
+            (root / PARADA).unlink(missing_ok=True)
+            print("[orquestar] no hay ningún bucle en marcha.")
+        return 0
+    if a.agentes:
+        print(informe_agentes(root))
+        return 0
+    if a.metricas is not None:
+        alcance = a.version_filtro or a.metricas
+        return metricas.mostrar(root, backlog(root), alcance, a.csv, sys.stdout)
+    if a.verificar:
+        return verificar(root, a.verificar)
     if a.preguntas:
         print(intervencion.consulta(root))
         return 0
-    if a.responder:
-        print(responder_pregunta_local(root, *a.responder))
-        return 0
     if a.preguntar:
-        q = solicitar_intervencion(
-            root,
-            *a.preguntar,
-            contexto=a.contexto,
-            paso=os.environ.get("ORQUESTAR_PASO", ""),
-            base_commit=os.environ.get("ORQUESTAR_BASE"),
+        qid = intervencion.solicitar(
+            root, _proxy_motor(), a.preguntar[0], a.preguntar[1], git("branch", "--show-current", cwd=root)
         )
-        print(f"Intervención registrada: {q['id']}; termina el paso.")
+        ficha = fichero_de(root, a.preguntar[0])
+        if ficha and (root / ".git").exists():
+            subprocess.run(["git", "add", str(ficha.relative_to(root))], cwd=root, env=_git_env(), check=False)
+            subprocess.run(
+                ["git", "commit", "-qm", f"docs(plan): bloquear {a.preguntar[0]} por pregunta {qid}"],
+                cwd=root,
+                env=_git_env(),
+                check=False,
+            )
+        print(f"[orquestar] pregunta registrada ({qid}) para {a.preguntar[0]}.")
         return 0
-    if a.enrutar_hallazgo:
-        iid, destino = a.enrutar_hallazgo
-        q = enrutar_hallazgo(root, iid, destino, contexto=a.contexto, base_commit=os.environ.get("ORQUESTAR_BASE"))
-        if q:
-            print(f"Intervención registrada: {q['id']}; termina el paso.")
-        else:
-            print(f"Hallazgo de Hades enrutado a {destino}; termina el paso.")
+    if a.responder:
+        msg = responder_pregunta(root, "cli", f"{a.responder[0]} {a.responder[1]}")
+        print(msg)
         return 0
-
-    if a.cuota_reset is not None:
-        print(f"[orquestar] {reset_cuotas(root, a.cuota_reset)} marcas de cuota recuperadas.")
-        return 0
-
-    if a.calidad:
-        if not a.base:
-            ap.error("--calidad requiere --base con la base Git estable de la tarea")
-        spec = importlib.util.spec_from_file_location("adevv_calidad", SKILL.with_name("calidad.py"))
-        modulo = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(modulo)
-        return modulo.ejecutar(root, a.base, a.aplicar, verificar)
-    if a.base is not None or a.aplicar:
-        ap.error("--base y --aplicar requieren --calidad")
-
-    if a.agentes:
-        print(informe_agentes(root, a.docs))
-        return 0
-
-    if a.recuperar_metricas:
-        excluir(root)
-        try:
-            copia = metricas.recuperar(root)
-        except OSError as error:
-            ap.error(str(error))
-        print(f"Métricas recuperadas. Copia del original en {copia}" if copia else "Registro sin líneas inválidas.")
-        return 0
-
-    if a.metricas is not None:
-        spec = importlib.util.spec_from_file_location("adevv_metricas", SKILL.with_name("metricas.py"))
-        modulo = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(modulo)
-        try:
-            return modulo.mostrar(root, backlog(root), a.version_filtro or a.metricas, a.csv, sys.stdout)
-        except (ValueError, OSError) as error:
-            ap.error(str(error))
-    if a.csv is not None or a.version_filtro is not None:
-        ap.error("--csv y --version-filtro requieren --metricas / --metrics.")
-
     if a.agente:
-        if a.revision:
-            os.environ["ORQUESTAR_REVISION"] = a.revision
-        borrar_prompt_file = False
-        ruta_prompt_file = None
-        prompt = None
-        if a.prompt is not None:
-            prompt = a.prompt
-        elif a.prompt_file is not None:
-            ruta_prompt_file = (root / a.prompt_file).resolve()
-            if not ruta_prompt_file.exists():
-                sys.exit(f"No existe el fichero de prompt: {a.prompt_file}")
-            prompt = ruta_prompt_file.read_text(encoding="utf-8")
-            if ruta_prompt_file.parent == root.resolve() and not es_fichero_rastreado_git(root, ruta_prompt_file):
-                borrar_prompt_file = True
-        else:
-            prompt = sys.stdin.read()
-
-        try:
-            if not prompt or not prompt.strip():
-                sys.exit("Falta el mandato: --prompt, --prompt-file o entrada estándar.")
-            if borrar_prompt_file:
-                return agente(root, a.agente, prompt, mandato_temporal=ruta_prompt_file.name)
-            return agente(root, a.agente, prompt)
-        finally:
-            if borrar_prompt_file and ruta_prompt_file and ruta_prompt_file.exists():
-                try:
-                    ruta_prompt_file.unlink()
-                except OSError:
-                    pass
-    if a.verificar:
-        cmd = suite(root, a) if a.verificar == "suite" else a.verificar
-        if not cmd:
-            sys.exit("Sin suite: usa --test o define validation.command en task_config.yaml.")
-        return verificar(root, cmd)
-    if a.aviso_prueba:
-        if not telegram(root):
-            sys.exit(
-                "Telegram sin configurar: define TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_USER_IDS "
-                f'(y que "telegram" no sea false en {CONFIG}).'
-            )
-        ok = avisar(root, None, "🔔 Aviso de prueba del orquestador.")
-        print("[orquestar] aviso enviado" if ok else "[orquestar] el aviso no se pudo enviar")
-        return 0 if ok else 1
-    if a.parar:
-        vivo = pid_vivo(root)
-        if not vivo:
-            (root / PID).unlink(missing_ok=True)
-            (root / PARADA).unlink(missing_ok=True)
-            print("[orquestar] no hay ningún bucle en marcha")
-            return 0
-        excluir(root)
-        (root / PARADA).touch()
-        print("[orquestar] parará al terminar el paso en curso")
-        return 0
-    a.recarga = recibir_recarga(root, PID, __file__)
-    if a.recarga is None and not a.estado and not a.parar and not a.verificar and not a.agente and not a.aviso_prueba:
-        validar_lanzamiento_bucle(root, a)
+        texto = a.prompt or (a.prompt_file.read_text(encoding="utf-8") if a.prompt_file else sys.stdin.read())
+        return agente(root, a.agente, texto)
     if a.fondo:
-        return en_fondo(root)
-    if a.estado:
-        resumen(root)
-    elif a.recarga is not None:
-        pass
-    elif vivo := pid_vivo(root):
-        if vivo != os.getpid():
-            sys.exit(f"Ya hay un bucle en marcha (pid {vivo}). Si no es así, borra {PID}.")
-    else:
-        excluir(root)
-        publicar_pid(root, os.getpid())
-    try:
-        return bucle(a, root)
-    finally:
-        if not a.estado and es_propietario_pid(root):
-            for f in (PID, PARADA, ESPERA):
-                (root / f).unlink(missing_ok=True)
+        return en_fondo(root, raw_args)
 
-
-def cierre_de_version(e):
-    """La versión abierta no tiene más tareas elegibles: toca la suite completa."""
-    return (e[0] == "PASO" and e[1] == "revisar-version") or (e[0] == "PARAR" and e[1].startswith(FIN_VERSION))
-
-
-def esperar_llamada(root, resultado, contexto=None):
-    """Notifica y registra la espera de cualquier llamada con el mismo contrato."""
-    cuota = resultado.espera_s
-    clave = (resultado.perfil.get("harness"), resultado.perfil.get("model") or "predeterminado")
-    marca = marcas_cuota(root, fecha_estado(ahora())).get(clave)
-    if not (marca and marca["origen"] == "sin créditos" and marca["hasta"] > fecha_estado(ahora())):
-        avisar(
-            root,
-            "cuota",
-            f'⏳ Sin cuota en {clave[0]}/{clave[1]} para "{resultado.paso}" '
-            f"{resultado.trabajo}: espero hasta las {datetime.now() + timedelta(seconds=cuota):%H:%M} y reintento.",
-        )
-    inicio = time.monotonic()
-    seguir = esperar(root, cuota, cuotas_esperadas=contexto)
-    registrar(
+    return bucle(
         root,
-        {
-            "tipo": "espera",
-            "fecha": ahora(),
-            "paso": resultado.paso,
-            "id": resultado.trabajo,
-            "invocacion": resultado.invocacion,
-            "duracion_s": round(time.monotonic() - inicio),
-        },
+        docs=a.docs,
+        test_cmd=a.test,
+        max_pasos=a.max_pasos,
+        reintentos=a.reintentos,
+        espera_max=a.espera_max,
+        cmd_override=a.cmd,
     )
-    return seguir
-
-
-def bucle(a, root):
-    _gateway_aviso_entorno.discard(str(Path(root).resolve()))
-    if not a.estado:
-        iniciar_gateway(root)
-    if a.idea and not (root / a.docs / "requirements.md").exists():
-        (root / a.docs).mkdir(parents=True, exist_ok=True)
-        (root / a.docs / "requirements.md").write_text(a.idea + "\n", encoding="utf-8")
-
-    cmd_suite = suite(root, a)
-    recarga = getattr(a, "recarga", None) or {}
-    sin_progreso = recarga.get("sin_progreso", 0)
-    esperado = recarga.get("esperado", 0)
-    intentos_dependencias = {tuple(r["errores"]): r["n"] for r in recarga.get("intentos_dependencias", [])}
-    recuperaciones_analisis = {(r["paso"], r["arg"]): r for r in recarga.get("recuperaciones_analisis", [])}
-    intentos_revision = {(p, i): n for p, i, n in recarga.get("intentos_revision", [])}
-    for n in range(recarga.get("n", 1), a.max_pasos + 1):
-        if (root / PARADA).exists():
-            print("\n[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.", flush=True)
-            return 2
-        if not a.estado and recargar_version(
-            __file__,
-            root,
-            PID,
-            {
-                "n": n,
-                "sin_progreso": sin_progreso,
-                "esperado": esperado,
-                "recuperaciones_analisis": list(recuperaciones_analisis.values()),
-                **(
-                    {"intentos_revision": [[p, i, n] for (p, i), n in intentos_revision.items()]}
-                    if intentos_revision
-                    else {}
-                ),
-                "intentos_dependencias": [{"errores": list(k), "n": v} for k, v in intentos_dependencias.items()],
-            },
-            "orquestar",
-        ):
-            return 0
-        if not a.estado:
-            renovar_intentos_de_respuestas(incorporar_respuestas(root), intentos_revision, recuperaciones_analisis)
-            for iid, titulo in ingerir(root):
-                print(f"[orquestar] alta desde Telegram: {iid} {titulo}", flush=True)
-                avisar(root, None, f"📝 Registrada {iid}: {titulo} (backlog, sin versión).")
-        e = estado(root, a.docs)
-        print(f"\n[orquestar] {n}. {e[0]}: " + " ".join(str(x) for x in e[1:] if x), flush=True)
-        if not a.estado and e[:2] == ("PASO", "diagnosticar-suite"):
-            if git("branch", "--show-current") != e[3] and not cambiar_de_rama(root, e[3]):
-                return parar(root, "error", f"no puedo cambiar a {e[3]}.")
-            try:
-                _, motivo = aplicar_diagnostico_suite(root, fichero_de(root, e[2]))
-            except diagnostico_suite.DiagnosticoPendiente as exc:
-                if exc.resultado and exc.resultado.espera_s is not None:
-                    if llamadas.recuperacion(exc.resultado, esperado=esperado, limite=a.espera_max * 3600) == "esperar":
-                        esperado += exc.resultado.espera_s
-                        if esperar_llamada(root, exc.resultado):
-                            continue
-                        return 2
-                    return parar(
-                        root,
-                        "cuota",
-                        f"{e[2]}: diagnóstico pendiente de cuota de "
-                        f"{exc.resultado.perfil}. La solicitud se conserva al relanzar.",
-                    )
-                return parar(root, "error", f"{e[2]}: diagnóstico pendiente. {exc}")
-            if motivo:
-                return parar(root, "version", motivo)
-            e = estado(root, a.docs)
-        espera_humana = e[0] == "PARAR" and "Bloqueo de tarea;" in e[1]
-        if not a.estado and cmd_suite and cierre_de_version(e) and not espera_humana:
-            version = e[2] if e[0] == "PASO" else re.search(r"\bv\d+\.\d+(?:\.\d+)?", e[1])[0]
-            rama_cierre = (
-                e[3]
-                if e[0] == "PASO"
-                else next((rama for rama in ramas_abiertas() if vkey(rama.split("/")[1]) == vkey(version)), None)
-            )
-            if not rama_cierre:
-                return parar(root, "error", f"no encuentro la rama de cierre de {version}.")
-            if rama_cierre and git("branch", "--show-current") != rama_cierre:
-                if not cambiar_de_rama(root, rama_cierre):
-                    return parar(root, "error", f"no puedo cambiar a {rama_cierre}.")
-            if verificar(root, cmd_suite):
-                try:
-                    iid, motivo = registrar_fallo_suite(root, version, cmd_suite)
-                except diagnostico_suite.DiagnosticoPendiente as exc:
-                    if exc.resultado and exc.resultado.espera_s is not None:
-                        if (
-                            llamadas.recuperacion(exc.resultado, esperado=esperado, limite=a.espera_max * 3600)
-                            == "esperar"
-                        ):
-                            esperado += exc.resultado.espera_s
-                            if esperar_llamada(root, exc.resultado):
-                                continue
-                            return 2
-                        return parar(
-                            root,
-                            "cuota",
-                            f"Diagnóstico de la suite pendiente de cuota: "
-                            f"{exc.resultado.perfil}. La solicitud se conserva al relanzar.",
-                        )
-                    return parar(root, "error", f"Diagnóstico de la suite pendiente. {exc}")
-                if motivo:
-                    return parar(root, "version", motivo)
-                e = estado(root, a.docs)
-        if a.estado:
-            return 0 if e[0] in ("FIN", "PASO") else 2
-        if e[0] == "FIN":
-            avisar(root, "version", f"✅ Producto terminado: {e[1]}")
-            return 0
-        if e[0] == "PARAR":
-            if espera_humana:
-                if a.espera_max > 0 and (respuestas := esperar_intervencion(root)):
-                    renovar_intentos_de_respuestas(respuestas, intentos_revision, recuperaciones_analisis)
-                    continue
-                return 2
-            return parar(root, evento_de(e), e[1])
-        _, paso, arg, rama = e
-        if rama and git("branch", "--show-current") != rama:
-            if not cambiar_de_rama(root, rama):
-                return parar(root, "error", f"no puedo cambiar a {rama}.")
-
-        dif = dificultad_de(root, arg) if arg else None
-        fijado, estricto = perfil_fijado_de(root, arg, "artemisa") if arg else (None, False)
-        estricto = bool(fijado and estricto)
-        if paso in ("task-dev", "bug-fix") and arg and estricto:
-            motivo = agotado_estricto(root, arg)
-            if motivo:
-                print(f"[orquestar] {arg}: {motivo} con el perfil fijado estricto; no cambio de modelo.", flush=True)
-                registrar(
-                    root,
-                    {"tipo": "promocion", "fecha": ahora(), "id": arg, "de": dif, "dificultad": dif, "estricto": True},
-                )
-                if not bloquear_sin_progreso(
-                    root,
-                    arg,
-                    0,
-                    "",
-                    causa=(
-                        f"{arg} bloqueada para el humano: {motivo} con el perfil fijado estricto, que impide "
-                        "subir de dificultad o escalar a otro modelo"
-                    ),
-                ):
-                    return parar(root, "error", f"no puedo limpiar el árbol tras bloquear {arg}.")
-                continue
-        if paso in ("task-dev", "bug-fix") and arg and not estricto:
-            debe, motivo = comprobar_promocion(root, arg)
-            if debe:
-                nueva_dif = promover_dificultad(root, arg, motivo=motivo)
-                if nueva_dif:
-                    dif = nueva_dif
-        if intervencion.restaurar(root, SimpleNamespace(**globals()), arg) is False:
-            return parar(root, "error", f"{arg}: WIP pendiente; guarda el trabajo local ajeno y reintenta.")
-        if rama and arg and decision_item.restaurar_wip(root, rama, arg) is False:
-            return parar(root, "error", f"{arg}: WIP técnico pendiente; guarda el trabajo local ajeno y reintenta.")
-        antes = firma(root, a.docs, paso, arg)
-        rol, cfg_rol = rol_de(root, paso, dificultad=dif, iid=arg)
-        escalado = False
-        if paso not in PASOS_ANALISIS:
-            cfg_rol, escalado = escalada(root, rol, cfg_rol, arg)
-        if escalado:
-            cfg_rol = {k: v for k, v in cfg_rol.items() if k != "fijado"}
-            print(
-                f"[orquestar] {arg}: {rechazos(root, arg)} rechazos seguidos de Hades; "
-                f"escalo a {cfg_rol.get('model') or cfg_rol.get('harness')}",
-                flush=True,
-            )
-        clave_analisis = (paso, arg or "")
-        recuperacion = None
-        if paso in PASOS_ANALISIS:
-            if clave_analisis not in recuperaciones_analisis:
-                recuperaciones_analisis[clave_analisis] = {
-                    "paso": paso,
-                    "arg": arg or "",
-                    "indice": 0,
-                    "intentos": 0,
-                    "perfiles": cadena_analisis(root, paso, dif, arg),
-                }
-            recuperacion = recuperaciones_analisis[clave_analisis]
-            cfg_rol = recuperacion["perfiles"][recuperacion["indice"]]
-        prompt = construir_prompt_paso(root, paso, arg)
-        encargo = intervencion_de_cierre(root, arg)[0] if paso == "bug-fix" else None
-        if encargo:
-            prompt += (
-                f"\nIntervención técnica asignada a Artemisa. Solicitud {encargo[0]}.\n{encargo[1]}\n"
-                "Ejecuta esta investigación con el WIP y la evidencia conservados. Si el impedimento "
-                "persiste, registra el resultado y conserva el bloqueo técnico. Solo devuelve el bug a "
-                "planned cuando acredites la condición de salida. Conserva el rechazo hasta su revisión."
-            )
-        env = {
-            **os.environ,
-            "ORQUESTAR_PASO": paso,
-            "ORQUESTAR_ID": arg or "",
-            "ORQUESTAR_BASE": git("rev-parse", "HEAD"),
-        }
-        llamada_padre = uuid.uuid4().hex
-        objetivo_paso = hashlib.sha256(json.dumps([paso, arg, rama]).encode()).hexdigest()
-        gitdir = Path(git("rev-parse", "--absolute-git-dir"))
-        if not gitdir.is_absolute():
-            gitdir = root / ".git"
-        almacen_llamadas = gitdir / "adevv-llamadas" / objetivo_paso
-        env.update(ORQUESTAR_LLAMADA=llamada_padre, ORQUESTAR_CANAL=str(almacen_llamadas.resolve()))
-        env.pop("ORQUESTAR_REVISION", None)
-        env.pop("ORQUESTAR_ENTRADAS", None)
-        if rama and arg:
-            _, entradas_previas = decision_item.contexto_prompt(root, rama, arg)
-            if entradas_previas:
-                env["ORQUESTAR_ENTRADAS"] = entradas_previas
-        env.pop("ORQUESTAR_ESCALADA", None)
-        if escalado:
-            env["ORQUESTAR_ESCALADA"] = "1"
-        args_paso = a
-        if a.harness and not a.cmd:
-            args_paso = copy.copy(a)
-            args_paso.harness = None
-            if a.harness != cfg_rol.get("harness", "claude"):
-                cfg_rol = {k: v for k, v in cfg_rol.items() if k not in ("model", "effort")}
-            cfg_rol = {**cfg_rol, "harness": a.harness}
-        reservas = lista_reservas(cfg_rol)
-        configs_originales = [cfg_rol] + reservas
-        contexto_cuota = {
-            "desde": len(leer_metricas(root)),
-            "pares": {
-                (cfg.get("harness", "claude"), cfg.get("model") or "predeterminado") for cfg in configs_originales
-            },
-        }
-        configs_a_probar = configs_originales
-        if not args_paso.cmd and not args_paso.harness:
-            configs_a_probar = configuraciones_con_cuota(root, configs_a_probar)
-        cede = "sin cuota" if cfg_rol.get("fijado") and configs_a_probar and configs_a_probar[0] is not cfg_rol else ""
-        ausencia_fijada = False
-        cuotas_paso = []
-        recuperaciones_paso = []
-        sesion_anterior = None
-        arnes_anterior = None
-        codigo = 1
-        m = {}
-        salida = ""
-        cuota = None
-        cuota_agente = None
-        cfg_usada = cfg_rol
-        hubo_ejecucion = False
-        pendiente_cuota = False
-        paso_completado = False
-        ultimo_registrado = False
-        revision_pendiente = False
-
-        for idx_cfg, cfg_actual in enumerate(configs_a_probar):
-            arnes_paso = args_paso.cmd or arnes(args_paso, cfg_actual)
-            if idx_cfg == 0:
-                nueva_sesion = (
-                    recuperacion and recuperacion["indice"] > 0 and not recuperacion.get("perfil_iniciado", False)
-                )
-                sesion_paso = None if nueva_sesion else buscar_sesion_paso(root, paso, arg, arnes_paso)
-            elif arnes_paso == arnes_anterior:
-                sesion_paso = sesion_anterior
-            else:
-                sesion_paso = None
-
-            ausente = False
-            for intento in range(getattr(a, "reintentos_arnes", 3) + 1):
-                if (root / PARADA).exists():
-                    return 2
-                n_met = len(leer_metricas(root))
-                try:
-                    if recuperacion is not None:
-                        recuperacion["perfil_iniciado"] = True
-                    if sesion_paso:
-                        resultado = ejecutar(args_paso, root, prompt, env=env, rol=cfg_actual, sesion=sesion_paso)
-                    else:
-                        resultado = ejecutar(args_paso, root, prompt, env=env, rol=cfg_actual)
-                except ArnesAusente:
-                    posicion = next(i for i, c in enumerate(configs_originales) if c is cfg_actual)
-                    registrar_ausencia(
-                        root, "paso", posicion, {**cfg_actual, "harness": arnes_paso}, rol=rol, paso=paso, id=arg
-                    )
-                    if cfg_actual is cfg_rol and cfg_rol.get("fijado"):
-                        ausencia_fijada = True
-                        cede = "sin arnés"
-                    ausente = True
-                    break
-                codigo, m, salida = resultado
-                if paso in ("task-dev", "bug-fix") and arg and not codigo:
-                    validar_puerta_delta(root, arg, env["ORQUESTAR_BASE"])
-                if paso in DESARROLLO:
-                    head = git("rev-parse", "HEAD")
-                    if head and head != env["ORQUESTAR_BASE"]:
-                        m["commit_producto"] = head
-                intervencion.notificar_reanudacion(root, SimpleNamespace(**globals()), arg)
-                intervencion.detectar_bloqueo(root, SimpleNamespace(**globals()), arg, env["ORQUESTAR_BASE"], salida)
-                if cede and cfg_actual is not cfg_rol:
-                    avisar_perfil(root, arg, cfg_rol, cede, cfg_actual)
-                    cede = ""
-                ultimo_registrado = False
-                hubo_ejecucion = True
-                pendiente_cuota = False
-                cfg_usada = cfg_actual
-                cuota = espera_cuota(salida) if codigo else None
-                cuota_agente = None
-                revision_pendiente = False
-                if cuota is None:
-                    nuevas, _ = nuevas_metricas(root, n_met)
-                    revision_pendiente = revision_sin_dictamen(nuevas, paso, arg)
-                    if revision_pendiente:
-                        m["revision_pendiente"] = True
-                    cuota_agente = cuota_agente_pendiente(nuevas)
-                    entregas = llamadas.leer(almacen_llamadas)
-                    if entregas:
-                        recibidas = {r.invocacion for r in entregas}
-                        legacy = [f for f in nuevas if f.get("invocacion") not in recibidas]
-                        faltantes = llamadas.pendientes(entregas + llamadas.desde_metricas(legacy))
-                        revision_pendiente = any(r.espera_s is None for r in faltantes)
-                        m.pop("revision_pendiente", None)
-                        if revision_pendiente:
-                            m["revision_pendiente"] = True
-                        cuotas = [r for r in faltantes if r.espera_s is not None]
-                        cuota_agente = None
-                        if cuotas:
-                            pendiente = min(cuotas, key=lambda r: r.restante)
-                            if not pendiente.objetivo or not pendiente.entradas:
-                                m["correlacion_desconocida"] = True
-                            cuota_agente = {
-                                "rol": pendiente.rol,
-                                "arnes": pendiente.perfil.get("harness"),
-                                "modelo_cuota": pendiente.perfil.get("model"),
-                                "espera_s": pendiente.restante,
-                                "invocacion": pendiente.invocacion,
-                            }
-                    elif cuota_agente is not None:
-                        m["correlacion_desconocida"] = True
-                    if cuota_agente is not None:
-                        if cierre_revisado(root, paso, arg, env["ORQUESTAR_BASE"]):
-                            paso_completado = True
-                            cuota_agente = None
-                        else:
-                            cuota = cuota_agente.get("espera_s", 1800)
-                if (
-                    codigo
-                    and cuota is None
-                    and not paso_completado
-                    and cierre_tras_error(root, a.docs, paso, arg, env["ORQUESTAR_BASE"], antes)
-                ):
-                    paso_completado = True
-                    cuota = cuota_agente = None
-                if not codigo or cuota is not None or paso_completado:
-                    break
-                if intento == getattr(a, "reintentos_arnes", 3):
-                    break
-                registrar(
-                    root,
-                    {
-                        "fecha": ahora(),
-                        "paso": paso,
-                        "id": arg,
-                        "rama": git("branch", "--show-current"),
-                        "rol": rol,
-                        "arnes": arnes_paso,
-                        "modelo": cfg_actual.get("model") or "predeterminado",
-                        "codigo": codigo,
-                        **m,
-                        **marca_fijado(cfg_actual),
-                        **({"dificultad": dif} if dif else {}),
-                        **({"escalado": True} if escalado else {}),
-                    },
-                )
-                demora = (60, 300, 900)[min(intento, 2)]
-                inicio = time.monotonic()
-                seguir = esperar(root, demora, motivo="fallo del arnés")
-                registrar(
-                    root,
-                    {
-                        "tipo": "espera",
-                        "fecha": ahora(),
-                        "paso": paso,
-                        "id": arg,
-                        "motivo": "fallo_arnes",
-                        "duracion_s": round(time.monotonic() - inicio),
-                    },
-                )
-                if not seguir:
-                    print("[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.", flush=True)
-                    return 2
-                sesion_paso = None
-            if ausente:
-                continue
-
-            if codigo and cuota is None and not paso_completado and idx_cfg == len(configs_a_probar) - 1:
-                restante, recuperada = cuota_descartada(
-                    root, configs_originales, configs_a_probar, incluir_recuperadas=True
-                )
-                if restante == 0:
-                    configs_a_probar.append(recuperada)
-            cuota_propia = espera_cuota(salida) if codigo else None
-            hay_mas_reservas = idx_cfg < len(configs_a_probar) - 1
-            resultado_perfil = llamadas.Resultado(
-                llamada_padre,
-                arg,
-                paso,
-                rol,
-                llamadas.estado(codigo, cuota=cuota_propia),
-                codigo,
-                espera_s=cuota_propia,
-            )
-            recuperar_perfil = llamadas.recuperacion(resultado_perfil, hay_reserva=hay_mas_reservas)
-
-            if codigo and cuota_propia is not None and not paso_completado:
-                datos = fallo_cuota(root, arnes_paso, cfg_actual.get("model") or "predeterminado", salida)
-                m.update(datos)
-                cuota_propia = datos["cuota_espera_s"]
-                cuotas_paso.append(cuota_propia)
-                recuperaciones_paso.append((time.monotonic() + cuota_propia, cfg_actual))
-                if recuperar_perfil == "reserva":
-                    registrar(
-                        root,
-                        {
-                            "fecha": ahora(),
-                            "paso": paso,
-                            "id": arg,
-                            "rama": git("branch", "--show-current"),
-                            "rol": rol,
-                            "arnes": arnes_paso,
-                            "modelo": cfg_actual.get("model") or "predeterminado",
-                            "codigo": codigo,
-                            **m,
-                            **marca_fijado(cfg_actual),
-                            **({"dificultad": dif} if dif else {}),
-                            **({"escalado": True} if escalado else {}),
-                            "sin_cuota": True,
-                        },
-                    )
-                    print(
-                        f"[orquestar] sin cuota en {rol} ({cfg_actual.get('model') or arnes_paso}); "
-                        f"conmutando a reserva...",
-                        flush=True,
-                    )
-                    if cfg_actual is cfg_rol and cfg_rol.get("fijado"):
-                        cede = "sin cuota"
-                    arnes_anterior = arnes_paso
-                    sesion_anterior = m.get("sesion")
-                    pendiente_cuota = True
-                    continue
-                else:
-                    cuota = min(cuotas_paso)
-                    break
-            elif codigo and cuota is None and not paso_completado and recuperar_perfil == "reserva":
-                registrar(
-                    root,
-                    {
-                        "fecha": ahora(),
-                        "paso": paso,
-                        "id": arg,
-                        "rama": git("branch", "--show-current"),
-                        "rol": rol,
-                        "arnes": arnes_paso,
-                        "modelo": cfg_actual.get("model") or "predeterminado",
-                        "codigo": codigo,
-                        **m,
-                        **marca_fijado(cfg_actual),
-                        **({"dificultad": dif} if dif else {}),
-                        **({"escalado": True} if escalado else {}),
-                    },
-                )
-                ultimo_registrado = True
-                print(
-                    f"[orquestar] fallo persistente en {rol} ({cfg_actual.get('model') or arnes_paso}); "
-                    "conmutando a reserva...",
-                    flush=True,
-                )
-                arnes_anterior = None
-                sesion_anterior = None
-                continue
-            else:
-                break
-
-        if not hubo_ejecucion and ausencia_fijada and cfg_rol.get("estricto"):
-            motivo = (
-                f"perfil fijado estricto {clave_perfil(cfg_rol)}: el arnés "
-                f'"{cfg_rol.get("harness") or "claude"}" no está disponible y no se cambia de modelo'
-            )
-            print(f"[orquestar] {arg}: {motivo}", flush=True)
-            if not bloquear_sin_progreso(root, arg, 0, "", causa=f"{arg} bloqueada para el humano: {motivo}"):
-                return parar(root, "error", f"no puedo limpiar el árbol tras bloquear {arg}.")
-            continue
-        if not hubo_ejecucion:
-            cuota, cfg_omitida = cuota_descartada(root, [cfg_rol] + reservas, configs_a_probar)
-            if cuota is None:
-                return parar(root, "error", f"{paso}: ningún arnés disponible en el principal ni en las reservas.")
-            cfg_usada = cfg_omitida
-            m = {"modelos": {}}
-        if pendiente_cuota:
-            cuota = min(cuotas_paso)
-            m = {}
-        if codigo and cuota_agente is None and not paso_completado and (cuota is None or cuotas_paso):
-            cuota_omitida, cfg_omitida = cuota_descartada(root, configs_originales, configs_a_probar)
-            pendientes = [(max(hasta - time.monotonic(), 0), cfg) for hasta, cfg in recuperaciones_paso]
-            if cuota_omitida is not None:
-                pendientes.append((cuota_omitida, cfg_omitida))
-            if pendientes:
-                cuota, cfg_recuperable = min(pendientes, key=lambda par: par[0])
-                if cfg_recuperable is not cfg_usada:
-                    if not ultimo_registrado:
-                        registrar(
-                            root,
-                            {
-                                "fecha": ahora(),
-                                "paso": paso,
-                                "id": arg,
-                                "rama": git("branch", "--show-current"),
-                                "rol": rol,
-                                "arnes": args_paso.cmd or arnes(args_paso, cfg_usada),
-                                "modelo": cfg_usada.get("model") or "predeterminado",
-                                "codigo": codigo,
-                                **m,
-                                **marca_fijado(cfg_usada),
-                                **({"sin_cuota": True} if "cuota_espera_s" in m else {}),
-                                **({"escalado": True} if escalado else {}),
-                            },
-                        )
-                    cfg_usada = cfg_recuperable
-                    m = {"modelos": {}}
-        if not codigo:
-            recuperar_cuota(root, arnes(args_paso, cfg_usada), cfg_usada.get("model") or "predeterminado")
-        despues = firma(root, a.docs, paso, arg)
-        hubo_progreso = bool(paso_completado or (despues != antes))
-        transicion_item = (
-            decision_item.aplicar_post_paso(
-                root,
-                SimpleNamespace(**globals()),
-                intervencion,
-                paso,
-                arg,
-                rama,
-                env["ORQUESTAR_BASE"],
-                almacen_llamadas,
-                salida,
-            )
-            if hubo_ejecucion and not paso_completado
-            else None
-        )
-        if hubo_ejecucion and (Path(root) / ".git").exists() and (arg or paso):
-            tipo_ctx = "cuota" if cuota is not None else ("tecnico" if codigo else "trabajo")
-            try:
-                contexto_ejecucion.registrar_intento(
-                    root,
-                    arg or paso,
-                    progreso=hubo_progreso,
-                    tipo=tipo_ctx,
-                    duracion_s=m.get("duracion_s") or 0,
-                    invocacion=llamada_padre,
-                )
-            except ValueError:
-                pass
-        if hubo_progreso:
-            intentos_revision.pop(clave_analisis, None)
-        if not ultimo_registrado or cuota is not None:
-            if encargo and hubo_ejecucion and not codigo and cuota is None and not revision_pendiente:
-                m["intervencion_atendida"] = encargo[0]
-            registrar(
-                root,
-                {
-                    "fecha": ahora(),
-                    "paso": paso,
-                    "id": arg,
-                    "rama": git("branch", "--show-current"),
-                    "rol": rol,
-                    "arnes": args_paso.cmd or arnes(args_paso, cfg_usada),
-                    "modelo": cfg_usada.get("model") or "predeterminado",
-                    "codigo": codigo,
-                    **m,
-                    **({"dificultad": dif} if dif else {}),
-                    "progreso": hubo_progreso,
-                    **marca_fijado(cfg_usada),
-                    **({"escalado": True} if escalado else {}),
-                    **({"sin_cuota": True, "espera_s": cuota} if cuota and cuota_agente is None else {}),
-                    **(
-                        {
-                            "bloqueo_agente": {
-                                k: cuota_agente.get(k)
-                                for k in ("rol", "arnes", "modelo_cuota", "cuota_origen", "espera_s", "invocacion")
-                            }
-                        }
-                        if cuota_agente is not None
-                        else {}
-                    ),
-                },
-            )
-        resultado_paso = llamadas.Resultado(
-            llamada_padre,
-            arg,
-            paso,
-            rol,
-            llamadas.estado(0 if paso_completado else codigo, cuota=cuota, entrega=not revision_pendiente),
-            codigo,
-            perfil=cfg_usada,
-            espera_s=cuota,
-            salida=salida,
-        )
-        if cuota_agente is not None:
-            resultado_paso = llamadas.Resultado(
-                llamada_padre,
-                arg,
-                paso,
-                cuota_agente["rol"],
-                "espera_cuota",
-                codigo,
-                perfil={"harness": cuota_agente.get("arnes"), "model": cuota_agente.get("modelo_cuota")},
-                espera_s=cuota,
-                salida=salida,
-            )
-        llamadas.publicar(almacen_llamadas.parent / "pasos", resultado_paso)
-        if paso_completado:
-            print(f"[orquestar] paso completado en disco a pesar del retorno {codigo} del arnés; continúo.", flush=True)
-            sin_progreso = 0
-            esperado = 0
-            recuperaciones_analisis.pop(clave_analisis, None)
-            continue
-        if transicion_item and transicion_item.get("tipo") in ("humano", "asignacion", "aclaracion"):
-            if not codigo and cuota is None:
-                esperado = 0
-                if transicion_item.get("tipo") != "aclaracion":
-                    sin_progreso = 0
-                continue
-        if transicion_item and transicion_item.get("tipo") == "espera":
-            siguiente_e = estado(root, a.docs)
-            if siguiente_e[0] == "PASO" and siguiente_e[2] != arg:
-                esperado = 0
-                continue
-            if not codigo:
-                esperado = 0
-                continue
-        if llamadas.recuperacion(resultado_paso, esperado=esperado, limite=a.espera_max * 3600) == "esperar":
-            esperado += cuota
-            seguir = esperar_llamada(root, resultado_paso, contexto_cuota)
-            if not seguir:
-                print("[orquestar] PARAR: detenido a petición (--parar). Relanza para seguir.", flush=True)
-                return 2
-            continue
-        if codigo or cuota is not None:
-            motivo = (
-                f"sin cuota tras esperar {esperado // 3600} h (--espera-max)"
-                if cuota is not None
-                else "¿autenticación, red?"
-            )
-            if cuota is None and revision_pendiente:
-                motivo = f"{paso} {arg}: revisión técnica pendiente de Hades"
-            if cuota_agente is not None:
-                motivo += (
-                    f"; revisión pendiente de {cuota_agente.get('rol', 'agente')} en "
-                    f"{cuota_agente.get('arnes')}/{cuota_agente.get('modelo_cuota', 'predeterminado')}"
-                    f" ({cuota_agente.get('cuota_origen') or 'cuota agotada'})"
-                )
-                if m.get("correlacion_desconocida"):
-                    motivo += "; el historial no acredita el alcance de esa revisión"
-            elif cuota is not None and encargo:
-                motivo += (
-                    f"; intervención de {rol} pendiente para {paso} {arg} en "
-                    f"{arnes(args_paso, cfg_usada)}/{cfg_usada.get('model') or 'predeterminado'}"
-                )
-            return parar(
-                root,
-                "cuota" if cuota is not None else "error",
-                f"el arnés terminó con código {codigo or 1} ({motivo}). Relanza cuando se resuelva."
-                + (f"\nÚltima salida del arnés:\n{salida[-2000:]}" if cuota is None else ""),
-            )
-        esperado = 0
-        if encargo and m.get("intervencion_atendida"):
-            sin_progreso = 0
-            continue
-
-        if despues == antes:
-            if revision_pendiente:
-                intentos_revision[clave_analisis] = intentos_revision.get(clave_analisis, 0) + 1
-                if intentos_revision[clave_analisis] >= a.reintentos:
-                    return parar(
-                        root,
-                        "error",
-                        f"{paso} {arg or ''}: revisión técnica pendiente de Hades "
-                        f"tras {intentos_revision[clave_analisis]} intentos sin avance.",
-                    )
-                continue
-            if recuperacion is not None:
-                recuperacion["intentos"] += 1
-                print(
-                    f"[orquestar] {paso} {arg or ''}: sin progreso ({recuperacion['intentos']}/{a.reintentos})",
-                    flush=True,
-                )
-                if recuperacion["intentos"] >= a.reintentos:
-                    if recuperacion["indice"] + 1 < len(recuperacion["perfiles"]):
-                        recuperacion["indice"] += 1
-                        recuperacion["intentos"] = 0
-                        recuperacion["perfil_iniciado"] = False
-                    else:
-                        diagnostico = diagnostico_analisis(recuperacion, a.reintentos)
-                        if paso in ("especificar", "revisar-tarea") and arg:
-                            print(f"[orquestar] {diagnostico}", flush=True)
-                            if not bloquear_sin_progreso(root, arg, a.reintentos, salida, contexto=diagnostico):
-                                return parar(root, "error", f"no puedo limpiar el árbol tras bloquear {arg}.")
-                            recuperaciones_analisis.pop(clave_analisis, None)
-                        else:
-                            return parar(root, "error", diagnostico)
-                continue
-            sin_progreso += 1
-            print(f"[orquestar] sin progreso ({sin_progreso}/{a.reintentos})")
-            if sin_progreso >= a.reintentos:
-                if paso in ("task-dev", "bug-fix") and arg:
-                    dif_actual = dificultad_de(root, arg)
-                    if dif_actual in ("sencilla", "media") and not estricto:
-                        nueva_dif = promover_dificultad(root, arg, motivo=f"tras {sin_progreso} intentos sin progreso")
-                        if nueva_dif:
-                            sin_progreso = 0
-                            continue
-                    if not bloquear_sin_progreso(root, arg, sin_progreso, salida):
-                        return parar(root, "error", f"no puedo limpiar el árbol tras bloquear {arg}.")
-                    sin_progreso = 0
-                    continue
-                return parar(root, "error", f'"{paso}" no avanza tras {a.reintentos} intentos.')
-        else:
-            sin_progreso = 0
-            recuperaciones_analisis.pop(clave_analisis, None)
-            if paso == "calcular-dependencias":
-                errores = tuple(errores_dependencias(backlog(root)))
-                if not errores:
-                    intentos_dependencias.clear()
-                else:
-                    intentos_dependencias[errores] = intentos_dependencias.get(errores, 0) + 1
-                    if intentos_dependencias[errores] >= a.reintentos:
-                        return parar(
-                            root,
-                            "respuesta",
-                            "Dependencias inválidas en el backlog tras "
-                            f"{a.reintentos} intentos de corregirlas: " + "; ".join(errores),
-                        )
-    return parar(root, "error", f"alcanzado --max-pasos={a.max_pasos}.")
 
 
 if __name__ == "__main__":

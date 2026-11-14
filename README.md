@@ -166,31 +166,9 @@ Para migrar el propio repositorio fuente de Adevv (que utiliza una junction `.ag
 4. Relanzar el bucle con `adevv orquestar`.
 5. La copia congelada en `~/.adevv/congelado` solo debe borrarse cuando se confirme que ningún proceso ni arnés en el sistema la está utilizando.
 
-### Calidad por tarea
+### Orquestación ligera y calidad
 
-El triaje conserva una base Git estable. Las skills task-dev y bug-fix aplican el formato disponible y comprueban formato y lint del delta antes de cerrar; Hades comprueba sin escritura. Configuración, deducción conservadora y omisiones justificadas: [calidad del delta](skills/orquestar/SKILL.md#calidad-del-delta-en-cada-tarea). La suite completa sigue correspondiendo al cierre de versión.
-
-
-Los pasos del bucle recuperan errores de red o autenticación mediante `adevv orquestar --reintentos-arnes 3`: reintentos por perfil y después reservas, con diagnóstico si se agotan. Consulta las esperas y la parada cooperativa en [Orquestación](docs/orquestacion.md).
-
-
-Los pasos de análisis recuperan la falta de progreso por `(paso, argumento)`:
-prueban niveles superiores, escalada y reservas con el límite `--reintentos` por
-perfil. La recarga conserva sus intentos. Si se agotan, `especificar` y
-`revisar-tarea` bloquean solo la tarea y permiten continuar las independientes;
-los análisis globales paran indicando los perfiles probados. Véase
-[recuperación de análisis](skills/orquestar/SKILL.md#recuperación-de-análisis-sin-progreso).
-
-
-El cierre local, `/cerrar` por Telegram y la API de publicación exigen un informe
-formal `docs/review/code_reviews/<ID>-code-review.md` para cada tarea o bug maestro
-completado de la versión. Debe estar APROBADO, o N/A con motivo explícito de ausencia
-de código. Un informe ausente, vacío o RECHAZADO mantiene pendiente el cierre aunque
-las pruebas pasen. El diagnóstico enumera los IDs y pide reanudar `revisar-tarea`
-y volver a validar; si Hades agotó cuota, hay que recuperar su disponibilidad y
-obtener el informe. Recuperar cuota o emitir el informe no publica por sí solo.
-El selector y el cierre distinguen parches (`v1.1.1` y `v1.1.2`); `v1.1` equivale
-a `v1.1.0`. `/cerrar v1.1.2 confirmo` admite la rama hotfix o release correspondiente.
-Las métricas conservan su agrupación histórica por mayor y menor.
-
-Si el bucle diagnostica una línea dañada en `orquestar_metricas.jsonl`, ejecuta `adevv orquestar --recuperar-metricas` en la raíz del proyecto. El comando indica dónde guardó el original y recupera los registros válidos en su orden. [Consulta y exportación de métricas](skills/orquestar/SKILL.md#consulta-y-exportación-de-métricas)
+- **Política ágil por defecto**: el motor inyecta `PROJECT.md` (o `POLITICA_BASE` si no existe) y ejecuta comprobaciones deterministas rápidas tras cada paso (`git status` limpio y `ruff` en los `.py` modificados).
+- **Revisiones directas sin secretarios**: `revisar-plataforma`, `revisar-tarea` (exigida en superficies críticas o cuando existe informe rechazado) y `revisar-version` invocan directamente a Hades desde Python y registran el commit sin intermediarios.
+- **Caché de verificación por huella de producto**: `adevv orquestar --verificar "<cmd>"` y la suite de cierre de versión reutilizan la evidencia en verde mientras no cambien ficheros fuera de `docs/plan/` y `docs/review/`.
+- **Control de modelos, dificultad y cuotas**: `orchestration.json` configura arnés, modelo, esfuerzo, `niveles` (`sencilla`/`media`/`dificil`) y `reserva`, respetando `perfil` explícito en la ficha y registrando el consumo en `orquestar_metricas.jsonl` (`adevv metricas`, `adevv agentes`).

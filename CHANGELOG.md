@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.0] - 2026-11-14
+
+### Cambiado
+
+- **T-ADV-0042** — Reescrito desde cero el motor de orquestación (`skills/orquestar/orquestar.py`, `perfiles.py`, `intervencion.py`, `adevv/revisiones.py`, `adevv/contexto_ejecucion.py`) eliminando 42 archivos redundantes (~24.000 líneas retiradas frente a ~3.200 añadidas, incluidas 29 suites de test que se empaquetaban dentro de `skills/`): invocación directa a Hades desde Python sin «agentes secretarios» en `revisar-plataforma`, `revisar-tarea` y `revisar-version`, caché de verificación por `huella_producto` inmune a commits en `docs/plan/` y `docs/review/`, evaluación perezosa de detección de procesos en CLI/sincronizador (`adevv/cli.py`, `adevv/sync.py`), preservación íntegra de métricas (`orquestar_metricas.jsonl`), control de modelos/dificultad/perfiles/cuotas/reservas y reducción de la suite completa de `501s` a `~45s` (>11x más rápida; `test_orquestar.py` en `< 1s`).
+
 ## [1.2.0] - 2026-11-14
 
 ### Añadido
