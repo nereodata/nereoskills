@@ -34,6 +34,7 @@ from adevv.revisiones import (  # noqa: E402
     motivo_informe,
     motivo_revision,
     nombre_version,
+    pide_humano,
     registrar_evidencia,
 )
 from adevv import store as _adevv_store  # noqa: E402
@@ -1302,6 +1303,16 @@ def _comando_suite_version(root: Path, test_cli: str | None) -> str:
     return str(((cfg.get("validation") or {}).get("command") or "")).strip()
 
 
+def _siguiente_dificultad(actual: str) -> str | None:
+    """Devuelve el siguiente nivel de dificultad (`sencilla` -> `media` -> `dificil`) o None si ya es máximo."""
+    niveles = perfiles.NIVELES
+    try:
+        idx = niveles.index(actual)
+    except ValueError:
+        idx = 1
+    return niveles[idx + 1] if idx + 1 < len(niveles) else None
+
+
 def bucle(
     root: Path,
     docs: str = "docs/requirements",
@@ -1385,16 +1396,37 @@ def bucle(
                     fallos_par.pop((paso, arg), None)
                     continue
                 if res_rev == "RECHAZADO" and paso == "revisar-tarea" and arg:
-                    n = fallos_par.get(("rechazo", arg), 0) + 1
-                    fallos_par[("rechazo", arg)] = n
                     ficha = fichero_de(root, arg)
-                    if n > reintentos:
+                    rev_path = root / f"docs/review/code_reviews/{arg}-code-review.md"
+                    rev_txt = rev_path.read_text(encoding="utf-8", errors="replace") if rev_path.is_file() else ""
+                    if pide_humano(rev_txt):
                         intervencion._actualizar_estado_ficha(
-                            ficha, "blocked", "humano", f"Bloqueado tras {n} rechazos de Hades."
+                            ficha,
+                            "blocked",
+                            "humano",
+                            f"Hades solicitó intervención humana en {rev_path.relative_to(root).as_posix()}.",
                         )
-                        avisar(root, "bloqueo", f"{arg} bloqueada tras {n} rechazos de Hades.")
+                        avisar(root, "bloqueo", f"{arg} bloqueada: Hades solicitó intervención humana.")
+                        fallos_par.pop(("rechazo", arg), None)
                     else:
-                        intervencion._actualizar_estado_ficha(ficha, "in_progress")
+                        n = fallos_par.get(("rechazo", arg), 0) + 1
+                        fallos_par[("rechazo", arg)] = n
+                        nueva_dif = None
+                        nota = ""
+                        if n > reintentos:
+                            dif_actual = perfiles.dificultad_de(root, arg, fichero_de)
+                            nueva_dif = _siguiente_dificultad(dif_actual)
+                            fallos_par[("rechazo", arg)] = 0
+                            if nueva_dif:
+                                print(
+                                    f"[orquestar] {arg}: {n} rechazos de Hades; escalando dificultad {dif_actual} -> {nueva_dif}.",
+                                    flush=True,
+                                )
+                                nota = (
+                                    f"Dificultad escalada automáticamente ({dif_actual} -> {nueva_dif}) "
+                                    f"tras {n} rechazos de Hades."
+                                )
+                        intervencion._actualizar_estado_ficha(ficha, "in_progress", nota=nota, dificultad=nueva_dif)
                     if (root / ".git").exists() and ficha:
                         subprocess.run(
                             ["git", "add", str(ficha.relative_to(root))], cwd=root, env=_git_env(), check=False

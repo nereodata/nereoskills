@@ -232,17 +232,29 @@ class OrquestadorLigeroTests(unittest.TestCase):
         self.assertEqual(motor.metricas.mostrar(self.root, motor.backlog(self.root), "ultima", None, buf), 0)
         self.assertIn("T-DEM-0001", buf.getvalue())
 
-    def test_rechazo_hades_reabre_y_bloquea_tras_tope_reintentos(self):
-        self.tarea("T-DEM-0001", "completed")
+    def test_rechazo_hades_escala_dificultad_sin_bloquear_y_reintenta(self):
+        self.tarea("T-DEM-0001", "completed", dif="sencilla")
+        dificultades_dev = []
+        rechazos = 0
 
         def fake_invocar(root, rol, paso, iid, prompt, cmd_override=None):
+            nonlocal rechazos
             if paso == "revisar-tarea":
-                self.escribir(
-                    "docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** RECHAZADO\nFalta X.\n"
-                )
-                return 0, {"modelos": {}, "duracion_s": 2}, "RECHAZADO"
-            # Artemisa vuelve a marcar completed sin arreglar
-            self.tarea("T-DEM-0001", "completed")
+                rechazos += 1
+                if rechazos <= 5:
+                    self.escribir(
+                        "docs/review/code_reviews/T-DEM-0001-code-review.md",
+                        "**Veredicto:** RECHAZADO\n- 🔴 **CRÍTICO** (para: desarrollador): Falta X.\n",
+                    )
+                    return 0, {"modelos": {}, "duracion_s": 2}, "RECHAZADO"
+                self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
+                return 0, {"modelos": {}, "duracion_s": 2}, "APROBADO"
+            if paso == "revisar-version":
+                self.escribir("docs/review/versions/v0.1-arquitectura.md", "**Veredicto:** APROBADO\n")
+                return 0, {"modelos": {}, "duracion_s": 2}, "APROBADO"
+            dif_actual = motor.perfiles.dificultad_de(root, iid, motor.fichero_de)
+            dificultades_dev.append(dif_actual)
+            self.tarea("T-DEM-0001", "completed", dif=dif_actual)
             return 0, {"modelos": {}, "duracion_s": 2}, "Intento"
 
         with (
@@ -252,8 +264,40 @@ class OrquestadorLigeroTests(unittest.TestCase):
         ):
             rc = motor.bucle(self.root, reintentos=1, espera_max=0)
 
+        self.assertEqual(rc, 0)
+        fm = motor.frontmatter(motor.fichero_de(self.root, "T-DEM-0001"))
+        self.assertEqual(fm["status"], "completed")
+        self.assertEqual(fm["dificultad"], "dificil")
+        self.assertEqual(dificultades_dev, ["sencilla", "media", "media", "dificil", "dificil"])
+
+    def test_rechazo_hades_bloquea_si_pide_humano_explicitamente(self):
+        self.tarea("T-DEM-0001", "completed")
+
+        def fake_invocar(root, rol, paso, iid, prompt, cmd_override=None):
+            self.escribir(
+                "docs/review/code_reviews/T-DEM-0001-code-review.md",
+                "**Veredicto:** RECHAZADO\n- 🔴 **CRÍTICO** (para: humano): Falta credencial externa.\n",
+            )
+            return 0, {"modelos": {}, "duracion_s": 2}, "RECHAZADO"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=fake_invocar),
+            patch.object(motor, "avisar"),
+        ):
+            rc = motor.bucle(self.root, reintentos=2, espera_max=0)
+
         self.assertEqual(rc, 1)
-        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, "T-DEM-0001"))["status"], "blocked")
+        fm = motor.frontmatter(motor.fichero_de(self.root, "T-DEM-0001"))
+        self.assertEqual(fm["status"], "blocked")
+        self.assertEqual(fm["pendiente_de"], "humano")
+
+    def test_pide_humano_detecta_solo_solicitud_explicita(self):
+        self.assertTrue(motor.pide_humano("**Veredicto:** RECHAZADO\n- 🔴 (para: humano): Falta token.\n"))
+        self.assertTrue(motor.pide_humano("**para:** humano\n"))
+        self.assertFalse(motor.pide_humano("**Veredicto:** RECHAZADO\n- 🔴 (para: desarrollador): Falla test.\n"))
+        self.assertFalse(motor.pide_humano("para: desarrollador|especificador|humano\n"))
+        self.assertFalse(motor.pide_humano("```\npara: humano\n```\n"))
 
     def test_preguntas_y_respuestas_humanas(self):
         self.tarea("T-DEM-0001", "in_progress")

@@ -36,17 +36,27 @@ def revision(root: Path, motor, iid: str) -> Path:
     return Path(root) / "docs" / "review" / "versions" / f"{ver}-revision.md"
 
 
-def _actualizar_estado_ficha(ficha: Path, nuevo_status: str, pendiente_de: str | None = None, nota: str = "") -> None:
+def _actualizar_estado_ficha(
+    ficha: Path,
+    nuevo_status: str,
+    pendiente_de: str | None = None,
+    nota: str = "",
+    dificultad: str | None = None,
+) -> None:
     if not ficha or not ficha.is_file():
         return
     texto = ficha.read_text(encoding="utf-8")
     m = re.match(r"^(---\s*\n)(.*?)(\n---)(.*)$", texto, re.S)
     if not m:
         return
-    lineas = [l for l in m.group(2).splitlines() if not re.match(r"^(status|pendiente_de)\s*:", l)]
+    excluir = ("status", "pendiente_de", "dificultad") if dificultad else ("status", "pendiente_de")
+    patron = re.compile(rf"^({'|'.join(excluir)})\s*:")
+    lineas = [l for l in m.group(2).splitlines() if not patron.match(l)]
     lineas.append(f"status: {nuevo_status}")
     if pendiente_de:
         lineas.append(f"pendiente_de: {pendiente_de}")
+    if dificultad:
+        lineas.append(f"dificultad: {dificultad}")
     cuerpo = m.group(4)
     if nota:
         cuerpo = cuerpo.rstrip() + f"\n\n{nota.strip()}\n"
