@@ -153,6 +153,21 @@ def declaracion(texto):
     return veredicto, huella
 
 
+def pide_humano(texto):
+    """Indica si un informe de revisión solicita explícitamente intervención humana (`para: humano`)."""
+    en_cerco = False
+    for cruda in (texto or "").splitlines():
+        linea = cruda.strip()
+        if linea.startswith(("```", "~~~")):
+            en_cerco = not en_cerco
+            continue
+        if en_cerco or linea.startswith(">"):
+            continue
+        if re.search(r"(?:^|[\s(\[*`])(?:para|pendiente_de)\**\s*:\s*\**\s*`?humano`?\b", linea, re.I):
+            return True
+    return False
+
+
 def motivo_informe(path):
     """Valida el veredicto formal de un informe de revisión."""
     try:

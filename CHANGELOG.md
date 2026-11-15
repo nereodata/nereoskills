@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.2] - 2026-11-15
+
+### Corregido
+
+- **orquestar / Hades** — Eliminado el bloqueo automático por contador de rechazos en `revisar-tarea`: al superar `reintentos`, la ficha escala su `dificultad` (`sencilla` → `media` → `dificil`) y reintenta resolviendo los hallazgos; solo pasa a `blocked` (`pendiente_de: humano`) cuando Hades o el agente solicitan explícitamente intervención humana (`para: humano` o `--preguntar`).
+
 ## [1.3.1] - 2026-11-15
 
 ### Corregido
