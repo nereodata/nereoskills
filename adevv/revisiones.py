@@ -168,6 +168,114 @@ def pide_humano(texto):
     return False
 
 
+_SEVERIDAD_ICONOS = {"🔴": "critico", "🟠": "alta", "🟡": "media", "🔵": "baja"}
+
+
+def _clasificar_hallazgo(titulo: str, cuerpo: str, severidad: str = "") -> dict:
+    bloque = f"{titulo}\n{cuerpo}"
+    sev = severidad
+    if not sev:
+        for icono, nombre in _SEVERIDAD_ICONOS.items():
+            if icono in bloque:
+                sev = nombre
+                break
+    m_dest = re.search(r"(?:^|[\s(\[*`·])destino\**\s*:\s*\**\s*`?(resolver|registrar|descartar)`?\b", bloque, re.I | re.M)
+    destino = m_dest.group(1).lower() if m_dest else ""
+    m_para = re.search(
+        r"(?:^|[\s(\[*`·])(?:para|pendiente_de)\**\s*:\s*\**\s*`?(desarrollador|especificador|humano)`?\b",
+        bloque,
+        re.I | re.M,
+    )
+    para = m_para.group(1).lower() if m_para else ""
+    if destino == "registrar":
+        accion = "registrar"
+    elif destino == "descartar":
+        accion = "descartar"
+    elif para == "humano":
+        accion = "humano"
+    else:
+        accion = "resolver"
+    titulo_limpio = re.sub(r"^[🔴🟠🟡🔵\s]+", "", titulo).strip()
+    m_cod = re.match(r"^(H-\d+)\s*[·:\-—]\s*(.+)$", titulo_limpio)
+    codigo = m_cod.group(1) if m_cod else ""
+    if m_cod:
+        titulo_limpio = m_cod.group(2).strip()
+    return {
+        "codigo": codigo,
+        "titulo": titulo_limpio or titulo.strip(),
+        "severidad": sev,
+        "para": para,
+        "destino": destino,
+        "accion": accion,
+        "detalle": cuerpo.strip(),
+    }
+
+
+def extraer_hallazgos_version(texto: str) -> list[dict]:
+    """Extrae hallazgos estructurados (encabezados H-XX o viñetas con severidad/destino) de un informe."""
+    hallazgos: list[dict] = []
+    en_cerco = False
+    actual_titulo = ""
+    actual_lineas: list[str] = []
+    tiene_bloques = False
+
+    def _cerrar_bloque() -> None:
+        nonlocal actual_titulo, actual_lineas
+        if actual_titulo:
+            hallazgos.append(_clasificar_hallazgo(actual_titulo, "\n".join(actual_lineas)))
+        actual_titulo = ""
+        actual_lineas = []
+
+    for cruda in (texto or "").splitlines():
+        linea = cruda.strip()
+        if linea.startswith(("```", "~~~")):
+            en_cerco = not en_cerco
+            if actual_titulo:
+                actual_lineas.append(cruda)
+            continue
+        if en_cerco:
+            if actual_titulo:
+                actual_lineas.append(cruda)
+            continue
+        m_head = re.match(r"^#{2,4}\s+(.+)$", linea)
+        if m_head:
+            cab = m_head.group(1).strip()
+            if re.match(r"^(?:[🔴🟠🟡🔵]\s*)?H-\d+\b", cab) or any(ic in cab for ic in _SEVERIDAD_ICONOS):
+                _cerrar_bloque()
+                actual_titulo = cab
+                tiene_bloques = True
+                continue
+            _cerrar_bloque()
+            continue
+        if linea == "---":
+            _cerrar_bloque()
+            continue
+        if actual_titulo:
+            actual_lineas.append(cruda)
+
+    _cerrar_bloque()
+    if tiene_bloques:
+        return hallazgos
+
+    en_cerco = False
+    for cruda in (texto or "").splitlines():
+        linea = cruda.strip()
+        if linea.startswith(("```", "~~~")):
+            en_cerco = not en_cerco
+            continue
+        if en_cerco or linea.startswith(">"):
+            continue
+        if re.match(r"^[-*]\s+", linea) and (
+            any(ic in linea for ic in _SEVERIDAD_ICONOS)
+            or re.search(r"\b(?:destino|para)\s*:", linea, re.I)
+        ):
+            cuerpo = re.sub(r"^[-*]\s+", "", linea)
+            titulo = re.sub(r"\([^)]*\)\s*:?\s*", "", cuerpo).strip()
+            titulo = re.sub(r"^\*+|\*+$", "", titulo).strip()
+            hallazgos.append(_clasificar_hallazgo(titulo or cuerpo, cuerpo))
+    return hallazgos
+
+
 def motivo_informe(path):
     """Valida el veredicto formal de un informe de revisión."""
     try:

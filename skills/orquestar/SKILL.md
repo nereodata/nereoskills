@@ -25,6 +25,7 @@ description: Lleva un producto de la idea a su última tarea sin parar. Invocada
 | `start-version` | Ejecuta `/start-version` con la versión indicada | rama `release/vX.Y` activa |
 | `task-dev` | Ejecuta `/task-dev <ID>` | ficha en `status: completed` y commit limpio |
 | `bug-fix` | Ejecuta `/bug-fix <ID>` | ficha en `status: completed` y commit limpio |
+| `resolver-version` | Resuelve los hallazgos bloqueantes de `docs/review/versions/<V>-arquitectura.md` (o escala con `--preguntar <V>`) | correcciones verificadas y commit limpio |
 | `revisar-producto` | Ejecuta `/revisar-producto` sobre la versión | `vX.Y-producto.md` con `**Decisión:** PENDIENTE` |
 | `aplicar-producto` | Ejecuta `/revisar-producto` (`aplicar-producto`) | `**Decisión:** APLICADA` |
 

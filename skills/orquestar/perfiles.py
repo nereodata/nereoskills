@@ -28,7 +28,7 @@ ARNESES = {
     "agy": ["agy", "-p", "{prompt}", "--dangerously-skip-permissions", "--output-format", "json"],
 }
 NIVELES = ("sencilla", "media", "dificil")
-DESARROLLO = {"task-dev", "bug-fix"}
+DESARROLLO = {"task-dev", "bug-fix", "resolver-version"}
 REVISION = {"revisar-plataforma", "revisar-tarea", "revisar-version"}
 CONFIG = "orchestration.json"
 CUOTA_DEFECTO_S = 1800
