@@ -30,6 +30,7 @@ from adevv.revisiones import (  # noqa: E402
     declaracion,
     diagnostico_revision,
     evidencia_vigente,
+    extraer_hallazgos_version,
     huella_producto,
     motivo_informe,
     motivo_revision,
@@ -521,7 +522,16 @@ def estado(root: Path, docs: str = "docs/requirements") -> tuple:
         return ("PASO", "revisar-version", v, rama_actual)
     mot_arq = motivo_informe(arq)
     if mot_arq == "informe rechazado":
-        return ("PARAR", f"Revisión de versión {v} rechazada en docs/review/versions/{v}-arquitectura.md.")
+        pregunta_pend = intervencion.pendiente_para(root, v)
+        if pregunta_pend:
+            return (
+                "PARAR",
+                f"Pregunta humana pendiente para {v} ({pregunta_pend['id']}): {pregunta_pend['pregunta']}",
+            )
+        _, huella_arq = declaracion(arq.read_text(encoding="utf-8", errors="replace"))
+        if huella_arq and huella_arq != huella_producto(root):
+            return ("PASO", "revisar-version", v, rama_actual)
+        return ("PASO", "resolver-version", v, rama_actual)
     if mot_arq:
         return ("PASO", "revisar-version", v, rama_actual)
 
@@ -600,6 +610,19 @@ def construir_prompt_paso(root: Path, paso: str, arg: str | None) -> str:
             contexto_extra = (
                 f"\n\nCorrige los hallazgos pendientes en `{rev.relative_to(root).as_posix()}` antes de cerrar."
             )
+    elif arg and paso == "resolver-version":
+        arq = root / "docs" / "review" / "versions" / f"{arg}-arquitectura.md"
+        contexto_extra = (
+            f"\n\nResuelve de forma autónoma los hallazgos bloqueantes (`para: desarrollador`, `para: especificador`, "
+            f"`destino: resolver`, 🔴/🟠) de `{arq.relative_to(root).as_posix()}` (los de `destino: registrar` ya "
+            f"se registraron como deuda y los de `destino: descartar` se ignoran). Verifica con tests y haz `git commit`. "
+            f'Solo si algún hallazgo bloqueante requiere una decisión de producto, negocio o alcance que no debas asumir, '
+            f'regístrala con `adevv orquestar --preguntar {arg} "<pregunta concreta>"` y termina.'
+        )
+        respuestas = intervencion.respuestas_para(root, arg)
+        if respuestas:
+            bloques = "\n".join(f"- **{r['id']}**: {r.get('pregunta', '')} -> **Respuesta:** {r.get('respuesta', '')}" for r in respuestas)
+            contexto_extra += f"\n\nDecisiones humanas recibidas para {arg}:\n{bloques}"
     return f"{cabecera}{cuerpo}{aviso_fuente}\n\nPolítica activa ({politica['path']}):\n{politica['text'].strip()}{contexto_extra}"
 
 
@@ -828,6 +851,100 @@ def _asegurar_revision_version(root: Path, version: str) -> Path:
             encoding="utf-8",
         )
     return rev_path
+
+
+def _prefijo_proyecto(root: Path) -> str:
+    cfg_path = root / "task_config.yaml"
+    cfg = (yaml_lite.load_yaml(cfg_path) or {}) if cfg_path.is_file() else {}
+    pref = ((cfg.get("project") or {}).get("prefix") or ((cfg.get("levels") or {}).get("master") or {}).get("id_prefix") or "PRJ")
+    return str(pref).strip().upper() or "PRJ"
+
+
+def _slug_corto(texto: str, max_len: int = 48) -> str:
+    norm = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii").lower()
+    limpio = re.sub(r"[^a-z0-9]+", "-", norm).strip("-")
+    return (limpio[:max_len].rstrip("-") or "deuda")
+
+
+def _registrar_deuda_version(root: Path, version: str, arq_path: Path, hallazgos: list[dict]) -> list[Path]:
+    """Registra hallazgos con destino `registrar` como bugs en backlog sin versión."""
+    if not hallazgos:
+        return []
+    _, bugs_dir = backlog_dirs(root)
+    bugs_dir.mkdir(parents=True, exist_ok=True)
+    prefijo = _prefijo_proyecto(root)
+    pat_num = re.compile(rf"^B-{re.escape(prefijo)}-(\d+)(?:[-.]|$)")
+    max_num = 0
+    titulos_existentes: set[str] = set()
+    for f in sorted(bugs_dir.glob("*.md")):
+        fm = frontmatter(f)
+        fid = str(fm.get("id") or f.stem)
+        m = pat_num.match(fid)
+        if m:
+            max_num = max(max_num, int(m.group(1)))
+        origen = str(fm.get("origen") or "")
+        if version in origen:
+            titulos_existentes.add(str(fm.get("title") or "").strip().lower())
+
+    rel_arq = arq_path.relative_to(root).as_posix()
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    creados: list[Path] = []
+    for h in hallazgos:
+        titulo = str(h.get("titulo") or "Deuda técnica de revisión de versión").strip()
+        if titulo.lower() in titulos_existentes:
+            continue
+        max_num += 1
+        bid = f"B-{prefijo}-{max_num:04d}"
+        dif = "sencilla" if h.get("severidad") == "baja" else "media"
+        titulo_yaml = titulo.replace('"', "'")
+        destino = bugs_dir / f"{bid}-{_slug_corto(titulo)}.md"
+        detalle = h.get("detalle") or titulo
+        cod = f" ({h['codigo']})" if h.get("codigo") else ""
+        destino.write_text(
+            f"---\n"
+            f"id: {bid}\n"
+            f'title: "{titulo_yaml}"\n'
+            f"type: bug\n"
+            f"weight: 1500\n"
+            f"dificultad: {dif}\n"
+            f'version: ""\n'
+            f"status: backlog\n"
+            f'origen: "revisar-version {version}{cod} ({rel_arq})"\n'
+            f"created_at: {hoy}\n"
+            f"---\n\n"
+            f"# {bid}: {titulo}\n\n"
+            f"## 🎯 Descripción del Fallo\n{detalle}\n\n"
+            f"## 📋 Evidencias\n- `{rel_arq}`{cod}\n",
+            encoding="utf-8",
+        )
+        titulos_existentes.add(titulo.lower())
+        creados.append(destino)
+
+    if creados and (root / ".git").exists():
+        rutas = [str(p.relative_to(root)) for p in creados]
+        subprocess.run(["git", "add", *rutas], cwd=root, env=_git_env(), check=False)
+        subprocess.run(
+            ["git", "commit", "-qm", f"docs(plan): registrar deuda de revisar-version {version}"],
+            cwd=root,
+            env=_git_env(),
+            check=False,
+        )
+    return creados
+
+
+def _procesar_rechazo_version(root: Path, version: str, arq_path: Path) -> tuple[bool, str, list[Path]]:
+    """Procesa un informe RECHAZADO de revisar-version: registra deuda, ignora descartes y detecta escalado humano."""
+    texto = arq_path.read_text(encoding="utf-8", errors="replace") if arq_path.is_file() else ""
+    hallazgos = extraer_hallazgos_version(texto)
+    para_registrar = [h for h in hallazgos if h["accion"] == "registrar"]
+    creados = _registrar_deuda_version(root, version, arq_path, para_registrar)
+    humanos = [h for h in hallazgos if h["accion"] == "humano"]
+    if humanos:
+        resumen = "; ".join(h["titulo"] for h in humanos)
+        return True, resumen, creados
+    if pide_humano(texto):
+        return True, f"Hades solicitó intervención humana en {arq_path.relative_to(root).as_posix()}.", creados
+    return False, "", creados
 
 
 def _ejecutar_revision_directa(
@@ -1334,6 +1451,7 @@ def bucle(
     reintentos: int = 2,
     espera_max: int = 18000,
     cmd_override: str | None = None,
+    max_rondas_version: int = 3,
 ) -> int:
     root = Path(root).resolve()
     validar_lanzamiento_bucle(root, docs=docs)
@@ -1351,6 +1469,7 @@ def bucle(
     (root / PARADA).unlink(missing_ok=True)
 
     fallos_par: dict[tuple, int] = {}
+    rondas_version: dict[str, int] = {}
     pasos_hechos = int((estado_recibido or {}).get("pasos", 0))
     suite_cmd = _comando_suite_version(root, test_cmd)
 
@@ -1407,6 +1526,8 @@ def bucle(
                     return 1
                 if res_rev == "OK":
                     fallos_par.pop((paso, arg), None)
+                    if paso == "revisar-version" and arg:
+                        rondas_version.pop(arg, None)
                     continue
                 if res_rev == "RECHAZADO" and paso == "revisar-tarea" and arg:
                     ficha = fichero_de(root, arg)
@@ -1451,11 +1572,36 @@ def bucle(
                             check=False,
                         )
                     continue
-                if res_rev == "RECHAZADO" and paso == "revisar-version":
-                    msg = f"Hades rechazó revisar-version {arg}; revisa docs/review/versions/{arg}-arquitectura.md."
-                    print(f"[orquestar] PARAR: {msg}", flush=True)
-                    avisar(root, "bloqueo", msg)
-                    return 1
+                if res_rev == "RECHAZADO" and paso == "revisar-version" and arg:
+                    arq_path = root / f"docs/review/versions/{arg}-arquitectura.md"
+                    hay_humano, resumen_humano, creados = _procesar_rechazo_version(root, arg, arq_path)
+                    if creados:
+                        print(
+                            f"[orquestar] revisar-version {arg}: registrada deuda en {', '.join(p.stem for p in creados)}.",
+                            flush=True,
+                        )
+                    if hay_humano:
+                        qid = intervencion.solicitar(root, _proxy_motor(), arg, resumen_humano, rama)
+                        msg = f"Pregunta humana registrada ({qid}) tras revisar-version {arg}: {resumen_humano}"
+                        print(f"[orquestar] PARAR: {msg}", flush=True)
+                        avisar(root, "bloqueo", msg)
+                        return 1
+                    rondas = rondas_version.get(arg, 0) + 1
+                    rondas_version[arg] = rondas
+                    if rondas > max_rondas_version:
+                        msg = (
+                            f"Límite de {max_rondas_version} rondas de revisión/resolución alcanzado para {arg}; "
+                            f"revisa docs/review/versions/{arg}-arquitectura.md."
+                        )
+                        print(f"[orquestar] PARAR: {msg}", flush=True)
+                        avisar(root, "bloqueo", msg)
+                        return 1
+                    print(
+                        f"[orquestar] revisar-version {arg} rechazada (ronda {rondas}/{max_rondas_version}); "
+                        f"pasando a resolución autónoma.",
+                        flush=True,
+                    )
+                    continue
 
             else:
                 huella_antes = (
@@ -1506,6 +1652,9 @@ def bucle(
                         intervencion._actualizar_estado_ficha(
                             ficha, "in_progress", nota=f"Puerta determinista: {error_puerta}"
                         )
+                if paso == "resolver-version" and arg and intervencion.pendiente_para(root, arg):
+                    fallos_par.pop((paso, arg), None)
+                    continue
                 if progreso:
                     fallos_par.pop((paso, arg), None)
                     continue
@@ -1515,7 +1664,7 @@ def bucle(
             fallos_par[(paso, arg)] = n_sin
             print(f"[orquestar] {etiqueta}: sin progreso ({n_sin}/{reintentos})", flush=True)
             if n_sin >= reintentos:
-                if arg and paso in perfiles.DESARROLLO:
+                if arg and paso in perfiles.DESARROLLO and fichero_de(root, arg):
                     ficha = fichero_de(root, arg)
                     intervencion._actualizar_estado_ficha(
                         ficha, "blocked", "humano", f"Bloqueado tras {n_sin} intentos sin progreso."

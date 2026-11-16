@@ -399,12 +399,11 @@ class OrquestadorLigeroTests(unittest.TestCase):
         self.tarea("T-DEM-0001", "completed")
         self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
 
-        # Un informe de arquitectura RECHAZADO detiene estado() en vez de dar la versión por terminada
+        # Un informe de arquitectura RECHAZADO pasa a resolver-version en vez de parar en seco
         self.escribir("docs/review/versions/v0.1-arquitectura.md", "**Veredicto:** RECHAZADO\n")
         with patch.object(motor, "git", return_value="release/v0.1"):
             est = motor.estado(self.root)
-        self.assertEqual(est[0], "PARAR")
-        self.assertIn("rechazada", est[1])
+        self.assertEqual(est, ("PASO", "resolver-version", "v0.1", "release/v0.1"))
 
         # Al aprobar revisar-version, se genera automáticamente v0.1-revision.md
         (self.root / "docs/review/versions/v0.1-arquitectura.md").unlink()
@@ -419,6 +418,138 @@ class OrquestadorLigeroTests(unittest.TestCase):
         ):
             self.assertEqual(motor.bucle(self.root, espera_max=0), 0)
         self.assertTrue((self.root / "docs/review/versions/v0.1-revision.md").is_file())
+
+    def test_revisar_version_rechazada_resuelve_autonomamente_y_registra_deuda(self):
+        self.escribir("app.py", "V = 1\n")
+        self.tarea("T-DEM-0001", "completed")
+        self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
+        pasos = []
+
+        def fake_invocar(root, rol, paso, iid, prompt, cmd_override=None):
+            pasos.append((rol, paso, iid))
+            if paso == "revisar-version" and len([p for p in pasos if p[1] == "revisar-version"]) == 1:
+                self.escribir(
+                    "docs/review/versions/v0.1-arquitectura.md",
+                    "**Veredicto:** RECHAZADO\n\n"
+                    "### 🟠 H-01 · Falta validación en app.py\n"
+                    "- **para:** desarrollador\n"
+                    "- **destino:** resolver\n\n"
+                    "### 🟡 H-02 · Refactorizar helper secundario\n"
+                    "- **Severidad:** 🟡 MEDIA · `destino: registrar`\n"
+                    "- **Detalle:** Conviene extraer helper en otro ciclo.\n\n"
+                    "### 🔵 H-03 · Detalle tipográfico menor\n"
+                    "- **Severidad:** 🔵 BAJA · `destino: descartar`\n",
+                )
+                return 0, {"modelos": {}, "duracion_s": 1}, "RECHAZADO"
+            if paso == "resolver-version":
+                self.escribir("app.py", "V = 2\n")
+                return 0, {"modelos": {}, "duracion_s": 1}, "Resuelto"
+            self.escribir("docs/review/versions/v0.1-arquitectura.md", "**Veredicto:** APROBADO\nSin hallazgos.\n")
+            return 0, {"modelos": {}, "duracion_s": 1}, "APROBADO"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=fake_invocar),
+            patch.object(motor, "avisar"),
+        ):
+            rc = motor.bucle(self.root, espera_max=0)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            pasos,
+            [
+                ("hades", "revisar-version", "v0.1"),
+                ("artemisa", "resolver-version", "v0.1"),
+                ("hades", "revisar-version", "v0.1"),
+            ],
+        )
+        # Solo H-02 (destino: registrar) genera deuda en backlog sin versión; H-03 se descarta
+        bugs = [i for i in motor.backlog(self.root) if i["id"].startswith("B-")]
+        self.assertEqual(len(bugs), 1)
+        self.assertEqual(bugs[0]["status"], "backlog")
+        self.assertEqual(bugs[0]["version"], "")
+        self.assertIn("Refactorizar helper secundario", bugs[0]["title"])
+
+    def test_revisar_version_escala_con_preguntar_y_reanuda_tras_respuesta(self):
+        self.escribir("app.py", "V = 1\n")
+        self.tarea("T-DEM-0001", "completed")
+        self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
+
+        def invocar_con_pregunta(root, rol, paso, iid, prompt, cmd_override=None):
+            if paso == "revisar-version":
+                self.escribir(
+                    "docs/review/versions/v0.1-arquitectura.md",
+                    "**Veredicto:** RECHAZADO\n- 🟠 (para: desarrollador): Definir política de compatibilidad.\n",
+                )
+                return 0, {"modelos": {}, "duracion_s": 1}, "RECHAZADO"
+            if paso == "resolver-version":
+                motor.intervencion.solicitar(
+                    self.root, motor, "v0.1", "¿Mantenemos compatibilidad con v0?", "release/v0.1"
+                )
+                return 0, {"modelos": {}, "duracion_s": 1}, "Pregunta registrada"
+            return 0, {"modelos": {}, "duracion_s": 1}, "OK"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=invocar_con_pregunta),
+            patch.object(motor, "avisar"),
+        ):
+            rc = motor.bucle(self.root, espera_max=0)
+
+        self.assertEqual(rc, 1)
+        self.assertIn("Q-0001", motor.intervencion.consulta(self.root))
+        with patch.object(motor, "git", return_value="release/v0.1"):
+            self.assertEqual(motor.estado(self.root)[0], "PARAR")
+
+        # Al responder, se desbloquea y el prompt de resolver-version incluye la decisión humana
+        msg = motor.responder_pregunta(self.root, "123", "Q-0001 Sí, mantener compatibilidad")
+        self.assertIn("Q-0001", msg)
+        with patch.object(motor, "git", return_value="release/v0.1"):
+            self.assertEqual(motor.estado(self.root), ("PASO", "resolver-version", "v0.1", "release/v0.1"))
+        self.assertIn("Sí, mantener compatibilidad", motor.construir_prompt_paso(self.root, "resolver-version", "v0.1"))
+
+        def invocar_tras_respuesta(root, rol, paso, iid, prompt, cmd_override=None):
+            if paso == "resolver-version":
+                self.escribir("app.py", "V = 2\n")
+                return 0, {"modelos": {}, "duracion_s": 1}, "Aplicada decisión"
+            self.escribir("docs/review/versions/v0.1-arquitectura.md", "**Veredicto:** APROBADO\n")
+            return 0, {"modelos": {}, "duracion_s": 1}, "APROBADO"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=invocar_tras_respuesta),
+            patch.object(motor, "avisar"),
+        ):
+            self.assertEqual(motor.bucle(self.root, espera_max=0), 0)
+
+    def test_revisar_version_respeta_limite_de_rondas(self):
+        self.escribir("app.py", "V = 1\n")
+        self.tarea("T-DEM-0001", "completed")
+        self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
+        contador = {"rev": 0, "res": 0}
+
+        def invocar_siempre_rechaza(root, rol, paso, iid, prompt, cmd_override=None):
+            if paso == "revisar-version":
+                contador["rev"] += 1
+                self.escribir(
+                    "docs/review/versions/v0.1-arquitectura.md",
+                    f"**Veredicto:** RECHAZADO\n- 🔴 (para: desarrollador): Fallo ronda {contador['rev']}.\n",
+                )
+                return 0, {"modelos": {}, "duracion_s": 1}, "RECHAZADO"
+            contador["res"] += 1
+            self.escribir("app.py", f"V = {contador['res'] + 1}\n")
+            return 0, {"modelos": {}, "duracion_s": 1}, "Intento"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=invocar_siempre_rechaza),
+            patch.object(motor, "avisar"),
+        ):
+            rc = motor.bucle(self.root, espera_max=0, max_rondas_version=2)
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(contador["res"], 2)
+        self.assertEqual(contador["rev"], 3)
 
 
 if __name__ == "__main__":

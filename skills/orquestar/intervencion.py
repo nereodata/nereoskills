@@ -102,6 +102,19 @@ def consulta(root: Path) -> str:
     return "\n".join(f"- *{f['id']}* ({_item_id(f)}): {f['pregunta']}" for f in pendientes)
 
 
+def pendiente_para(root: Path, iid: str) -> dict | None:
+    """Devuelve la primera pregunta humana pendiente para un ítem o versión, si existe."""
+    for f in _cargar(Path(root)):
+        if _item_id(f) == iid and f.get("estado") == "pendiente":
+            return dict(f)
+    return None
+
+
+def respuestas_para(root: Path, iid: str) -> list[dict]:
+    """Devuelve las preguntas ya respondidas para un ítem o versión."""
+    return [dict(f) for f in _cargar(Path(root)) if _item_id(f) == iid and f.get("estado") == "respondida"]
+
+
 def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str = "") -> tuple[bool, str]:
     """Registra la respuesta a Q-XXXX (o ID de tarea con única pregunta) y desbloquea la ficha."""
     root = Path(root)
@@ -143,10 +156,12 @@ def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str =
 
         iid = _item_id(objetivo)
         ficha = motor.fichero_de(root, iid)
-        _actualizar_estado_ficha(
-            ficha,
-            "planned",
-            None,
-            f"### Respuesta humana ({objetivo['id']})\n{texto_resp}",
-        )
-    return True, f"Respuesta registrada en {objetivo['id']}; {iid} vuelve a planned."
+        if ficha and ficha.is_file():
+            _actualizar_estado_ficha(
+                ficha,
+                "planned",
+                None,
+                f"### Respuesta humana ({objetivo['id']})\n{texto_resp}",
+            )
+            return True, f"Respuesta registrada en {objetivo['id']}; {iid} vuelve a planned."
+    return True, f"Respuesta registrada en {objetivo['id']} para {iid}."

@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.4] - 2026-11-16
+
+### Corregido
+
+- **orquestar (`orquestar.py`, `revisiones.py`, `intervencion.py`)** — Eliminada la parada automática tras un `RECHAZADO` de Hades en `revisar-version`: los hallazgos con `destino: registrar` se registran automáticamente como deuda en `docs/plan/bugs/` (`status: backlog`, sin versión), los de `destino: descartar` se ignoran y los bloqueantes pasan al paso autónomo `resolver-version` con límite de rondas (`max_rondas_version`, por defecto `3`), escalando mediante `--preguntar` solo si Hades o el agente solicitan una decisión humana.
+
 ## [1.3.3] - 2026-11-16
 
 ### Corregido
