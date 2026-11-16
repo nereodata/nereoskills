@@ -206,6 +206,9 @@ def es_propietario_pid(root: Path, pid_file: str = PID) -> bool:
         return False
 
 
+_RE_VERSION_ALMACEN = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[.\-+].*)?$")
+
+
 def _version_activa_distinta(script: Path) -> tuple[Path, str] | None:
     try:
         p = Path(script).resolve()
@@ -215,10 +218,19 @@ def _version_activa_distinta(script: Path) -> tuple[Path, str] | None:
         version_dir = versions / rel.parts[0]
         datos = json.loads((home / "active.json").read_text(encoding="utf-8"))
         version = datos.get("version") if isinstance(datos, dict) else None
-        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        if (
+            not isinstance(version, str)
+            or "/" in version
+            or "\\" in version
+            or ".." in version
+            or not _RE_VERSION_ALMACEN.match(version)
+        ):
             return None
-        destino = (versions / version / p.relative_to(version_dir)).resolve()
-        if destino != p and destino.is_file() and destino.is_relative_to(versions / version):
+        destino_dir = versions / version
+        if destino_dir.parent != versions:
+            return None
+        destino = (destino_dir / p.relative_to(version_dir)).resolve()
+        if destino != p and destino.is_file() and destino.is_relative_to(destino_dir):
             return destino, version
     except (OSError, ValueError, IndexError, RuntimeError):
         return None
@@ -230,7 +242,8 @@ def recargar_version(script: Path, root: Path, pid_file: str, estado_recarga: di
     if nueva is None:
         return False
     destino, version = nueva
-    if tuple(int(n) for n in version.split(".")) < (0, 5, 0):
+    m = _RE_VERSION_ALMACEN.match(version)
+    if not m or tuple(int(n) for n in m.groups()) < (0, 5, 0):
         return False
     root = Path(root).resolve()
     if not es_propietario_pid(root, pid_file):

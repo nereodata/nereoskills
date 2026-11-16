@@ -629,6 +629,32 @@ class TestUpdaterIntegrationAndCli(unittest.TestCase):
             self.assertTrue(motor.recargar_version(scripts["0.6.1"], raiz, motor.PID, {"n": 1}, "orquestar"))
         self.assertEqual(Path(lanzar.call_args.args[0][2]).resolve(), scripts["0.5.0"].resolve())
 
+    def test_recarga_version_soporta_versiones_dev_como_origen_y_destino(self):
+        scripts = {}
+        for version in ("1.2.0.dev20261112+7b6f133", "1.3.2"):
+            carpeta = self.adevv_home / "versions" / version
+            carpeta.mkdir(parents=True, exist_ok=True)
+            script = carpeta / "skills/orquestar/orquestar.py"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text(f"motor {version}", encoding="utf-8")
+            scripts[version] = script
+        spec = importlib.util.spec_from_file_location("motor_recarga_dev", Path(__file__).resolve().parents[1] / "skills/orquestar/orquestar.py")
+        motor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(motor)
+        raiz = Path(self.temp_dir.name)
+        (raiz / motor.PID).write_text(str(os.getpid()))
+
+        set_active_info({"version": "1.3.2", "origen": "publicada"})
+        with patch.object(motor.subprocess, "Popen", return_value=MagicMock(pid=1111)) as lanzar:
+            self.assertTrue(motor.recargar_version(scripts["1.2.0.dev20261112+7b6f133"], raiz, motor.PID, {"n": 1}, "gateway"))
+        self.assertEqual(Path(lanzar.call_args.args[0][2]).resolve(), scripts["1.3.2"].resolve())
+
+        set_active_info({"version": "1.2.0.dev20261112+7b6f133", "origen": "local"})
+        (raiz / motor.PID).write_text(str(os.getpid()))
+        with patch.object(motor.subprocess, "Popen", return_value=MagicMock(pid=2222)) as lanzar:
+            self.assertTrue(motor.recargar_version(scripts["1.3.2"], raiz, motor.PID, {"n": 1}, "gateway"))
+        self.assertEqual(Path(lanzar.call_args.args[0][2]).resolve(), scripts["1.2.0.dev20261112+7b6f133"].resolve())
+
     def test_instalar_version_falla_si_paquete_no_coincide(self):
         # Repositorio donde la etiqueta es v0.3.0 pero el paquete dice 0.2.9
         repo_dir = Path(self.temp_dir.name) / "bad_repo"

@@ -670,6 +670,31 @@ class LectorProyectoMcpTests(unittest.TestCase):
         self.assertNotIn("imagen.bin", formateado)
         self.assertIn("- docs/review/versions/v1.0-revision.md", formateado)
 
+    def test_indice_conversacion_omite_orchestration_dist_y_corta_lectura_en_repos_grandes(self):
+        (self.root / ".orchestration").mkdir()
+        (self.root / ".orchestration/estado.json").write_text("{}", encoding="utf-8")
+        (self.root / "dist").mkdir()
+        (self.root / "dist/bundle.js").write_text("console.log(1);", encoding="utf-8")
+        (self.root / "lote").mkdir()
+        for i in range(1050):
+            (self.root / f"lote/f_{i:04d}.txt").write_text("ok\n", encoding="utf-8")
+
+        abiertos = 0
+        orig = lector._es_binario
+
+        def contar_binario(ruta):
+            nonlocal abiertos
+            abiertos += 1
+            return orig(ruta)
+
+        with patch.object(lector, "_es_binario", side_effect=contar_binario):
+            rutas, total = lector.indice_ficheros_conversacion(self.root, limite=10)
+
+        self.assertEqual(len(rutas), 10)
+        self.assertGreater(total, 1000)
+        self.assertEqual(abiertos, 10)
+        self.assertFalse(any(r.startswith((".orchestration/", "dist/")) for r in rutas))
+
 
 class ConversacionTelegramLecturaTests(unittest.TestCase):
     """Recorrido completo de conversación del gateway sin enviar mensajes reales a Telegram."""

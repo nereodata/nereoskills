@@ -12,6 +12,11 @@ from adevv.store import write_json_atomic
 ARCHIVO = "orquestar_preguntas.json"
 
 
+def _item_id(fila: dict) -> str:
+    """Obtiene el ID de ítem con retrocompatibilidad para esquemas previos (`tarea_id`)."""
+    return fila.get("item_id") or fila.get("tarea_id") or ""
+
+
 def _cargar(root: Path) -> list[dict]:
     p = Path(root) / ARCHIVO
     if not p.is_file():
@@ -69,7 +74,7 @@ def solicitar(root: Path, motor, iid: str, pregunta: str, rama: str = "") -> str
     with bloqueo(root):
         filas = _cargar(root)
         for existente in filas:
-            if existente.get("item_id") == iid and existente.get("estado") == "pendiente":
+            if _item_id(existente) == iid and existente.get("estado") == "pendiente":
                 return existente["id"]
         num = max((int(re.sub(r"\D", "", f.get("id", "0")) or 0) for f in filas), default=0) + 1
         qid = f"Q-{num:04d}"
@@ -94,7 +99,7 @@ def consulta(root: Path) -> str:
     pendientes = [f for f in _cargar(Path(root)) if f.get("estado") == "pendiente"]
     if not pendientes:
         return "No hay preguntas humanas pendientes."
-    return "\n".join(f"- *{f['id']}* ({f['item_id']}): {f['pregunta']}" for f in pendientes)
+    return "\n".join(f"- *{f['id']}* ({_item_id(f)}): {f['pregunta']}" for f in pendientes)
 
 
 def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str = "") -> tuple[bool, str]:
@@ -108,7 +113,7 @@ def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str =
     with bloqueo(root):
         filas = _cargar(root)
         candidatas = [
-            f for f in filas if f.get("estado") == "pendiente" and (f.get("id") == ref or f.get("item_id") == ref)
+            f for f in filas if f.get("estado") == "pendiente" and (f.get("id") == ref or _item_id(f) == ref)
         ]
         if len(candidatas) > 1:
             ids = ", ".join(f["id"] for f in candidatas)
@@ -116,7 +121,7 @@ def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str =
         if not candidatas:
             ya = next((f for f in filas if f.get("id") == ref and f.get("estado") == "respondida"), None)
             if ya:
-                return True, f"{ref} ({ya.get('item_id')}) ya estaba respondida."
+                return True, f"{ref} ({_item_id(ya)}) ya estaba respondida."
             ficha = motor.fichero_de(root, ref)
             if ficha:
                 _, cuotas = motor.consumo_cuotas(root)
@@ -136,7 +141,7 @@ def responder(root: Path, motor, referencia: str, respuesta: str, usuario: str =
         objetivo["respondida_en"] = datetime.now().isoformat(timespec="seconds")
         _guardar(root, filas)
 
-        iid = objetivo["item_id"]
+        iid = _item_id(objetivo)
         ficha = motor.fichero_de(root, iid)
         _actualizar_estado_ficha(
             ficha,

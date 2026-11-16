@@ -2,6 +2,14 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.3] - 2026-11-16
+
+### Corregido
+
+- **orquestar (`intervencion.py`)** — Añadida retrocompatibilidad para leer `tarea_id` como fallback de `item_id` en preguntas humanas pendientes (`solicitar`, `consulta`, `responder`), evitando `KeyError('item_id')` con ficheros `orquestar_preguntas.json` previos a `1.3.x`.
+- **orquestar (`orquestar.py`)** — Flexibilizada la validación de versión en `_version_activa_distinta` y `recargar_version` para aceptar versiones con sufijo `.dev`/PEP 440 o prefijo `v` manteniendo la guarda contra *path traversal*.
+- **telegram_gateway (`lector_proyecto.py`)** — Añadidos `.orchestration`, `dist`, `build`, `.next`, `.nuxt`, `target`, `.cache`, `coverage`, `.tox`, `.nox`, `.parcel-cache` y `.turbo` a `DIRECTORIOS_OMITIDOS`, y aplicado corte temprano en `_es_binario` al alcanzar el límite del índice en repositorios grandes.
+
 ## [1.3.2] - 2026-11-15
 
 ### Corregido

@@ -29,6 +29,18 @@ DIRECTORIOS_OMITIDOS = frozenset(
         "node_modules",
         ".venv",
         "venv",
+        ".orchestration",
+        "dist",
+        "build",
+        ".next",
+        ".nuxt",
+        "target",
+        ".cache",
+        "coverage",
+        ".tox",
+        ".nox",
+        ".parcel-cache",
+        ".turbo",
     }
 )
 FICHEROS_RAIZ_PRIORITARIOS = frozenset(
@@ -233,11 +245,9 @@ def indice_ficheros_conversacion(root: Path, limite: int = MAX_INDICE_CONVERSACI
     base = base_cruda.resolve()
     tope = max(1, min(int(limite if limite is not None else MAX_INDICE_CONVERSACION), 1000))
     prefijos_plan = _prefijos_plan_proyecto(base)
-    candidatos: list[tuple[int, str]] = []
+    candidatos: list[tuple[int, str, Path]] = []
 
     for fichero, rel in _iterar_ficheros_legibles(base, base):
-        if _es_binario(fichero):
-            continue
         if rel in FICHEROS_RAIZ_PRIORITARIOS:
             prioridad = 0
         elif rel.startswith(prefijos_plan):
@@ -246,10 +256,26 @@ def indice_ficheros_conversacion(root: Path, limite: int = MAX_INDICE_CONVERSACI
             prioridad = 2
         else:
             prioridad = 3
-        candidatos.append((prioridad, rel))
+        candidatos.append((prioridad, rel, fichero))
 
-    candidatos.sort()
-    rutas = [rel for _, rel in candidatos[:tope]]
+    candidatos.sort(key=lambda item: (item[0], item[1]))
+    rutas: list[str] = []
+    if len(candidatos) <= 1000:
+        total_texto = 0
+        for _, rel, fichero in candidatos:
+            if _es_binario(fichero):
+                continue
+            total_texto += 1
+            if len(rutas) < tope:
+                rutas.append(rel)
+        return rutas, total_texto
+
+    for _, rel, fichero in candidatos:
+        if _es_binario(fichero):
+            continue
+        rutas.append(rel)
+        if len(rutas) >= tope:
+            break
     return rutas, len(candidatos)
 
 

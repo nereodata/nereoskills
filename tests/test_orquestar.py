@@ -312,6 +312,34 @@ class OrquestadorLigeroTests(unittest.TestCase):
         # Idempotencia al repetir respuesta
         self.assertIn("ya estaba respondida", motor.responder_pregunta(self.root, "123", "Q-0001 SQLite"))
 
+    def test_preguntas_legacy_con_tarea_id_son_retrocompatibles(self):
+        self.tarea("T-AFN-0006", "blocked")
+        (self.root / "orquestar_preguntas.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "Q-AFN-0006",
+                        "tarea_id": "T-AFN-0006",
+                        "pregunta": "¿Confirmas el despliegue?",
+                        "rama": "release/v1.0",
+                        "estado": "pendiente",
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        listado = motor.intervencion.consulta(self.root)
+        self.assertIn("Q-AFN-0006", listado)
+        self.assertIn("T-AFN-0006", listado)
+        self.assertEqual(
+            motor.intervencion.solicitar(self.root, motor, "T-AFN-0006", "Otra"),
+            "Q-AFN-0006",
+        )
+        ok, msg = motor.intervencion.responder(self.root, motor, "Q-AFN-0006", "Sí, adelante", "123")
+        self.assertTrue(ok, msg)
+        self.assertIn("T-AFN-0006 vuelve a planned", msg)
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, "T-AFN-0006"))["status"], "planned")
+
     def test_lanzar_timeout_devuelve_124_y_corta_proceso(self):
         cmd = [sys.executable, "-c", "import time; print('inicio', flush=True); time.sleep(30)"]
         cod, m, sal = motor.lanzar(cmd, self.root, "agy", timeout=0.4, gracia_cierre=0.05)
