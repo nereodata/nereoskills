@@ -390,6 +390,63 @@ class GatewayTests(unittest.TestCase):
                     self.assertIsNotNone(res)
                     self.assertEqual(Path(res).resolve(), fake_exe.resolve())
 
+    def test_escuchar_avisa_una_sola_vez_y_limpia_orquestar_pid_huerfano(self):
+        (self.root / motor.PID).write_text("888888", encoding="utf-8")
+        (self.root / motor.ESPERA).write_text('{"hasta": "2099-01-01T00:00:00+00:00"}', encoding="utf-8")
+        with (
+            patch.object(motor, "pid_vivo", return_value=None),
+            patch.object(gateway, "actualizaciones", return_value=[]),
+            patch.object(motor, "enviar", return_value=True) as enviar,
+            patch("builtins.print"),
+        ):
+            gateway.escuchar(self.root, "tok", {"12345"}, vueltas=2)
+
+        self.assertEqual(enviar.call_count, 1)
+        self.assertEqual(enviar.call_args.args[0], "tok")
+        self.assertEqual(enviar.call_args.args[1], "12345")
+        self.assertIn("pid 888888", enviar.call_args.args[2])
+        self.assertIn("terminó inesperadamente", enviar.call_args.args[2])
+        self.assertFalse((self.root / motor.PID).exists())
+        self.assertFalse((self.root / motor.ESPERA).exists())
+
+        # Fallo transitorio de envío conserva orquestar.pid para reintentar en el siguiente ciclo
+        (self.root / motor.PID).write_text("888889", encoding="utf-8")
+        with (
+            patch.object(motor, "pid_vivo", return_value=None),
+            patch.object(gateway, "actualizaciones", return_value=[]),
+            patch.object(motor, "enviar", side_effect=[False, True]) as enviar_reintento,
+            patch("builtins.print"),
+        ):
+            gateway.escuchar(self.root, "tok", {"12345"}, vueltas=1)
+        self.assertEqual(enviar_reintento.call_count, 2)
+        self.assertFalse((self.root / motor.PID).exists())
+
+        # Si un bucle nuevo sobrescribe orquestar.pid durante el envío, no se borra el PID nuevo
+        (self.root / motor.PID).write_text("888890", encoding="utf-8")
+
+        def simular_relanzamiento(*_args, **_kwargs):
+            motor.escribir_pid(self.root, 999991)
+            return True
+
+        with (
+            patch.object(motor, "pid_vivo", return_value=None),
+            patch.object(motor, "enviar", side_effect=simular_relanzamiento),
+            patch("builtins.print"),
+        ):
+            self.assertFalse(gateway.vigilar_caida_bucle(self.root, "tok", {"12345"}))
+        self.assertEqual((self.root / motor.PID).read_text(encoding="utf-8").strip(), "999991")
+
+        # Si el PID está vivo, no borra orquestar.pid ni envía aviso
+        (self.root / motor.PID).write_text("777777", encoding="utf-8")
+        with (
+            patch.object(motor, "pid_vivo", return_value=777777),
+            patch.object(gateway, "actualizaciones", return_value=[]),
+            patch.object(motor, "enviar") as enviar_vivo,
+        ):
+            gateway.escuchar(self.root, "tok", {"12345"}, vueltas=1)
+        enviar_vivo.assert_not_called()
+        self.assertTrue((self.root / motor.PID).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

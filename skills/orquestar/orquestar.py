@@ -2,6 +2,7 @@
 """Orquestador ligero de Adevv: estado desde disco, modelos con reserva, métricas y revisión directa."""
 
 import argparse
+import contextlib
 from datetime import datetime
 import importlib.util
 import json
@@ -197,6 +198,106 @@ def pid_vivo(root: Path, pid_file: str = PID) -> int | None:
         return pid
     except OSError:
         return None
+
+
+def pid_huerfano(root: Path, pid_file: str = PID) -> int | None:
+    p = Path(root) / pid_file
+    if not p.is_file():
+        return None
+    try:
+        pid = int(p.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+    if pid <= 0 or pid_vivo(root, pid_file):
+        return None
+    return pid
+
+
+class _DuplicadorSalida:
+    def __init__(self, principal, copia):
+        self._principal = principal
+        self._copia = copia
+
+    def write(self, texto: str) -> int:
+        try:
+            self._copia.write(texto)
+            self._copia.flush()
+        except (OSError, ValueError):
+            pass
+        if self._principal is not None:
+            try:
+                return self._principal.write(texto)
+            except (OSError, ValueError, UnicodeEncodeError):
+                pass
+        return len(texto)
+
+    def flush(self) -> None:
+        try:
+            self._copia.flush()
+        except (OSError, ValueError):
+            pass
+        if self._principal is not None:
+            try:
+                self._principal.flush()
+            except (OSError, ValueError):
+                pass
+
+    def __getattr__(self, nombre: str):
+        if self._principal is None:
+            raise AttributeError(nombre)
+        return getattr(self._principal, nombre)
+
+
+@contextlib.contextmanager
+def _salida_con_log(root: Path):
+    ruta_log = Path(root) / LOG
+    try:
+        copia = ruta_log.open("a", encoding="utf-8")
+    except OSError:
+        yield
+        return
+    mismo = False
+    try:
+        mismo = os.path.sameopenfile(sys.stdout.fileno(), copia.fileno())
+    except (AttributeError, OSError, ValueError):
+        mismo = False
+    if mismo:
+        copia.close()
+        yield
+        return
+    prev = sys.stdout
+    sys.stdout = _DuplicadorSalida(prev, copia)
+    try:
+        yield
+    finally:
+        sys.stdout = prev
+        copia.close()
+
+
+def escribir_pid(root: Path, pid_val: int, pid_file: str = PID) -> None:
+    destino = Path(root) / pid_file
+    temporal = destino.with_name(f"{pid_file}.{os.getpid()}.tmp")
+    with registro_metricas.bloqueo(root):
+        try:
+            temporal.write_text(str(pid_val), encoding="utf-8")
+            os.replace(temporal, destino)
+        finally:
+            temporal.unlink(missing_ok=True)
+
+
+def limpiar_pid_si_coincide(root: Path, pid_esperado: int, pid_file: str = PID, limpiar_espera: bool = True) -> bool:
+    destino = Path(root) / pid_file
+    with registro_metricas.bloqueo(root):
+        try:
+            actual = int(destino.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return False
+        if actual != pid_esperado:
+            return False
+        destino.unlink(missing_ok=True)
+        if limpiar_espera and pid_file == PID:
+            (Path(root) / ESPERA).unlink(missing_ok=True)
+        return True
 
 
 def es_propietario_pid(root: Path, pid_file: str = PID) -> bool:
@@ -616,12 +717,15 @@ def construir_prompt_paso(root: Path, paso: str, arg: str | None) -> str:
             f"\n\nResuelve de forma autónoma los hallazgos bloqueantes (`para: desarrollador`, `para: especificador`, "
             f"`destino: resolver`, 🔴/🟠) de `{arq.relative_to(root).as_posix()}` (los de `destino: registrar` ya "
             f"se registraron como deuda y los de `destino: descartar` se ignoran). Verifica con tests y haz `git commit`. "
-            f'Solo si algún hallazgo bloqueante requiere una decisión de producto, negocio o alcance que no debas asumir, '
+            f"Solo si algún hallazgo bloqueante requiere una decisión de producto, negocio o alcance que no debas asumir, "
             f'regístrala con `adevv orquestar --preguntar {arg} "<pregunta concreta>"` y termina.'
         )
         respuestas = intervencion.respuestas_para(root, arg)
         if respuestas:
-            bloques = "\n".join(f"- **{r['id']}**: {r.get('pregunta', '')} -> **Respuesta:** {r.get('respuesta', '')}" for r in respuestas)
+            bloques = "\n".join(
+                f"- **{r['id']}**: {r.get('pregunta', '')} -> **Respuesta:** {r.get('respuesta', '')}"
+                for r in respuestas
+            )
             contexto_extra += f"\n\nDecisiones humanas recibidas para {arg}:\n{bloques}"
     return f"{cabecera}{cuerpo}{aviso_fuente}\n\nPolítica activa ({politica['path']}):\n{politica['text'].strip()}{contexto_extra}"
 
@@ -717,9 +821,7 @@ def _invocar_con_reservas(
         harness = cand.get("harness", "agy")
         modelo = cand.get("model") or "predeterminado"
         plantilla = (
-            base_comando_agente(harness, "{prompt}")
-            if rol in ("hades", "clio", "cronos")
-            else None
+            base_comando_agente(harness, "{prompt}") if rol in ("hades", "clio", "cronos") else None
         ) or ARNESES.get(harness)
         if not plantilla:
             continue
@@ -856,14 +958,18 @@ def _asegurar_revision_version(root: Path, version: str) -> Path:
 def _prefijo_proyecto(root: Path) -> str:
     cfg_path = root / "task_config.yaml"
     cfg = (yaml_lite.load_yaml(cfg_path) or {}) if cfg_path.is_file() else {}
-    pref = ((cfg.get("project") or {}).get("prefix") or ((cfg.get("levels") or {}).get("master") or {}).get("id_prefix") or "PRJ")
+    pref = (
+        (cfg.get("project") or {}).get("prefix")
+        or ((cfg.get("levels") or {}).get("master") or {}).get("id_prefix")
+        or "PRJ"
+    )
     return str(pref).strip().upper() or "PRJ"
 
 
 def _slug_corto(texto: str, max_len: int = 48) -> str:
     norm = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii").lower()
     limpio = re.sub(r"[^a-z0-9]+", "-", norm).strip("-")
-    return (limpio[:max_len].rstrip("-") or "deuda")
+    return limpio[:max_len].rstrip("-") or "deuda"
 
 
 def _registrar_deuda_version(root: Path, version: str, arq_path: Path, hallazgos: list[dict]) -> list[Path]:
@@ -1230,10 +1336,16 @@ def parte(root: Path, docs: str = "docs/requirements") -> str:
     """Resumen breve para CLI y Telegram (/estado)."""
     root = Path(root)
     hasta, motivo = leer_espera(root)
-    if hasta and hasta > fecha_estado(ahora()):
+    vivo = pid_vivo(root)
+    huerfano = None if vivo else pid_huerfano(root)
+    if vivo and hasta and hasta > fecha_estado(ahora()):
         marcha = f"esperando ({motivo}) hasta {hasta:%H:%M}"
+    elif vivo:
+        marcha = "en marcha"
+    elif huerfano:
+        marcha = f"caído (pid {huerfano} terminó inesperadamente)"
     else:
-        marcha = "en marcha" if pid_vivo(root) else "parado"
+        marcha = "parado"
     e = estado(root, docs)
     lineas = [f"*{root.name}* · bucle {marcha}", f"*Fase:* {e[0]} " + " ".join(str(x) for x in e[1:3] if x)]
     if e[0] == "PASO" and e[1] == "revisar-tarea":
@@ -1401,7 +1513,7 @@ def en_fondo(root: Path, argumentos: list[str] | None = None) -> int:
             stderr=subprocess.STDOUT,
             **opciones,
         )
-    (root / PID).write_text(str(proc.pid), encoding="utf-8")
+    escribir_pid(root, proc.pid)
     print(f"[orquestar] lanzado en segundo plano (pid {proc.pid}); salida en {LOG}", flush=True)
     return 0
 
@@ -1463,7 +1575,7 @@ def bucle(
         if vivo and vivo != os.getpid():
             sys.exit(f"Ya hay un bucle en marcha (pid {vivo}).")
         excluir(root)
-        (root / PID).write_text(str(os.getpid()), encoding="utf-8")
+        escribir_pid(root, os.getpid())
     else:
         excluir(root)
     (root / PARADA).unlink(missing_ok=True)
@@ -1473,6 +1585,8 @@ def bucle(
     pasos_hechos = int((estado_recibido or {}).get("pasos", 0))
     suite_cmd = _comando_suite_version(root, test_cmd)
 
+    pila_log = contextlib.ExitStack()
+    pila_log.enter_context(_salida_con_log(root))
     try:
         while True:
             if (root / PARADA).exists():
@@ -1685,10 +1799,19 @@ def bucle(
                 print(f"[orquestar] PARAR: {msg}", flush=True)
                 avisar(root, "error", msg)
                 return 1
+    except Exception as exc:
+        msg = f"Fallo inesperado del bucle: {type(exc).__name__}: {exc}"
+        try:
+            print(f"[orquestar] ERROR: {msg}", flush=True)
+        except Exception:
+            pass
+        avisar(root, "error", msg)
+        raise
     finally:
-        if es_propietario_pid(root):
-            (root / PID).unlink(missing_ok=True)
-            (root / ESPERA).unlink(missing_ok=True)
+        try:
+            limpiar_pid_si_coincide(root, os.getpid())
+        finally:
+            pila_log.close()
 
 
 # ------------------------------------------------------------------ CLI
@@ -1701,8 +1824,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--estado", action="store_true", help="muestra el estado actual y sale")
     ap.add_argument("--parar", action="store_true", help="pide parar al terminar el paso en curso")
     ap.add_argument("--fondo", action="store_true", help="ejecuta el bucle en segundo plano")
-    ap.add_argument("--agentes", "--agents", action="store_true", help="muestra agentes configurados y estado de cuotas")
-    ap.add_argument("--metricas", "--metrics", nargs="?", const="ultima", help="consulta métricas (ultima, todas, vX.Y)")
+    ap.add_argument(
+        "--agentes", "--agents", action="store_true", help="muestra agentes configurados y estado de cuotas"
+    )
+    ap.add_argument(
+        "--metricas", "--metrics", nargs="?", const="ultima", help="consulta métricas (ultima, todas, vX.Y)"
+    )
     ap.add_argument("--version-filtro", help=argparse.SUPPRESS)
     ap.add_argument("--csv", nargs="?", const="-", help="exporta métricas en CSV")
     ap.add_argument("--verificar", metavar="CMD", help="ejecuta comando con caché por huella de producto")
@@ -1728,6 +1855,9 @@ def main(argv: list[str] | None = None) -> int:
     root = a.root.resolve()
 
     if a.estado:
+        huerfano = pid_huerfano(root)
+        if huerfano:
+            print(f"[orquestar] AVISO: bucle caído (pid {huerfano} terminó inesperadamente).")
         est = estado(root, a.docs)
         print(f"[orquestar] {est[0]}: " + " ".join(str(x) for x in est[1:] if x))
         return 0

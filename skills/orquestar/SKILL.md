@@ -5,8 +5,9 @@ description: Lleva un producto de la idea a su última tarea sin parar. Invocada
 
 # Skill: Orquestar (/orquestar)
 
-## Uso humano
-- **Lanzar en segundo plano:** `adevv orquestar --fondo`
+## Uso humano y desde agente IA
+- **Lanzar desde un agente IA (Antigravity, Claude Code, Codex):** ejecuta `adevv orquestar` **sin `--fondo`** activando el modo demonio/background nativo de tu herramienta de comandos (`IsDaemon: true` en Antigravity, `run_in_background: true` en Claude Code). **Nunca uses `--fondo` desde un agente IA**: `--fondo` termina el proceso padre al instante y el arnés mata el árbol de subprocesos al cerrar el comando. Tras lanzarlo, comprueba con `adevv orquestar --estado` que sigue en marcha sin aviso de caída.
+- **Lanzar desde una terminal humana:** `adevv orquestar --fondo`
 - **Ver estado:** `adevv orquestar --estado`
 - **Parar al acabar el paso actual:** `adevv orquestar --parar`
 - **Consultar métricas y costes:** `adevv orquestar --metricas [ultima|todas|vX.Y]`
