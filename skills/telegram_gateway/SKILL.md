@@ -5,7 +5,7 @@ description: Gateway de Telegram de Adevv. Atiende a los usuarios autorizados mi
 
 # Skill: Telegram Gateway (/telegram-gateway)
 
-Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los avisos de salida (fin de versión, falta de cuota, paradas que necesitan respuesta, errores) no son del gateway: los envía el bucle (ver «Avisos por Telegram» en `/orquestar`).
+Canal de entrada por Telegram para un proyecto que corre con `/orquestar`. Los avisos de salida (fin de versión, falta de cuota, paradas que necesitan respuesta, errores) los envía el bucle; además, mientras el gateway escucha, vigila si `orquestar.pid` queda huérfano tras una muerte abrupta del bucle para enviar un aviso inmediato de caída inesperada y limpiar la marca.
 
 ## 🔐 Configuración (fichero `.env` en la raíz o variables de entorno)
 - Fichero `.env` en la raíz (recomendado para aislar el bot de cada proyecto; excluido de git por defecto).

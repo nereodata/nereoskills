@@ -371,9 +371,7 @@ class OrquestadorLigeroTests(unittest.TestCase):
         out = io.StringIO()
         with patch.object(sys, "stdout", out):
             self.assertEqual(motor.main(["--root", str(self.root), "--agentes"]), 0)
-            self.assertEqual(
-                motor.main(["--root", str(self.root), "--metrics", "--version-filtro", "v0.1"]), 0
-            )
+            self.assertEqual(motor.main(["--root", str(self.root), "--metrics", "--version-filtro", "v0.1"]), 0)
         self.assertIn("m-hades", out.getvalue())
 
         # --agente hades usa el perfil de hades incluso si ORQUESTAR_PASO=task-dev
@@ -550,6 +548,95 @@ class OrquestadorLigeroTests(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(contador["res"], 2)
         self.assertEqual(contador["rev"], 3)
+
+    def test_bucle_primer_plano_escribe_orquestar_log_sin_duplicar_si_ya_redirigido(self):
+        import contextlib
+
+        self.tarea("T-DEM-0001", "completed")
+        buf = io.StringIO()
+        with (
+            patch.object(motor, "git", return_value="main"),
+            patch.object(motor, "avisar"),
+            contextlib.redirect_stdout(buf),
+        ):
+            rc = motor.bucle(self.root, espera_max=0)
+            self.assertIs(sys.stdout, buf)
+        self.assertEqual(rc, 0)
+        self.assertIn("[orquestar] FIN:", buf.getvalue())
+        log_path = self.root / motor.LOG
+        self.assertTrue(log_path.is_file())
+        self.assertIn("[orquestar] FIN:", log_path.read_text(encoding="utf-8"))
+
+        # Si stdout ya apunta a orquestar.log (como en --fondo), no se duplica la salida
+        log_path.write_text("", encoding="utf-8")
+        with log_path.open("a", encoding="utf-8") as fh, contextlib.redirect_stdout(fh):
+            with motor._salida_con_log(self.root):
+                print("linea-unica", flush=True)
+            self.assertIs(sys.stdout, fh)
+        self.assertEqual(log_path.read_text(encoding="utf-8").splitlines(), ["linea-unica"])
+
+        # Si el pipe stdout se cierra o falla al codificar, _DuplicadorSalida sigue escribiendo en orquestar.log
+        class PipeRoto:
+            def write(self, _):
+                raise BrokenPipeError("pipe cerrado")
+
+            def flush(self):
+                raise BrokenPipeError("pipe cerrado")
+
+        log_path.write_text("", encoding="utf-8")
+        roto = PipeRoto()
+        with contextlib.redirect_stdout(roto):
+            with motor._salida_con_log(self.root):
+                print("sobrevive-pipe-roto 🚀", flush=True)
+            self.assertIs(sys.stdout, roto)
+        self.assertIn("sobrevive-pipe-roto 🚀", log_path.read_text(encoding="utf-8"))
+
+    def test_pid_huerfano_se_diagnostica_en_parte_y_estado_y_excepcion_avisa(self):
+        import contextlib
+
+        (self.root / motor.PID).write_text("99999999", encoding="utf-8")
+        (self.root / motor.ESPERA).write_text(
+            '{"hasta": "2099-01-01T00:00:00+00:00", "motivo": "cuota"}', encoding="utf-8"
+        )
+        with patch.object(motor, "pid_vivo", return_value=None):
+            resumen = motor.parte(self.root)
+            self.assertIn("caído (pid 99999999 terminó inesperadamente)", resumen)
+            self.assertNotIn("esperando", resumen)
+
+            salida_cli = io.StringIO()
+            with contextlib.redirect_stdout(salida_cli):
+                rc = motor.main(["--root", str(self.root), "--estado"])
+            self.assertEqual(rc, 0)
+            self.assertIn("AVISO: bucle caído (pid 99999999 terminó inesperadamente)", salida_cli.getvalue())
+
+        (self.root / motor.PID).unlink(missing_ok=True)
+        (self.root / motor.ESPERA).unlink(missing_ok=True)
+
+        # Excepción inesperada en bucle() avisa por canal 'error' incluso con stdout roto y limpia orquestar.pid
+        class StdoutRoto:
+            def write(self, _):
+                raise OSError("broken stdout")
+
+            def flush(self):
+                raise OSError("broken stdout")
+
+        with (
+            patch.object(motor, "estado", side_effect=RuntimeError("boom")),
+            patch.object(motor, "avisar") as mock_avisar,
+            contextlib.redirect_stdout(StdoutRoto()),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "boom"):
+                motor.bucle(self.root, espera_max=0)
+        mock_avisar.assert_called_once()
+        self.assertEqual(mock_avisar.call_args.args[1], "error")
+        self.assertIn("boom", mock_avisar.call_args.args[2])
+        self.assertFalse((self.root / motor.PID).exists())
+
+    def test_skill_orquestar_instruye_demonio_sin_fondo_para_agentes_ia(self):
+        skill_txt = motor.SKILL.read_text(encoding="utf-8")
+        self.assertIn("sin `--fondo`", skill_txt)
+        self.assertIn("IsDaemon", skill_txt)
+        self.assertIn("run_in_background", skill_txt)
 
 
 if __name__ == "__main__":

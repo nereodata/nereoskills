@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.5] - 2026-11-18
+
+### Corregido
+
+- **B-ADV-0053 (`skills/orquestar`, `skills/telegram_gateway`, `README.md`)** — Evitada la muerte silenciosa del bucle al lanzarlo desde agentes IA: `skills/orquestar/SKILL.md` instruye a los agentes IA a ejecutar `adevv orquestar` sin `--fondo` mediante el modo demonio/background nativo de su herramienta (reservando `--fondo` para terminales humanas), `bucle()` en primer plano vuelca también su salida a `orquestar.log` sin duplicarla cuando `stdout` ya apunta al fichero, `--estado` y `parte()` informan explícitamente de `orquestar.pid` huérfano (`caído`), y `gateway.py` detecta en su bucle de polling cualquier caída abrupta del bucle enviando aviso inmediato por Telegram y limpiando el PID huérfano.
+
 ## [1.3.4] - 2026-11-16
 
 ### Corregido

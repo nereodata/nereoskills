@@ -487,6 +487,35 @@ def parar(root):
     return 0
 
 
+def vigilar_caida_bucle(root, token=None, autorizados=None):
+    """Detecta un orquestar.pid huérfano tras muerte abrupta, avisa sin perder el evento y limpia de forma segura."""
+    root = Path(root)
+    huerfano = motor.pid_huerfano(root)
+    if not huerfano or motor.pid_huerfano(root) != huerfano:
+        return False
+    mensaje = f"El bucle (pid {huerfano}) terminó inesperadamente sin cerrar."
+    cfg_tg = motor.config(root).get("telegram")
+    debe_enviar = cfg_tg is not False and not (
+        isinstance(cfg_tg, dict) and isinstance(cfg_tg.get("eventos"), list) and "error" not in cfg_tg["eventos"]
+    )
+    tok, ids = (
+        ((token, list(autorizados)) if (token and autorizados) else motor.credenciales(root))
+        if debe_enviar
+        else ("", [])
+    )
+    if debe_enviar and tok and ids:
+        entregado = False
+        for uid in sorted(ids, key=str):
+            if motor.enviar(tok, uid, firmar(f"[{root.name}] {mensaje}")):
+                entregado = True
+        if not entregado:
+            return False
+    if not motor.limpiar_pid_si_coincide(root, huerfano):
+        return False
+    print(f"[gateway] AVISO: {mensaje}", flush=True)
+    return True
+
+
 def escuchar(root, token, autorizados, vueltas=None, desde=None):
     """Bucle de long polling: responde a cada mensaje autorizado; un mensaje que falla no para el resto."""
     n = 0
@@ -494,6 +523,7 @@ def escuchar(root, token, autorizados, vueltas=None, desde=None):
     while (vueltas is None or n < vueltas) and not (root / PARADA).exists():
         if motor.recargar_version(__file__, root, PID, {"desde": desde}, "gateway"):
             return
+        vigilar_caida_bucle(root, token, autorizados)
         n += 1
         try:
             items = actualizaciones(token, desde)
@@ -506,6 +536,7 @@ def escuchar(root, token, autorizados, vueltas=None, desde=None):
                     return
                 continue
             raise
+        vigilar_caida_bucle(root, token, autorizados)
         for u in items:
             if (root / PARADA).exists():
                 return
