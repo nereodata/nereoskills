@@ -161,13 +161,16 @@ def extraer_respuesta(salida, harness):
         if linea.startswith("{") and linea.endswith("}"):
             try:
                 d = json.loads(linea)
-                if harness == "claude" and "result" in d:
+                if harness == "claude" and isinstance(d.get("result"), str):
                     return d["result"]
-                if harness == "agy" and "response" in d:
+                if harness == "agy" and isinstance(d.get("response"), str):
                     return d["response"]
-                if "response" in d:
+                if d.get("event") == "result" and isinstance(d.get("result"), dict):
+                    if isinstance(d["result"].get("response"), str):
+                        return d["result"]["response"]
+                if isinstance(d.get("response"), str):
                     return d["response"]
-                if "result" in d:
+                if isinstance(d.get("result"), str):
                     return d["result"]
             except Exception:
                 pass
@@ -211,6 +214,9 @@ def invocar(root, prompt, cfg, sesion=None):
         entorno = motor.os.environ.copy()
         entorno.pop("CODEX_WINDOWS_REGISTERED_CORE", None)
         kwargs_lanzar["env"] = entorno
+    resolver_plazo = getattr(motor, "resolver_plazo", lambda v, d: d if v is None else float(v))
+    kwargs_lanzar["timeout"] = resolver_plazo(cfg.get("timeout_s"), 300)
+    kwargs_lanzar["inactividad"] = resolver_plazo(cfg.get("inactividad_s"), 120)
     try:
         codigo, m, salida = motor.lanzar(cmd, root, harness, entrada=entrada, **kwargs_lanzar)
     except OSError as error:
@@ -218,6 +224,12 @@ def invocar(root, prompt, cfg, sesion=None):
     fecha = motor.ahora()
     instante = motor.fecha_estado(fecha)
     modelo = cfg.get("model") or "predeterminado"
+    if codigo == 124:
+        motor.registrar(
+            root,
+            {**m, "tipo": "gateway", "fecha": fecha, "arnes": harness, "modelo": modelo, "codigo": 124},
+        )
+        raise ModeloIndisponible("inactividad del arnés" if m.get("inactividad") else "timeout del arnés")
     if codigo and getattr(motor, "acceso_suscripcion_denegado", lambda *_: False)(harness, salida):
         motor.registrar(
             root,
