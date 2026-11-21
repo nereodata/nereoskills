@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.6] - 2026-11-21
+
+### Corregido
+
+- **B-ADV-0054 (`skills/orquestar/perfiles.py`, `skills/orquestar/orquestar.py`, `skills/telegram_gateway/gateway.py`)** — Eliminados los bloqueos indefinidos del orquestador ante subprocesos de arnés colgados: activada la salida en streaming con señales de vida en tiempo real en `claude` (`-p --verbose --output-format stream-json`), `agy` (`--output-format stream-json`) y `codex` (`--json`); aislamiento del árbol de procesos en `lanzar()` mediante `Job Object` de Windows (`KILL_ON_JOB_CLOSE`) y sesión POSIX propia, con lectura no bloqueante, gracia de cierre tras recibir el evento JSON final (`10 s`), watchdog de inactividad (`inactividad_s`, `900 s` por defecto) y tope total por paso (`timeout_s`, `2700 s` por defecto); y conmutación automática al siguiente candidato de `reserva` ante `codigo == 124` tanto en `_invocar_con_reservas` como en `gateway.invocar` (respetando tareas ya cerradas en disco y perfiles con `estricto: true`).
+
 ## [1.3.5] - 2026-11-18
 
 ### Corregido

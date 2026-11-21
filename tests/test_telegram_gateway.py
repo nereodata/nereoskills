@@ -447,6 +447,43 @@ class GatewayTests(unittest.TestCase):
         enviar_vivo.assert_not_called()
         self.assertTrue((self.root / motor.PID).exists())
 
+    def test_gateway_conmuta_a_reserva_ante_timeout_124_y_extrae_stream_json_agy(self):
+        import json
+
+        salida_stream = (
+            '{"event":"result","result":{"conversation_id":"c1","status":"SUCCESS","response":"Respuesta stream"}}'
+        )
+        self.assertEqual(gateway.extraer_respuesta(salida_stream, "agy"), "Respuesta stream")
+
+        (self.root / "orchestration.json").write_text(
+            json.dumps(
+                {
+                    "telegram": {
+                        "harness": "codex",
+                        "model": "gpt-lento",
+                        "reserva": [{"harness": "agy", "model": "gemini-rapido"}],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        llamados = []
+
+        def fake_lanzar(cmd, root, harness, **kw):
+            llamados.append(harness)
+            if harness == "codex":
+                return 124, {"timeout": True, "inactividad": True, "modelos": {}, "duracion_s": 120}, ""
+            return 0, {"sesion": "s-agy", "modelos": {}, "duracion_s": 2}, '{"response": "Desde reserva"}'
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_lanzar),
+        ):
+            resp = self.responder("¿Cómo va el proyecto?")
+
+        self.assertEqual(llamados, ["codex", "agy"])
+        self.assertIn("Desde reserva", resp)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -638,6 +638,153 @@ class OrquestadorLigeroTests(unittest.TestCase):
         self.assertIn("IsDaemon", skill_txt)
         self.assertIn("run_in_background", skill_txt)
 
+    def test_stream_json_tres_arneses_y_gracia_post_json_con_nieto_heredando_stdout(self):
+        import time
+
+        self.assertIn("stream-json", motor.ARNESES["claude"])
+        self.assertIn("--verbose", motor.ARNESES["claude"])
+        self.assertIn("stream-json", motor.ARNESES["agy"])
+        self.assertIn("stream-json", motor.base_comando_agente("claude", "x"))
+        self.assertIn("stream-json", motor.base_comando_agente("agy", "x"))
+
+        # AGY stream-json: no duplica tokens de step_update y extrae resultado + sesión
+        salida_agy = "\n".join(
+            [
+                '{"event":"init","conversation_id":"conv-agy-1"}',
+                '{"event":"step_update","step_update":{"usage":{"input_tokens":500,"output_tokens":10}}}',
+                '{"event":"result","result":{"conversation_id":"conv-agy-1","status":"SUCCESS","response":"Hecho AGY","num_turns":2,"usage":{"input_tokens":500,"output_tokens":10,"thinking_tokens":5,"cache_read_tokens":100}}}',
+            ]
+        )
+        m_agy, txt_agy = motor.perfiles._parsear_salida_json(salida_agy, "agy", modelo_hint="gemini-4-carbon")
+        self.assertEqual(txt_agy, "Hecho AGY")
+        self.assertEqual(m_agy["sesion"], "conv-agy-1")
+        self.assertEqual(m_agy["turnos"], 2)
+        self.assertEqual(
+            m_agy["modelos"]["gemini-4-carbon"],
+            {"entrada": 500, "salida": 10, "cache_leida": 100, "razonamiento": 5},
+        )
+
+        # Claude stream-json: toma el texto final de type=result sin duplicar bloques assistant intermedios
+        salida_claude = "\n".join(
+            [
+                '{"type":"system","subtype":"init","session_id":"sess-cl-1"}',
+                '{"type":"assistant","message":{"content":[{"type":"text","text":"Pensando..."}]}}',
+                '{"type":"result","is_error":false,"result":"Hecho Claude","session_id":"sess-cl-1","num_turns":1,"modelUsage":{"claude-opus":{"inputTokens":200,"outputTokens":30}}}',
+            ]
+        )
+        m_cl, txt_cl = motor.perfiles._parsear_salida_json(salida_claude, "claude")
+        self.assertEqual(txt_cl, "Hecho Claude")
+        self.assertEqual(m_cl["sesion"], "sess-cl-1")
+        self.assertEqual(m_cl["modelos"]["claude-opus"]["entrada"], 200)
+
+        # Codex turn.failed extrae mensaje de error para detección de cuota
+        salida_err = '{"type":"turn.failed","error":{"message":"429 rate limit, resets in 45s"}}'
+        m_err, txt_err = motor.perfiles._parsear_salida_json(salida_err, "codex")
+        self.assertTrue(m_err["error"])
+        self.assertEqual(motor.espera_cuota(txt_err), 45)
+
+        # Subproceso real que emite turn.completed de Codex, lanza un nieto que hereda stdout y sale:
+        # lanzar() debe retornar éxito tras gracia corta y terminar al nieto (Job Object / grupo)
+        pid_nieto_file = self.root / "nieto.pid"
+        script_padre = self.root / "padre_codex.py"
+        script_padre.write_text(
+            "import pathlib, subprocess, sys\n"
+            f"nieto = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])  # hereda stdout\n"
+            f"pathlib.Path({str(pid_nieto_file)!r}).write_text(str(nieto.pid), encoding='utf-8')\n"
+            'print(\'{"type":"item.completed","item":{"type":"agent_message","text":"Tarea lista"}}\', flush=True)\n'
+            'print(\'{"type":"turn.completed","usage":{"input_tokens":120,"output_tokens":40,"cached_input_tokens":10}}\', flush=True)\n',
+            encoding="utf-8",
+        )
+        t0 = time.monotonic()
+        cod, m, sal = motor.lanzar(
+            [sys.executable, str(script_padre)], self.root, "codex", timeout=5.0, gracia_cierre=0.15, modelo="gpt-6.1"
+        )
+        transcurrido = time.monotonic() - t0
+        self.assertEqual(cod, 0)
+        self.assertLess(transcurrido, 4.0)
+        self.assertTrue(m.get("cierre_forzado"))
+        self.assertEqual(sal, "Tarea lista")
+        self.assertEqual(m["modelos"]["gpt-6.1"]["entrada"], 120)
+        # Verificar que el nieto ya no está vivo
+        self.assertIsNone(motor.pid_vivo(self.root, "nieto.pid"))
+
+    def test_watchdog_inactividad_corta_silencio_y_conmuta_a_reserva_salvo_completada(self):
+        import time
+
+        self.assertEqual(motor.resolver_plazo(None, 900), 900)
+        self.assertIsNone(motor.resolver_plazo(0, 900))
+        self.assertIsNone(motor.resolver_plazo(-5, 900))
+        self.assertEqual(motor.resolver_plazo("nan", 900), 900)
+        self.assertEqual(motor.resolver_plazo("inf", 900), 900)
+
+        # Subproceso que emite un evento inicial y queda congelado en silencio
+        cmd = [
+            sys.executable,
+            "-c",
+            'import time; print(\'{"type":"turn.started"}\', flush=True); time.sleep(30)',
+        ]
+        t0 = time.monotonic()
+        cod, m, _ = motor.lanzar(cmd, self.root, "codex", timeout=10.0, inactividad=0.25, gracia_cierre=0.05)
+        self.assertEqual(cod, 124)
+        self.assertLess(time.monotonic() - t0, 4.0)
+        self.assertTrue(m.get("timeout"))
+        self.assertTrue(m.get("inactividad"))
+
+        # _invocar_con_reservas conmuta de codex (colgado 124) a reserva agy
+        self.escribir(
+            "orchestration.json",
+            json.dumps(
+                {
+                    "artemisa": {
+                        "harness": "codex",
+                        "model": "gpt-colgado",
+                        "reserva": [{"harness": "agy", "model": "gemini-rescate"}],
+                    }
+                }
+            ),
+        )
+        self.tarea("T-DEM-0001", "planned")
+        intentos = []
+
+        def fake_lanzar(cmd_arg, root_arg, harness_arg, **kw):
+            intentos.append((harness_arg, kw.get("timeout"), kw.get("inactividad")))
+            if harness_arg == "codex":
+                return 124, {"duracion_s": 5, "timeout": True, "inactividad": True, "modelos": {}}, ""
+            return 0, {"duracion_s": 3, "modelos": {"gemini-rescate": {"entrada": 50, "salida": 10}}}, "Resuelto"
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_lanzar),
+        ):
+            cod_r, m_r, sal_r = motor._invocar_con_reservas(self.root, "artemisa", "task-dev", "T-DEM-0001", "haz T1")
+
+        self.assertEqual(cod_r, 0)
+        self.assertEqual([x[0] for x in intentos], ["codex", "agy"])
+        self.assertEqual(intentos[0][1], motor.TIMEOUT_PASO_S)
+        self.assertEqual(intentos[0][2], motor.INACTIVIDAD_PASO_S)
+        self.assertEqual(m_r["modelo"], "gemini-rescate")
+        self.assertEqual(sal_r, "Resuelto")
+        filas = motor.leer_metricas(self.root)
+        self.assertTrue(
+            any(f.get("arnes") == "codex" and f.get("codigo") == 124 and f.get("inactividad") for f in filas)
+        )
+
+        # Si el agente colgado ya dejó la ficha en status: completed antes del timeout, no relanza la reserva
+        intentos.clear()
+
+        def fake_lanzar_completada(cmd_arg, root_arg, harness_arg, **kw):
+            intentos.append(harness_arg)
+            self.tarea("T-DEM-0001", "completed")
+            return 124, {"duracion_s": 5, "timeout": True, "modelos": {}}, ""
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_lanzar_completada),
+        ):
+            cod_ok, _, _ = motor._invocar_con_reservas(self.root, "artemisa", "task-dev", "T-DEM-0001", "haz T1")
+        self.assertEqual(cod_ok, 0)
+        self.assertEqual(intentos, ["codex"])
+
 
 if __name__ == "__main__":
     unittest.main()

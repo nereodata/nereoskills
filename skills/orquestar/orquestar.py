@@ -78,6 +78,10 @@ configuraciones_con_cuota = perfiles.configuraciones_con_cuota
 informe_agentes = perfiles.informe_agentes
 extraer_perfil = perfiles.extraer_perfil
 lanzar = perfiles.lanzar
+resolver_plazo = perfiles.resolver_plazo
+TIMEOUT_PASO_S = perfiles.TIMEOUT_PASO_S
+INACTIVIDAD_PASO_S = perfiles.INACTIVIDAD_PASO_S
+GRACIA_CIERRE_JSON_S = perfiles.GRACIA_CIERRE_JSON_S
 
 SKILL = Path(__file__).resolve().with_name("SKILL.md")
 METRICAS = registro_metricas.ARCHIVO
@@ -801,17 +805,27 @@ def verificar(root: Path, comando: str, iid: str = "") -> int:
 # ------------------------------------------------------------------ invocación de roles y pasos directos
 
 
+def _paso_ya_completado_en_disco(root: Path, paso: str, iid: str) -> bool:
+    """Evita relanzar una reserva tras timeout si el agente colgado ya dejó el objetivo completado en disco."""
+    if paso in ("task-dev", "bug-fix") and iid:
+        ficha = fichero_de(root, iid)
+        if ficha and frontmatter(ficha).get("status") == "completed" and not _validar_puerta_python(root):
+            return True
+    return False
+
+
 def _invocar_con_reservas(
     root: Path, rol: str, paso: str, iid: str, prompt_final: str, cmd_override: str | None = None
 ) -> tuple[int, dict, str]:
-    """Ejecuta un rol probando reservas ante cuota agotada, acceso denegado o arnés ausente."""
+    """Ejecuta un rol probando reservas ante cuota agotada, acceso denegado, timeout/inactividad o arnés ausente."""
     dif = perfiles.dificultad_de(root, iid, fichero_de)
     _, cfg_base = perfiles.rol_de(root, paso, dificultad=dif, iid=iid, fichero_fn=fichero_de, rol_explicito=rol)
     if cmd_override:
         codigo, m, salida = lanzar(cmd_override, root, "custom")
         return codigo, {**m, "arnes": "custom", "modelo": "custom"}, salida
 
-    candidatos = [cfg_base] + lista_reservas(cfg_base)
+    cfg_root = config(root)
+    candidatos = [cfg_base] if cfg_base.get("estricto") else [cfg_base] + lista_reservas(cfg_base)
     disponibles = configuraciones_con_cuota(root, candidatos)
     if not disponibles:
         return 75, {"sin_cuota": True, "modelos": {}}, "Todos los candidatos del rol están en espera de cuota."
@@ -839,13 +853,53 @@ def _invocar_con_reservas(
         env["ORQUESTAR_ID"] = iid or ""
         if harness == "codex" and os.name == "nt":
             env.pop("CODEX_WINDOWS_REGISTERED_CORE", None)
-        timeout = float(cand["timeout_s"]) if cand.get("timeout_s") else None
 
-        codigo, m, salida = lanzar(cmd, root, harness, entrada=entrada, timeout=timeout, env=env)
+        raw_timeout = (
+            cand.get("timeout_s")
+            if "timeout_s" in cand
+            else (cfg_root.get("timeout_s") if "timeout_s" in cfg_root else os.environ.get("ORQUESTAR_TIMEOUT_S"))
+        )
+        raw_inact = (
+            cand.get("inactividad_s")
+            if "inactividad_s" in cand
+            else (
+                cfg_root.get("inactividad_s")
+                if "inactividad_s" in cfg_root
+                else os.environ.get("ORQUESTAR_INACTIVIDAD_S")
+            )
+        )
+        timeout = resolver_plazo(raw_timeout, TIMEOUT_PASO_S)
+        inactividad = resolver_plazo(raw_inact, INACTIVIDAD_PASO_S)
+
+        codigo, m, salida = lanzar(
+            cmd, root, harness, entrada=entrada, timeout=timeout, env=env, inactividad=inactividad, modelo=modelo
+        )
         m["arnes"] = harness
         m["modelo"] = modelo
 
         if codigo == 124:
+            if _paso_ya_completado_en_disco(root, paso, iid):
+                return 0, m, salida
+            ultimo_error = (124, m, salida)
+            if idx + 1 < len(disponibles):
+                motivo_t = "inactividad" if m.get("inactividad") else "timeout"
+                print(
+                    f"[orquestar] AVISO: {harness}/{modelo} superó el límite de {motivo_t} en {paso} {iid}; conmutando a reserva...",
+                    flush=True,
+                )
+                registrar(
+                    root,
+                    {
+                        **m,
+                        "tipo": "agente" if rol == "hades" else "paso",
+                        "fecha": ahora(),
+                        "rol": rol,
+                        "paso": paso,
+                        "id": iid,
+                        "codigo": 124,
+                    },
+                )
+                continue
             return codigo, m, salida
         if codigo and acceso_suscripcion_denegado(harness, salida):
             ultimo_error = (codigo, {**m, "acceso_denegado": True}, salida)
