@@ -3,7 +3,7 @@
 
 import argparse
 import contextlib
-from datetime import datetime
+from datetime import datetime, timedelta
 import importlib.util
 import json
 import os
@@ -82,6 +82,8 @@ resolver_plazo = perfiles.resolver_plazo
 TIMEOUT_PASO_S = perfiles.TIMEOUT_PASO_S
 INACTIVIDAD_PASO_S = perfiles.INACTIVIDAD_PASO_S
 GRACIA_CIERRE_JSON_S = perfiles.GRACIA_CIERRE_JSON_S
+CUOTA_REINTENTO_S = perfiles.CUOTA_REINTENTO_S
+ESPERAS_REINTENTO_ARNES_S = (60, 300, 900)
 
 SKILL = Path(__file__).resolve().with_name("SKILL.md")
 METRICAS = registro_metricas.ARCHIVO
@@ -830,7 +832,29 @@ def _invocar_con_reservas(
     if not disponibles:
         return 75, {"sin_cuota": True, "modelos": {}}, "Todos los candidatos del rol están en espera de cuota."
 
-    ultimo_error = (1, {"modelos": {}}, "Sin candidatos ejecutables.")
+    ultimo_ausente = (1, {"modelos": {}}, "Sin candidatos ejecutables.")
+    ultimo_operacional: tuple[int, dict, str] | None = None
+    ultimo_cuota: tuple[int, dict, str] | None = None
+    ultimo_denegado: tuple[int, dict, str] | None = None
+    intentos_no_cuota: list[tuple[int, dict]] = []
+
+    def _volcar_intermedios(excluir_m: dict | None = None) -> None:
+        for cod_i, m_i in intentos_no_cuota:
+            if m_i is excluir_m:
+                continue
+            registrar(
+                root,
+                {
+                    **m_i,
+                    "tipo": "agente" if rol == "hades" else "paso",
+                    "fecha": ahora(),
+                    "rol": rol,
+                    "paso": paso,
+                    "id": iid,
+                    "codigo": cod_i,
+                },
+            )
+
     for idx, cand in enumerate(disponibles):
         harness = cand.get("harness", "agy")
         modelo = cand.get("model") or "predeterminado"
@@ -842,7 +866,7 @@ def _invocar_con_reservas(
         exe = buscar_ejecutable(plantilla[0])
         if not exe:
             registrar_ausencia(root, paso, idx, cand)
-            ultimo_error = (127, {"modelos": {}}, f"Arnés ausente: {plantilla[0]}")
+            ultimo_ausente = (127, {"modelos": {}}, f"Arnés ausente: {plantilla[0]}")
             continue
 
         base_cmd = [exe] + [(prompt_final if tok == "{prompt}" else tok) for tok in plantilla[1:]]
@@ -877,34 +901,22 @@ def _invocar_con_reservas(
         m["arnes"] = harness
         m["modelo"] = modelo
 
-        if codigo == 124:
-            if _paso_ya_completado_en_disco(root, paso, iid):
-                return 0, m, salida
-            ultimo_error = (124, m, salida)
-            if idx + 1 < len(disponibles):
-                motivo_t = "inactividad" if m.get("inactividad") else "timeout"
-                print(
-                    f"[orquestar] AVISO: {harness}/{modelo} superó el límite de {motivo_t} en {paso} {iid}; conmutando a reserva...",
-                    flush=True,
-                )
-                registrar(
-                    root,
-                    {
-                        **m,
-                        "tipo": "agente" if rol == "hades" else "paso",
-                        "fecha": ahora(),
-                        "rol": rol,
-                        "paso": paso,
-                        "id": iid,
-                        "codigo": 124,
-                    },
-                )
-                continue
-            return codigo, m, salida
-        if codigo and acceso_suscripcion_denegado(harness, salida):
-            ultimo_error = (codigo, {**m, "acceso_denegado": True}, salida)
+        if codigo == 0:
+            _volcar_intermedios()
+            recuperar_cuota(root, harness, modelo)
+            return 0, m, salida
+
+        if _paso_ya_completado_en_disco(root, paso, iid):
+            _volcar_intermedios()
+            return 0, m, salida
+
+        if acceso_suscripcion_denegado(harness, salida):
+            m_den = {**m, "acceso_denegado": True, "fallo_arnes": True}
+            ultimo_denegado = (codigo, m_den, salida)
+            intentos_no_cuota.append((codigo, m_den))
             continue
-        if codigo and espera_cuota(salida) is not None:
+
+        if codigo != 124 and espera_cuota(salida) is not None:
             datos_cuota = fallo_cuota(root, harness, modelo, salida)
             m.update(datos_cuota)
             registrar(
@@ -919,14 +931,29 @@ def _invocar_con_reservas(
                     "codigo": codigo,
                 },
             )
-            ultimo_error = (75, m, salida)
+            ultimo_cuota = (75, m, salida)
             continue
 
-        if codigo == 0:
-            recuperar_cuota(root, harness, modelo)
-        return codigo, m, salida
+        m["fallo_arnes"] = True
+        ultimo_operacional = (codigo, m, salida)
+        intentos_no_cuota.append((codigo, m))
+        if idx + 1 < len(disponibles):
+            motivo_t = "inactividad" if m.get("inactividad") else ("timeout" if codigo == 124 else f"código {codigo}")
+            print(
+                f"[orquestar] AVISO: {harness}/{modelo} falló ({motivo_t}) en {paso} {iid}; conmutando a reserva...",
+                flush=True,
+            )
 
-    return ultimo_error
+    if ultimo_operacional is not None:
+        _volcar_intermedios(excluir_m=ultimo_operacional[1])
+        return ultimo_operacional
+    if ultimo_cuota is not None:
+        _volcar_intermedios()
+        return ultimo_cuota
+    if ultimo_denegado is not None:
+        _volcar_intermedios(excluir_m=ultimo_denegado[1])
+        return ultimo_denegado
+    return ultimo_ausente
 
 
 def agente(root: Path, rol: str, prompt: str) -> int:
@@ -1141,6 +1168,8 @@ def _ejecutar_revision_directa(
     bytes_antes = destino.read_bytes() if destino.is_file() else None
     mandato = construir_prompt_agente(root, "hades", prompt)
     codigo, m, salida = _invocar_con_reservas(root, "hades", paso, arg or "", mandato, cmd_override=cmd_override)
+    m["codigo"] = codigo
+    m["cola_salida"] = (salida or "").strip()[-500:]
     if m.get("sin_cuota"):
         return "CUOTA", m
 
@@ -1151,7 +1180,7 @@ def _ejecutar_revision_directa(
             destino.parent.mkdir(parents=True, exist_ok=True)
             destino.write_text(salida.strip() + "\n", encoding="utf-8")
             archivo_cambio = True
-        elif bytes_antes is not None and codigo != 0:
+        elif codigo != 0:
             registrar(
                 root,
                 {
@@ -1572,6 +1601,20 @@ def en_fondo(root: Path, argumentos: list[str] | None = None) -> int:
     return 0
 
 
+def _dormir_con_espera(root: Path, segundos: int, motivo: str) -> bool:
+    if segundos <= 0:
+        return not (root / PARADA).exists()
+    proximo = fecha_estado(ahora()) + timedelta(seconds=segundos)
+    (root / ESPERA).write_text(json.dumps({"hasta": proximo.isoformat(), "motivo": motivo}), encoding="utf-8")
+    fin = time.monotonic() + segundos
+    while time.monotonic() < fin:
+        if (root / PARADA).exists():
+            break
+        time.sleep(min(5.0, max(0.05, fin - time.monotonic())))
+    (root / ESPERA).unlink(missing_ok=True)
+    return not (root / PARADA).exists()
+
+
 def _esperar_cuota_si_procede(root: Path, espera_max: int) -> bool:
     _, bloqueos = consumo_cuotas(root)
     if not bloqueos or espera_max <= 0:
@@ -1580,15 +1623,29 @@ def _esperar_cuota_si_procede(root: Path, espera_max: int) -> bool:
     segundos = max(1, int((proximo - fecha_estado(ahora())).total_seconds()))
     if segundos > espera_max:
         return False
-    (root / ESPERA).write_text(json.dumps({"hasta": proximo.isoformat(), "motivo": "cuota"}), encoding="utf-8")
     print(f"[orquestar] esperando cuota {segundos}s (hasta {proximo:%H:%M})...", flush=True)
-    fin = time.monotonic() + segundos
-    while time.monotonic() < fin:
-        if (root / PARADA).exists():
-            break
-        time.sleep(min(5.0, fin - time.monotonic()))
-    (root / ESPERA).unlink(missing_ok=True)
-    return not (root / PARADA).exists()
+    return _dormir_con_espera(root, segundos, "cuota")
+
+
+def _config_reintentos_arnes(root: Path, cli_reintentos: int | None) -> tuple[int, tuple[int, ...]]:
+    cfg = config(root)
+    bruto = cli_reintentos if cli_reintentos is not None else cfg.get("reintentos_arnes", 3)
+    try:
+        tope = max(0, int(bruto))
+    except (TypeError, ValueError):
+        tope = 3
+    lista_cfg = cfg.get("esperas_reintento_s")
+    esperas: list[int] = []
+    if isinstance(lista_cfg, list):
+        for x in lista_cfg:
+            if not isinstance(x, bool):
+                try:
+                    val = float(x)
+                    if val >= 0 and val < float("inf"):
+                        esperas.append(int(val))
+                except (TypeError, ValueError):
+                    pass
+    return tope, (tuple(esperas) if esperas else ESPERAS_REINTENTO_ARNES_S)
 
 
 def _comando_suite_version(root: Path, test_cli: str | None) -> str:
@@ -1618,6 +1675,7 @@ def bucle(
     espera_max: int = 18000,
     cmd_override: str | None = None,
     max_rondas_version: int = 3,
+    reintentos_arnes: int | None = None,
 ) -> int:
     root = Path(root).resolve()
     validar_lanzamiento_bucle(root, docs=docs)
@@ -1635,9 +1693,31 @@ def bucle(
     (root / PARADA).unlink(missing_ok=True)
 
     fallos_par: dict[tuple, int] = {}
+    fallos_arnes: dict[tuple, int] = {}
     rondas_version: dict[str, int] = {}
     pasos_hechos = int((estado_recibido or {}).get("pasos", 0))
-    suite_cmd = _comando_suite_version(root, test_cmd)
+    suite_cmd = _comando_suite_version(root, test_cli=test_cmd)
+
+    def _gestionar_fallo_tecnico(clave: tuple, etiqueta_paso: str, cod_err: int, cola: str) -> bool:
+        nonlocal pasos_hechos
+        tope_arn, esperas_arn = _config_reintentos_arnes(root, reintentos_arnes)
+        n_arn = fallos_arnes.get(clave, 0) + 1
+        fallos_arnes[clave] = n_arn
+        if n_arn <= tope_arn:
+            pasos_hechos = max(0, pasos_hechos - 1)
+            seg = esperas_arn[min(n_arn - 1, len(esperas_arn) - 1)]
+            print(
+                f"[orquestar] fallo técnico en {etiqueta_paso} (código {cod_err}); "
+                f"reintento periódico {n_arn}/{tope_arn} en {seg}s...",
+                flush=True,
+            )
+            _dormir_con_espera(root, seg, f"reintento técnico {n_arn}/{tope_arn}")
+            return True
+        detalle = f" Detalle: {cola}" if cola else ""
+        msg = f"{etiqueta_paso} detenido tras {tope_arn} reintentos técnicos del arnés (código {cod_err}).{detalle}"
+        print(f"[orquestar] PARAR: {msg}", flush=True)
+        avisar(root, "error", msg)
+        return False
 
     pila_log = contextlib.ExitStack()
     pila_log.enter_context(_salida_con_log(root))
@@ -1686,17 +1766,27 @@ def bucle(
 
             # Pasos de revisión: Hades directo sin agente secretario
             if paso in perfiles.REVISION:
-                res_rev, _ = _ejecutar_revision_directa(root, paso, arg, rama, cmd_override=cmd_override)
+                res_rev, m_rev = _ejecutar_revision_directa(root, paso, arg, rama, cmd_override=cmd_override)
                 if res_rev == "CUOTA":
-                    if _esperar_cuota_si_procede(root, espera_max):
+                    pasos_hechos = max(0, pasos_hechos - 1)
+                    if _esperar_cuota_si_procede(root, espera_max) or (root / PARADA).exists():
                         continue
                     print(f"[orquestar] PARAR: Hades sin cuota en {etiqueta}.", flush=True)
                     return 1
                 if res_rev == "OK":
                     fallos_par.pop((paso, arg), None)
+                    fallos_arnes.pop((paso, arg), None)
                     if paso == "revisar-version" and arg:
                         rondas_version.pop(arg, None)
                     continue
+                if res_rev == "RECHAZADO":
+                    fallos_arnes.pop((paso, arg), None)
+                elif m_rev.get("codigo", 0) != 0:
+                    if _gestionar_fallo_tecnico(
+                        (paso, arg), etiqueta, int(m_rev.get("codigo", 1)), str(m_rev.get("cola_salida") or "")
+                    ):
+                        continue
+                    return 1
                 if res_rev == "RECHAZADO" and paso == "revisar-tarea" and arg:
                     ficha = fichero_de(root, arg)
                     rev_path = root / f"docs/review/code_reviews/{arg}-code-review.md"
@@ -1786,7 +1876,8 @@ def bucle(
                 if salida:
                     print(salida, flush=True)
                 if m.get("sin_cuota"):
-                    if _esperar_cuota_si_procede(root, espera_max):
+                    pasos_hechos = max(0, pasos_hechos - 1)
+                    if _esperar_cuota_si_procede(root, espera_max) or (root / PARADA).exists():
                         continue
                     print(f"[orquestar] PARAR: {rol_paso} sin cuota en {etiqueta}.", flush=True)
                     return 1
@@ -1822,10 +1913,16 @@ def bucle(
                         )
                 if paso == "resolver-version" and arg and intervencion.pendiente_para(root, arg):
                     fallos_par.pop((paso, arg), None)
+                    fallos_arnes.pop((paso, arg), None)
                     continue
                 if progreso:
                     fallos_par.pop((paso, arg), None)
+                    fallos_arnes.pop((paso, arg), None)
                     continue
+                if codigo != 0:
+                    if _gestionar_fallo_tecnico((paso, arg), etiqueta, codigo, (salida or "").strip()[-500:]):
+                        continue
+                    return 1
 
             # Gestión uniforme de falta de progreso con tope corto
             n_sin = fallos_par.get((paso, arg), 0) + 1
@@ -1899,6 +1996,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--test", help="comando de suite completa al cerrar versión")
     ap.add_argument("--max-pasos", type=int, help="máximo de pasos a ejecutar")
     ap.add_argument("--reintentos", type=int, default=2, help="intentos máximos sin progreso por ítem")
+    ap.add_argument(
+        "--reintentos-arnes", type=int, default=None, help="reintentos periódicos ante fallo técnico del arnés"
+    )
     ap.add_argument("--espera-max", type=int, default=18000, help="segundos máximos de espera de cuota")
     ap.add_argument("--cmd", help=argparse.SUPPRESS)
 
@@ -1969,6 +2069,7 @@ def main(argv: list[str] | None = None) -> int:
         reintentos=a.reintentos,
         espera_max=a.espera_max,
         cmd_override=a.cmd,
+        reintentos_arnes=a.reintentos_arnes,
     )
 
 
