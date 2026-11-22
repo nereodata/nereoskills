@@ -2,6 +2,12 @@
 
 Todos los cambios relevantes de este proyecto se documentan en este archivo.
 
+## [1.3.7] - 2026-11-22
+
+### Corregido
+
+- **B-ADV-0056 (`skills/orquestar/perfiles.py`, `skills/orquestar/orquestar.py`)** — Recuperados los reintentos periódicos con espera creciente y el sondeo de cuotas sin hora: cualquier fallo técnico del arnés (`codigo != 0`) en `_invocar_con_reservas` prueba también los candidatos de `reserva` (respetando tareas ya cerradas en disco y `estricto: true`); si fallan todos los candidatos por causa técnica (red, `5xx`, timeout `124`), `bucle()` ejecuta reintentos periódicos con espera creciente (`60 s`, `300 s`, `900 s` por defecto; `--reintentos-arnes` / `reintentos_arnes` y `esperas_reintento_s` en `orchestration.json`) publicando `orquestar.espera`, respetando `--parar` y sin consumir `--max-pasos` ni bloquear la ficha como `sin progreso`; y `fallo_cuota` sondea cada `300 s` (`cuota_reintento_s`) ante errores de cuota sin hora explícita, soportando además duraciones compuestas `XhYmZs`.
+
 ## [1.3.6] - 2026-11-21
 
 ### Corregido
