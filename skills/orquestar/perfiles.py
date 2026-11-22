@@ -35,7 +35,8 @@ NIVELES = ("sencilla", "media", "dificil")
 DESARROLLO = {"task-dev", "bug-fix", "resolver-version"}
 REVISION = {"revisar-plataforma", "revisar-tarea", "revisar-version"}
 CONFIG = "orchestration.json"
-CUOTA_DEFECTO_S = 1800
+CUOTA_DEFECTO_S = 300
+CUOTA_REINTENTO_S = 300
 VENTANA_CUOTA_S = 18000
 TIMEOUT_PASO_S = 2700
 INACTIVIDAD_PASO_S = 900
@@ -257,7 +258,7 @@ def acceso_suscripcion_denegado(harness: str, salida: str) -> bool:
     )
 
 
-def espera_cuota(salida: str) -> int | None:
+def espera_cuota(salida: str, por_defecto: int = CUOTA_REINTENTO_S) -> int | None:
     texto = salida or ""
     bajo = texto.lower()
     patrones_cuota = (
@@ -273,20 +274,39 @@ def espera_cuota(salida: str) -> int | None:
     )
     if not any(p in bajo for p in patrones_cuota):
         return None
-    m_seg = re.search(r"(?:resets?\s+in|retry\s+after|try\s+again\s+in)\s+(\d+(?:\.\d+)?)\s*s\b", bajo)
-    if m_seg:
-        return max(1, math.ceil(float(m_seg.group(1))))
-    m_min = re.search(r"(?:resets?\s+in|try\s+again\s+in)\s+(\d+(?:\.\d+)?)\s*m(?:in)?\b", bajo)
-    if m_min:
-        return max(60, math.ceil(float(m_min.group(1)) * 60))
-    return CUOTA_DEFECTO_S
+    for m_comp in re.finditer(
+        r"(?:resets?\s+in|retry\s+after|try\s+again\s+in)\s+(?=\d)"
+        r"(?:(\d+(?:\.\d+)?)\s*h\s*)?(?:(\d+(?:\.\d+)?)\s*m(?:in)?\s*)?(?:(\d+(?:\.\d+)?)\s*s)?\b",
+        bajo,
+    ):
+        if any(m_comp.groups()):
+            h = float(m_comp.group(1) or 0)
+            m = float(m_comp.group(2) or 0)
+            s = float(m_comp.group(3) or 0)
+            total = h * 3600 + m * 60 + s
+            if total > 0:
+                return max(1, math.ceil(total))
+    return por_defecto
+
+
+def _cuota_reintento_config(root: Path) -> int:
+    try:
+        bruto = config(root).get("cuota_reintento_s")
+    except Exception:
+        bruto = None
+    plazo = resolver_plazo(bruto, CUOTA_REINTENTO_S)
+    return max(1, math.ceil(plazo)) if plazo else CUOTA_REINTENTO_S
 
 
 def fallo_cuota(root: Path, harness: str, modelo: str, salida: str) -> dict:
-    espera = espera_cuota(salida) or CUOTA_DEFECTO_S
+    reintento_cfg = _cuota_reintento_config(root)
+    explicita = espera_cuota(salida, por_defecto=0)
+    supuesta = not explicita
+    espera = explicita or reintento_cfg
     return {
         "sin_cuota": True,
         "cuota_espera_s": int(math.ceil(espera)),
+        "cuota_supuesta": supuesta,
         "modelo": modelo or "predeterminado",
     }
 

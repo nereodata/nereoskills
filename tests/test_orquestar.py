@@ -785,6 +785,190 @@ class OrquestadorLigeroTests(unittest.TestCase):
         self.assertEqual(cod_ok, 0)
         self.assertEqual(intentos, ["codex"])
 
+    def test_cuota_sin_hora_usa_sondeo_300s_configurable_y_formato_compuesto_hms(self):
+        self.assertEqual(motor.espera_cuota("429 rate limit: Resets in 56h48m9s"), 56 * 3600 + 48 * 60 + 9)
+        self.assertEqual(motor.espera_cuota("429 retry after soon, resets in 45s"), 45)
+        self.assertEqual(motor.espera_cuota("Your workspace is out of credits."), 300)
+
+        d_def = motor.fallo_cuota(self.root, "codex", "gpt-6.1", "429 usage limit reached")
+        self.assertEqual(d_def["cuota_espera_s"], 300)
+        self.assertTrue(d_def["cuota_supuesta"])
+
+        self.escribir("orchestration.json", json.dumps({"cuota_reintento_s": 120}))
+        d_cfg = motor.fallo_cuota(self.root, "codex", "gpt-6.1", "429 usage limit reached")
+        self.assertEqual(d_cfg["cuota_espera_s"], 120)
+        self.assertTrue(d_cfg["cuota_supuesta"])
+
+        d_real = motor.fallo_cuota(self.root, "codex", "gpt-6.1", "429 resets in 10m")
+        self.assertEqual(d_real["cuota_espera_s"], 600)
+        self.assertFalse(d_real["cuota_supuesta"])
+
+    def test_fallo_tecnico_prueba_reservas_y_bucle_reintenta_periodicamente_sin_bloquear_ficha(self):
+        # 1. Cualquier fallo técnico (p. ej. 503 red) en _invocar_con_reservas prueba la reserva
+        self.escribir(
+            "orchestration.json",
+            json.dumps(
+                {
+                    "esperas_reintento_s": [1, 2],
+                    "artemisa": {
+                        "harness": "codex",
+                        "model": "gpt-primario",
+                        "reserva": [{"harness": "agy", "model": "gemini-reserva"}],
+                    },
+                }
+            ),
+        )
+        self.tarea("T-DEM-0001", "planned")
+        llamados = []
+
+        def fake_lanzar_503(cmd, root, harness, **kw):
+            llamados.append(harness)
+            if harness == "codex":
+                return 1, {"duracion_s": 1, "modelos": {}}, "HTTP 503 Service Unavailable"
+            return 0, {"duracion_s": 2, "modelos": {"gemini-reserva": {"entrada": 10, "salida": 5}}}, "Hecho"
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_lanzar_503),
+        ):
+            cod, m, _ = motor._invocar_con_reservas(self.root, "artemisa", "task-dev", "T-DEM-0001", "haz T1")
+        self.assertEqual(cod, 0)
+        self.assertEqual(llamados, ["codex", "agy"])
+        self.assertEqual(m["modelo"], "gemini-reserva")
+
+        # 2. En bucle(): dos caídas técnicas en task-dev y una en revisar-version esperan (1s, 2s y 1s),
+        # NO bloquean la ficha, NO ensucian {v}-revision.md y NO queman max_pasos=3 (exactamente 3 pasos reales)
+        esperas_registradas = []
+        ronda = {"dev": 0, "rev_ver": 0}
+
+        def fake_dormir(root, seg, motivo):
+            esperas_registradas.append((seg, motivo))
+            return True
+
+        def fake_invocar_transitorio(root, rol, paso, iid, prompt, cmd_override=None):
+            if paso == "task-dev":
+                ronda["dev"] += 1
+                if ronda["dev"] <= 2:
+                    return 1, {"modelos": {}, "duracion_s": 1, "fallo_arnes": True}, "Error de red temporal 502"
+                self.tarea("T-DEM-0001", "completed")
+                return 0, {"modelos": {}, "duracion_s": 2}, "Completada al recuperar red"
+            if paso == "revisar-tarea":
+                self.escribir("docs/review/code_reviews/T-DEM-0001-code-review.md", "**Veredicto:** APROBADO\n")
+                return 0, {"modelos": {}, "duracion_s": 1}, "APROBADO"
+            ronda["rev_ver"] += 1
+            if ronda["rev_ver"] == 1:
+                return 1, {"modelos": {}, "duracion_s": 1, "fallo_arnes": True}, "Hades 503 transitorio"
+            self.assertFalse((root / "docs/review/versions/v0.1-revision.md").exists())
+            self.escribir("docs/review/versions/v0.1-arquitectura.md", "**Veredicto:** APROBADO\n")
+            return 0, {"modelos": {}, "duracion_s": 1}, "APROBADO"
+
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(motor, "_invocar_con_reservas", side_effect=fake_invocar_transitorio),
+            patch.object(motor, "_dormir_con_espera", side_effect=fake_dormir),
+            patch.object(motor, "avisar"),
+        ):
+            rc = motor.bucle(self.root, reintentos=1, max_pasos=3, espera_max=0, reintentos_arnes=3)
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(
+            esperas_registradas,
+            [
+                (1, "reintento técnico 1/3"),
+                (2, "reintento técnico 2/3"),
+                (1, "reintento técnico 1/3"),
+            ],
+        )
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, "T-DEM-0001"))["status"], "completed")
+
+        # 3. [primario 503, reserva 429] no duplica métricas; [429, acceso_denegado] es simétrico -> 75;
+        # y estricto: true no conmuta a reserva ante fallo técnico != 124
+        (self.root / motor.METRICAS).unlink(missing_ok=True)
+        self.tarea("T-DEM-0003", "planned")
+
+        def fake_503_429(cmd, root, harness, **kw):
+            if harness == "codex":
+                return 1, {"duracion_s": 1, "modelos": {"gpt-primario": {"entrada": 77, "salida": 11}}}, "HTTP 503"
+            return 1, {"duracion_s": 1, "modelos": {}}, "429 rate limit resets in 60s"
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_503_429),
+        ):
+            self.assertEqual(motor.agente(self.root, "artemisa", "prueba metricas"), 1)
+        filas_503 = [f for f in motor.leer_metricas(self.root) if f.get("arnes") == "codex"]
+        self.assertEqual(len(filas_503), 1)
+
+        (self.root / motor.METRICAS).unlink(missing_ok=True)
+        self.escribir(
+            "orchestration.json",
+            json.dumps(
+                {
+                    "artemisa": {
+                        "harness": "codex",
+                        "model": "gpt-cuota",
+                        "reserva": [{"harness": "claude", "model": "claude-den"}],
+                    }
+                }
+            ),
+        )
+
+        def fake_cuota_den(cmd, root, harness, **kw):
+            if harness == "codex":
+                return 1, {"duracion_s": 1, "modelos": {}}, "429 rate limit resets in 90s"
+            return 1, {"duracion_s": 1, "modelos": {}}, "Your organization has disabled Claude subscription access"
+
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(motor, "lanzar", side_effect=fake_cuota_den),
+        ):
+            cod_sim, m_sim, _ = motor._invocar_con_reservas(self.root, "artemisa", "task-dev", "T-DEM-0003", "haz")
+        self.assertEqual(cod_sim, 75)
+        self.assertTrue(m_sim.get("sin_cuota"))
+
+        self.tarea(
+            "T-DEM-0004",
+            "planned",
+            extra='perfil: {"harness": "codex", "model": "gpt-fijo", "estricto": true}\n',
+        )
+        invocados_estricto = []
+        with (
+            patch.object(motor, "buscar_ejecutable", side_effect=lambda x: x),
+            patch.object(
+                motor,
+                "lanzar",
+                side_effect=lambda c, r, h, **kw: invocados_estricto.append(h) or (1, {"modelos": {}}, "HTTP 500"),
+            ),
+        ):
+            cod_est, _, _ = motor._invocar_con_reservas(self.root, "artemisa", "task-dev", "T-DEM-0004", "haz")
+        self.assertEqual(cod_est, 1)
+        self.assertEqual(invocados_estricto, ["codex"])
+
+        # 4. Parada cooperativa con orquestar.parar durante _dormir_con_espera termina con código 0
+        (self.root / motor.PARADA).touch()
+        self.assertFalse(motor._dormir_con_espera(self.root, 30, "reintento técnico 1/3"))
+        self.assertFalse((self.root / motor.ESPERA).exists())
+        (self.root / motor.PARADA).unlink(missing_ok=True)
+
+        # 5. Si agota reintentos_arnes, para con código 1, incluye cola de error en avisar y NO bloquea la ficha
+        self.tarea("T-DEM-0002", "planned")
+        avisos = []
+        with (
+            patch.object(motor, "git", return_value="release/v0.1"),
+            patch.object(
+                motor,
+                "_invocar_con_reservas",
+                return_value=(1, {"modelos": {}, "duracion_s": 1}, "401 token caducado"),
+            ),
+            patch.object(motor, "_dormir_con_espera", return_value=True),
+            patch.object(motor, "avisar", side_effect=lambda r, ev, msg: avisos.append((ev, msg))),
+        ):
+            rc_fin = motor.bucle(self.root, reintentos=1, espera_max=0, reintentos_arnes=1)
+
+        self.assertEqual(rc_fin, 1)
+        self.assertEqual(motor.frontmatter(motor.fichero_de(self.root, "T-DEM-0002"))["status"], "planned")
+        self.assertTrue(any(ev == "error" and "401 token caducado" in msg for ev, msg in avisos))
+
 
 if __name__ == "__main__":
     unittest.main()
